@@ -180,7 +180,7 @@ impl PromptClient {
 "##
         );
 
-        println!("--> Prompt to Gemini for formatting: {}", &final_prompt);
+        debug!("--> Prompt to Gemini for formatting: {}", &final_prompt);
         let request_body = GeminiRequest {
             contents: vec![Content {
                 parts: vec![Part { text: final_prompt }],
