@@ -66,6 +66,10 @@ impl IntoResponse for AppError {
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Internal regex error: {e}"),
                     ),
+                    PromptError::JsonSerialization(e) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to serialize result: {e}"),
+                    ),
                     PromptError::ReqwestClientBuild(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Failed to build HTTP client: {e}"),

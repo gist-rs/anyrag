@@ -60,7 +60,7 @@ You can grant these roles using the `gcloud` CLI.
 
 ## Configuration
 
-The server is configured using environment variables. You can create a `.env` file in the `crates/server` directory or set them in your shell.
+The server is configured using environment variables. You can create a `.env` file in the `./`, `crates/lib`, `crates/server` directory or set them in your shell.
 
 **Required Environment Variables:**
 

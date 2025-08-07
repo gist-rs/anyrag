@@ -21,4 +21,6 @@ pub enum PromptError {
     MissingProjectId,
     #[error("Regex error: {0}")]
     Regex(#[from] regex::Error),
+    #[error("Failed to serialize result to JSON: {0}")]
+    JsonSerialization(#[from] serde_json::Error),
 }

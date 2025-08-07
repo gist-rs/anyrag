@@ -14,6 +14,7 @@ use gcp_bigquery_client::model::{
 };
 use log::{debug, error, info};
 use regex::Regex;
+use serde_json::Value;
 use std::sync::Arc;
 use types::{Content, GeminiRequest, GeminiResponse, Part};
 
@@ -169,7 +170,7 @@ impl PromptClient {
         }
     }
 
-    /// Executes a SQL query on BigQuery.
+    /// Executes a SQL query on BigQuery and returns the result as a JSON string.
     async fn execute_bigquery_sql(&self, sql_query: &str) -> Result<String, PromptError> {
         info!("--> Executing BigQuery SQL: {sql_query}");
         let response = self
@@ -186,17 +187,22 @@ impl PromptClient {
             .map_err(|e| PromptError::BigQueryExecution(e.to_string()))?;
 
         let mut results = ResultSet::new_from_query_response(response);
-
-        let mut result_string = String::new();
+        let mut json_results: Vec<Value> = Vec::new();
         let column_names = results.column_names();
+
         while results.next_row() {
+            let mut row_map = serde_json::Map::new();
             for name in &column_names {
-                let value = results.get_json_value_by_name(name).unwrap();
-                result_string.push_str(&format!("{name}: {value:?}, "));
+                let value = results
+                    .get_json_value_by_name(name)
+                    .ok()
+                    .flatten()
+                    .unwrap_or(Value::Null);
+                row_map.insert(name.clone(), value);
             }
-            result_string.push('\n');
+            json_results.push(Value::Object(row_map));
         }
 
-        Ok(result_string)
+        Ok(serde_json::to_string(&json_results)?)
     }
 }
