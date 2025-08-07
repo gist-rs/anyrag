@@ -26,8 +26,11 @@ impl PromptClient {
         prompt: &str,
         table_name: Option<&str>,
         instruction: Option<&str>,
+        answer_key: Option<&str>,
     ) -> Result<String, PromptError> {
-        let sql_query = self.get_sql_from_prompt(prompt, table_name).await?;
+        let sql_query = self
+            .get_sql_from_prompt(prompt, table_name, answer_key)
+            .await?;
 
         if sql_query.trim().is_empty() {
             return Ok("The prompt did not result in a valid SQL query.".to_string());
@@ -40,16 +43,7 @@ impl PromptClient {
         let result = result?;
 
         // Pre-process the JSON to make it more readable for the model.
-        let mut json_data: serde_json::Value = serde_json::from_str(&result)?;
-        if let Some(array) = json_data.as_array_mut() {
-            for item in array {
-                if let Some(obj) = item.as_object_mut() {
-                    if let Some(value) = obj.remove("f0_") {
-                        obj.insert("answer".to_string(), value);
-                    }
-                }
-            }
-        }
+        let json_data: serde_json::Value = serde_json::from_str(&result)?;
         let pretty_json = serde_json::to_string_pretty(&json_data)?;
         self.format_response(&pretty_json, prompt, instruction)
             .await
@@ -60,6 +54,7 @@ impl PromptClient {
         &self,
         prompt: &str,
         table_name: Option<&str>,
+        answer_key: Option<&str>,
     ) -> Result<String, PromptError> {
         info!("[get_sql_from_prompt] received prompt: {prompt:?}");
         let mut context = String::new();
@@ -70,9 +65,14 @@ impl PromptClient {
             context.push_str(&format!("Schema for `{table}`: ({schema_str}). "));
         }
 
+        let alias_instruction = format!(
+            "If the query uses an aggregate function like COUNT, SUM, etc., alias the result with `AS {}`.",
+            answer_key.unwrap_or("answer")
+        );
+
         let final_prompt = if !context.is_empty() {
             format!(
-                "You are a BigQuery SQL expert. Write a readonly SQL query that answers the user's question. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names. Expected output is a single SQL query only.\n\n# Context\n{context}\n\n# User question\n{prompt}"
+                "You are a BigQuery SQL expert. Write a readonly SQL query that answers the user's question. {alias_instruction} Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names. Expected output is a single SQL query only.\n\n# Context\n{context}\n\n# User question\n{prompt}"
             )
         } else {
             prompt.to_string()

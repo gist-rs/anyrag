@@ -29,6 +29,7 @@ struct PromptRequest {
     prompt: String,
     table_name: Option<String>,
     instruction: Option<String>,
+    answer_key: Option<String>,
 }
 
 /// The response body for the `/prompt` endpoint.
@@ -63,6 +64,7 @@ async fn prompt_handler(
             &payload.prompt,
             payload.table_name.as_deref(),
             payload.instruction.as_deref(),
+            payload.answer_key.as_deref(),
         )
         .await?;
 

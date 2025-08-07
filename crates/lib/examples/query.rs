@@ -7,13 +7,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
-        eprintln!("Usage: {} \"<prompt>\" [table_name] [instruction]", args[0]);
+        eprintln!(
+            "Usage: {} \"<prompt>\" [table_name] [instruction] [answer_key]",
+            args[0]
+        );
         return Ok(());
     }
 
     let prompt = &args[1];
     let table_name = args.get(2).map(|s| s.as_str());
     let instruction = args.get(3).map(|s| s.as_str());
+    let answer_key = args.get(4).map(|s| s.as_str());
     let api_url = env::var("GEMINI_API_URL").expect("GEMINI_API_URL environment variable not set");
     let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY environment variable not set");
     let project_id =
@@ -26,7 +30,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?
         .build()?;
 
-    match client.execute_prompt(prompt, table_name, instruction).await {
+    match client
+        .execute_prompt(prompt, table_name, instruction, answer_key)
+        .await
+    {
         Ok(result) => println!("Query Result:\n{result}"),
         Err(e) => eprintln!("Error: {e}"),
     }

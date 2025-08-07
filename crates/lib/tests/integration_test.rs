@@ -33,6 +33,7 @@ async fn test_execute_prompt_success() {
             prompt,
             Some("bigquery-public-data.samples.shakespeare"),
             None,
+            None,
         )
         .await;
 
@@ -62,7 +63,7 @@ async fn test_execute_prompt_invalid_sql() {
         .unwrap();
 
     let prompt = "this is not a valid query";
-    let result = client.execute_prompt(prompt, None, None).await;
+    let result = client.execute_prompt(prompt, None, None, None).await;
 
     assert!(result.is_ok());
     assert_eq!(
@@ -128,7 +129,7 @@ async fn test_execute_prompt_with_formatting() {
     let table_name = "bigquery-public-data.samples.shakespeare";
     let instruction = "Answer with only the number with thousand format.";
     let result = client
-        .execute_prompt(prompt, Some(table_name), Some(instruction))
+        .execute_prompt(prompt, Some(table_name), Some(instruction), None)
         .await;
 
     if let Err(e) = &result {
