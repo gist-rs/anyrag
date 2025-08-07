@@ -14,6 +14,7 @@ pub use types::{PromptClient, PromptClientBuilder};
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use log::{debug, error, info};
 use regex::Regex;
+use serde_json;
 use types::{Content, GeminiRequest, GeminiResponse, Part};
 
 impl PromptClient {
@@ -25,6 +26,7 @@ impl PromptClient {
         &self,
         prompt: &str,
         table_name: Option<&str>,
+        instruction: Option<&str>,
     ) -> Result<String, PromptError> {
         let sql_query = self.get_sql_from_prompt(prompt, table_name).await?;
 
@@ -36,7 +38,12 @@ impl PromptClient {
         if let Err(e) = &result {
             error!("[execute_prompt] Error: {e:?}");
         }
-        result
+        let result = result?;
+
+        // Pre-process the JSON to make it more readable for the model.
+        let json_data: serde_json::Value = serde_json::from_str(&result)?;
+        let pretty_json = serde_json::to_string_pretty(&json_data)?;
+        self.format_response(&pretty_json, prompt, instruction).await
     }
 
     /// Converts a natural language prompt to a SQL query using the Gemini API.
@@ -135,5 +142,68 @@ impl PromptClient {
         } else {
             "".to_string()
         }
+    }
+
+    async fn format_response(
+        &self,
+        content: &str,
+        prompt: &str,
+        instruction: Option<&str>,
+    ) -> Result<String, PromptError> {
+        info!("[format_response] received instruction: {instruction:?}");
+
+        let output_instruction = instruction.unwrap_or("Answer the prompt from the #INPUT data.");
+
+        let final_prompt = format!(
+            r##"You are a data formatting engine. Your sole purpose is to transform the #INPUT data based on the #PROMPT and #OUTPUT instructions. Do not add any explanations, apologies, or extra text.
+
+# PROMPT:
+{prompt}
+
+# OUTPUT:
+{output_instruction}
+
+# INPUT:
+{content}
+"##,
+            prompt = prompt,
+            output_instruction = output_instruction,
+            content = content
+        );
+
+        debug!("--> Prompt to Gemini for formatting: {}", &final_prompt);
+        let request_body = GeminiRequest {
+            contents: vec![Content {
+                parts: vec![Part { text: final_prompt }],
+            }],
+        };
+
+        let response = self
+            .gemini_client
+            .post(&self.gemini_url)
+            .query(&[("key", &self.gemini_api_key)])
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(PromptError::GeminiRequest)?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(PromptError::GeminiApi(error_text));
+        }
+
+        let gemini_response: GeminiResponse = response
+            .json()
+            .await
+            .map_err(PromptError::GeminiDeserialization)?;
+
+        let raw_response = gemini_response
+            .candidates
+            .first()
+            .and_then(|c| c.content.parts.first())
+            .map(|p| p.text.clone())
+            .unwrap_or_default();
+
+        Ok(raw_response)
     }
 }

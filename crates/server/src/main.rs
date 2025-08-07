@@ -28,6 +28,7 @@ struct AppState {
 struct PromptRequest {
     prompt: String,
     table_name: Option<String>,
+    instruction: Option<String>,
 }
 
 /// The response body for the `/prompt` endpoint.
@@ -58,7 +59,11 @@ async fn prompt_handler(
 
     let result = app_state
         .prompt_client
-        .execute_prompt(&payload.prompt, payload.table_name.as_deref())
+        .execute_prompt(
+            &payload.prompt,
+            payload.table_name.as_deref(),
+            payload.instruction.as_deref(),
+        )
         .await?;
 
     Ok(Json(PromptResponse { result }))
