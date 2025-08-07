@@ -17,7 +17,7 @@ async fn test_execute_prompt_success() {
     let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
-    let client = PromptClientBuilder::new()
+    let client = PromptClientBuilder::default()
         .gemini_url(gemini_url)
         .gemini_api_key(gemini_api_key)
         .bigquery_storage(project_id)
@@ -52,7 +52,7 @@ async fn test_execute_prompt_invalid_sql() {
     let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
-    let client = PromptClientBuilder::new()
+    let client = PromptClientBuilder::default()
         .gemini_url(gemini_url)
         .gemini_api_key(gemini_api_key)
         .bigquery_storage(project_id)
@@ -77,7 +77,7 @@ async fn test_builder_missing_api_key() {
     dotenv().ok();
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
-    let builder_result = PromptClientBuilder::new()
+    let builder_result = PromptClientBuilder::default()
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -96,7 +96,7 @@ async fn test_builder_missing_storage_provider() {
     let gemini_url = env::var("GEMINI_API_URL").expect("GEMINI_API_URL not set");
     let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
 
-    let builder_result = PromptClientBuilder::new()
+    let builder_result = PromptClientBuilder::default()
         .gemini_url(gemini_url)
         .gemini_api_key(gemini_api_key)
         .build();
@@ -115,7 +115,7 @@ async fn test_execute_prompt_with_formatting() {
     let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
-    let client = PromptClientBuilder::new()
+    let client = PromptClientBuilder::default()
         .gemini_url(gemini_url)
         .gemini_api_key(gemini_api_key)
         .bigquery_storage(project_id)

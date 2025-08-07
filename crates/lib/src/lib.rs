@@ -10,11 +10,10 @@ pub mod types;
 pub use errors::PromptError;
 pub use types::{PromptClient, PromptClientBuilder};
 
-
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use log::{debug, error, info};
 use regex::Regex;
-use serde_json;
+
 use types::{Content, GeminiRequest, GeminiResponse, Part};
 
 impl PromptClient {
@@ -43,7 +42,8 @@ impl PromptClient {
         // Pre-process the JSON to make it more readable for the model.
         let json_data: serde_json::Value = serde_json::from_str(&result)?;
         let pretty_json = serde_json::to_string_pretty(&json_data)?;
-        self.format_response(&pretty_json, prompt, instruction).await
+        self.format_response(&pretty_json, prompt, instruction)
+            .await
     }
 
     /// Converts a natural language prompt to a SQL query using the Gemini API.
@@ -165,10 +165,7 @@ impl PromptClient {
 
 # INPUT:
 {content}
-"##,
-            prompt = prompt,
-            output_instruction = output_instruction,
-            content = content
+"##
         );
 
         debug!("--> Prompt to Gemini for formatting: {}", &final_prompt);

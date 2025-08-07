@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug};
 
 /// A client to interact with the Gemini API and a storage provider.
-
 pub struct PromptClient {
     pub(crate) gemini_client: ReqwestClient,
     pub(crate) storage_provider: Box<dyn Storage>,
