@@ -27,20 +27,11 @@ impl Debug for PromptClient {
 ///
 /// This builder facilitates the creation of a `PromptClient` by allowing
 /// for the configuration of necessary parameters such as API keys and project IDs.
+#[derive(Default)]
 pub struct PromptClientBuilder {
     gemini_url: String,
     gemini_api_key: String,
     storage_provider: Option<Box<dyn Storage>>,
-}
-
-impl Default for PromptClientBuilder {
-    fn default() -> Self {
-        Self {
-            gemini_url: String::new(),
-            gemini_api_key: String::new(),
-            storage_provider: None,
-        }
-    }
 }
 
 impl PromptClientBuilder {

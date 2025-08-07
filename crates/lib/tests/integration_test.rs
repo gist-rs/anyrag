@@ -137,7 +137,7 @@ async fn test_execute_prompt_with_formatting() {
     assert!(result.is_ok());
     let output = result.unwrap();
 
-    println!("{}", output);
+    println!("{output}");
 
     assert!(!output.contains("f0_")); // Should not contain the raw JSON key
     assert!(output.contains("27,894"));
