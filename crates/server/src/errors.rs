@@ -39,7 +39,7 @@ impl IntoResponse for AppError {
                 // Log the original error for debugging purposes
                 error!("PromptError: {:?}", err);
                 match err {
-                    PromptError::MissingApiKey | PromptError::MissingProjectId => (
+                    PromptError::MissingApiKey | PromptError::MissingStorageProvider => (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Server is not configured correctly.".to_string(),
                     ),
@@ -54,13 +54,13 @@ impl IntoResponse for AppError {
                     PromptError::GeminiApi(e) => {
                         (StatusCode::BAD_GATEWAY, format!("Gemini API error: {e}"))
                     }
-                    PromptError::BigQueryClient(e) => (
+                    PromptError::StorageConnection(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("BigQuery client error: {e}"),
+                        format!("Storage provider connection error: {e}"),
                     ),
-                    PromptError::BigQueryExecution(e) => (
+                    PromptError::StorageQueryFailed(e) => (
                         StatusCode::BAD_REQUEST,
-                        format!("BigQuery execution failed: {e}"),
+                        format!("Storage query execution failed: {e}"),
                     ),
                     PromptError::Regex(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,

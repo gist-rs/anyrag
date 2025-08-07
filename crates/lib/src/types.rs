@@ -1,27 +1,25 @@
-use crate::errors::PromptError;
-use gcp_bigquery_client::{model::table_schema::TableSchema, Client};
+use crate::{
+    errors::PromptError,
+    providers::{bigquery::BigQueryProvider, storage::Storage},
+};
 use reqwest::Client as ReqwestClient;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::fmt::{self, Debug};
 
-/// A client to interact with the Gemini API and BigQuery.
+/// A client to interact with the Gemini API and a storage provider.
+
 pub struct PromptClient {
     pub(crate) gemini_client: ReqwestClient,
-    pub(crate) bigquery_client: Client,
+    pub(crate) storage_provider: Box<dyn Storage>,
     pub(crate) gemini_url: String,
     pub(crate) gemini_api_key: String,
-    pub(crate) project_id: String,
-    pub(crate) schema_cache: Arc<RwLock<HashMap<String, Arc<TableSchema>>>>,
 }
 
-impl fmt::Debug for PromptClient {
+impl Debug for PromptClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PromptClient")
             .field("gemini_url", &self.gemini_url)
-            .field("project_id", &self.project_id)
+            .field("storage_provider", &self.storage_provider)
             .finish_non_exhaustive()
     }
 }
@@ -30,11 +28,20 @@ impl fmt::Debug for PromptClient {
 ///
 /// This builder facilitates the creation of a `PromptClient` by allowing
 /// for the configuration of necessary parameters such as API keys and project IDs.
-#[derive(Default)]
 pub struct PromptClientBuilder {
     gemini_url: String,
     gemini_api_key: String,
-    project_id: String,
+    storage_provider: Option<Box<dyn Storage>>,
+}
+
+impl Default for PromptClientBuilder {
+    fn default() -> Self {
+        Self {
+            gemini_url: String::new(),
+            gemini_api_key: String::new(),
+            storage_provider: None,
+        }
+    }
 }
 
 impl PromptClientBuilder {
@@ -63,40 +70,41 @@ impl PromptClientBuilder {
         self
     }
 
-    /// Sets the BigQuery project ID.
-    pub fn project_id(mut self, project_id: String) -> Self {
-        self.project_id = project_id;
+    /// Sets the storage provider instance.
+    pub fn storage_provider(mut self, storage_provider: Box<dyn Storage>) -> Self {
+        self.storage_provider = Some(storage_provider);
         self
+    }
+
+    /// A helper to build and set a `BigQueryProvider` as the storage provider.
+    pub async fn bigquery_storage(mut self, project_id: String) -> Result<Self, PromptError> {
+        let provider = BigQueryProvider::new(project_id).await?;
+        self.storage_provider = Some(Box::new(provider));
+        Ok(self)
     }
 
     /// Builds the `PromptClient`.
     ///
     /// This method consumes the builder and returns a `Result` containing
     /// either a configured `PromptClient` or a `PromptError` if configuration
-    /// is incomplete (e.g., missing API key or project ID).
-    pub async fn build(self) -> Result<PromptClient, PromptError> {
+    /// is incomplete (e.g., missing API key or storage provider).
+    pub fn build(self) -> Result<PromptClient, PromptError> {
         if self.gemini_api_key.is_empty() {
             return Err(PromptError::MissingApiKey);
         }
-        if self.project_id.is_empty() {
-            return Err(PromptError::MissingProjectId);
-        }
+        let storage_provider = self
+            .storage_provider
+            .ok_or(PromptError::MissingStorageProvider)?;
 
         let gemini_client = ReqwestClient::builder()
             .build()
             .map_err(PromptError::ReqwestClientBuild)?;
 
-        let bigquery_client = Client::from_application_default_credentials()
-            .await
-            .map_err(PromptError::BigQueryClient)?;
-
         Ok(PromptClient {
             gemini_client,
-            bigquery_client,
+            storage_provider,
             gemini_url: self.gemini_url,
             gemini_api_key: self.gemini_api_key,
-            project_id: self.project_id,
-            schema_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 }

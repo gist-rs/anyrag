@@ -4,18 +4,16 @@
 //! using the Google Gemini API and execute them against a BigQuery project.
 
 pub mod errors;
+pub mod providers;
 pub mod types;
 
 pub use errors::PromptError;
 pub use types::{PromptClient, PromptClientBuilder};
 
-use gcp_bigquery_client::model::{
-    query_request::QueryRequest, query_response::ResultSet, table::Table, table_schema::TableSchema,
-};
+
+use gcp_bigquery_client::model::table_schema::TableSchema;
 use log::{debug, error, info};
 use regex::Regex;
-use serde_json::Value;
-use std::sync::Arc;
 use types::{Content, GeminiRequest, GeminiResponse, Part};
 
 impl PromptClient {
@@ -34,7 +32,7 @@ impl PromptClient {
             return Ok("The prompt did not result in a valid SQL query.".to_string());
         }
 
-        let result = self.execute_bigquery_sql(&sql_query).await;
+        let result = self.storage_provider.execute_sql(&sql_query).await;
         if let Err(e) = &result {
             error!("[execute_prompt] Error: {e:?}");
         }
@@ -51,7 +49,7 @@ impl PromptClient {
         let mut context = String::new();
 
         if let Some(table) = table_name {
-            let schema = self.get_table_schema(table).await?;
+            let schema = self.storage_provider.get_table_schema(table).await?;
             let schema_str = Self::format_schema_for_prompt(&schema);
             context.push_str(&format!("Schema for `{table}`: ({schema_str}). "));
         }
@@ -121,37 +119,6 @@ impl PromptClient {
         Ok(sql_query)
     }
 
-    async fn get_table_schema(&self, table_name: &str) -> Result<Arc<TableSchema>, PromptError> {
-        if let Some(schema) = self.schema_cache.read().await.get(table_name) {
-            return Ok(schema.clone());
-        }
-
-        let parts: Vec<&str> = table_name.split('.').collect();
-        if parts.len() != 3 {
-            return Err(PromptError::BigQueryExecution(format!(
-                "Invalid table name format: {table_name}"
-            )));
-        }
-        let project_id = parts[0];
-        let dataset_id = parts[1];
-        let table_id = parts[2];
-
-        let table: Table = self
-            .bigquery_client
-            .table()
-            .get(project_id, dataset_id, table_id, None)
-            .await?;
-
-        let schema = table.schema;
-
-        let schema_arc = Arc::new(schema);
-        self.schema_cache
-            .write()
-            .await
-            .insert(table_name.to_string(), schema_arc.clone());
-        Ok(schema_arc)
-    }
-
     fn format_schema_for_prompt(schema: &TableSchema) -> String {
         if let Some(fields) = &schema.fields {
             fields
@@ -168,41 +135,5 @@ impl PromptClient {
         } else {
             "".to_string()
         }
-    }
-
-    /// Executes a SQL query on BigQuery and returns the result as a JSON string.
-    async fn execute_bigquery_sql(&self, sql_query: &str) -> Result<String, PromptError> {
-        info!("--> Executing BigQuery SQL: {sql_query}");
-        let response = self
-            .bigquery_client
-            .job()
-            .query(
-                &self.project_id,
-                QueryRequest {
-                    query: sql_query.to_string(),
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|e| PromptError::BigQueryExecution(e.to_string()))?;
-
-        let mut results = ResultSet::new_from_query_response(response);
-        let mut json_results: Vec<Value> = Vec::new();
-        let column_names = results.column_names();
-
-        while results.next_row() {
-            let mut row_map = serde_json::Map::new();
-            for name in &column_names {
-                let value = results
-                    .get_json_value_by_name(name)
-                    .ok()
-                    .flatten()
-                    .unwrap_or(Value::Null);
-                row_map.insert(name.clone(), value);
-            }
-            json_results.push(Value::Object(row_map));
-        }
-
-        Ok(serde_json::to_string(&json_results)?)
     }
 }

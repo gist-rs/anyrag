@@ -20,9 +20,10 @@ async fn test_execute_prompt_success() {
     let client = PromptClientBuilder::new()
         .gemini_url(gemini_url)
         .gemini_api_key(gemini_api_key)
-        .project_id(project_id)
-        .build()
+        .bigquery_storage(project_id)
         .await
+        .unwrap()
+        .build()
         .unwrap();
 
     // This prompt assumes you have a public dataset like `bigquery-public-data.samples.shakespeare`
@@ -50,9 +51,10 @@ async fn test_execute_prompt_invalid_sql() {
     let client = PromptClientBuilder::new()
         .gemini_url(gemini_url)
         .gemini_api_key(gemini_api_key)
-        .project_id(project_id)
-        .build()
+        .bigquery_storage(project_id)
         .await
+        .unwrap()
+        .build()
         .unwrap();
 
     let prompt = "this is not a valid query";
@@ -72,9 +74,10 @@ async fn test_builder_missing_api_key() {
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let builder_result = PromptClientBuilder::new()
-        .project_id(project_id)
-        .build()
-        .await;
+        .bigquery_storage(project_id)
+        .await
+        .unwrap()
+        .build();
 
     assert!(matches!(
         builder_result.unwrap_err(),
@@ -82,9 +85,9 @@ async fn test_builder_missing_api_key() {
     ));
 }
 
-/// Tests that the builder returns an error if the project ID is missing.
+/// Tests that the builder returns an error if the storage provider is missing.
 #[tokio::test]
-async fn test_builder_missing_project_id() {
+async fn test_builder_missing_storage_provider() {
     dotenv().ok();
     let gemini_url = env::var("GEMINI_API_URL").expect("GEMINI_API_URL not set");
     let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
@@ -92,11 +95,10 @@ async fn test_builder_missing_project_id() {
     let builder_result = PromptClientBuilder::new()
         .gemini_url(gemini_url)
         .gemini_api_key(gemini_api_key)
-        .build()
-        .await;
+        .build();
 
     assert!(matches!(
         builder_result.unwrap_err(),
-        PromptError::MissingProjectId
+        PromptError::MissingStorageProvider
     ));
 }

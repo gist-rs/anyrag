@@ -2,12 +2,12 @@ mod config;
 mod errors;
 
 use crate::{config::get_config, errors::AppError};
+use anyquery::{PromptClient, PromptClientBuilder};
 use axum::{
     extract::State,
     routing::{get, post},
     Json, Router,
 };
-use anyquery::{PromptClient, PromptClientBuilder};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -83,9 +83,9 @@ async fn main() -> anyhow::Result<()> {
     let prompt_client = PromptClientBuilder::new()
         .gemini_url(config.gemini_api_url)
         .gemini_api_key(config.gemini_api_key)
-        .project_id(config.project_id)
-        .build()
-        .await?;
+        .bigquery_storage(config.project_id)
+        .await?
+        .build()?;
 
     // Create the application state
     let app_state = AppState {

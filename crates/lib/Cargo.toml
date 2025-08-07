@@ -16,6 +16,8 @@ regex = { workspace = true }
 tokio = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }
+async-trait.workspace = true
+dyn-clone = { workspace = true }
 
 [dev-dependencies]
 dotenvy = "0.15.7"

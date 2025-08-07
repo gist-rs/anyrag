@@ -21,9 +21,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = PromptClientBuilder::new()
         .gemini_url(api_url)
         .gemini_api_key(api_key)
-        .project_id(project_id)
-        .build()
-        .await?;
+        .bigquery_storage(project_id)
+        .await?
+        .build()?;
 
     match client.execute_prompt(prompt, table_name).await {
         Ok(result) => println!("Query Result:\n{result}"),
