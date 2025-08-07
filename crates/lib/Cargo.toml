@@ -1,0 +1,20 @@
+[package]
+name = "anyquery"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "anyquery"
+path = "src/lib.rs"
+
+[dependencies]
+gcp-bigquery-client = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+tokio = { workspace = true }
+log = { workspace = true }
+
+[dev-dependencies]
+dotenvy = "0.15.7"

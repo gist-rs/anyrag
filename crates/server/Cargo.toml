@@ -1,0 +1,32 @@
+[package]
+name = "anyquery-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+openssl = { version = "0.10", features = ["vendored"] }
+# Internal Crate
+anyquery = { path = "../lib" }
+
+# Web Framework
+axum = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Tracing & Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tower-http = { workspace = true }
+
+# Serde
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Other
+dotenvy = "0.15.7"
+anyhow = "1.0.98"
