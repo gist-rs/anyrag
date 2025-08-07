@@ -40,7 +40,16 @@ impl PromptClient {
         let result = result?;
 
         // Pre-process the JSON to make it more readable for the model.
-        let json_data: serde_json::Value = serde_json::from_str(&result)?;
+        let mut json_data: serde_json::Value = serde_json::from_str(&result)?;
+        if let Some(array) = json_data.as_array_mut() {
+            for item in array {
+                if let Some(obj) = item.as_object_mut() {
+                    if let Some(value) = obj.remove("f0_") {
+                        obj.insert("answer".to_string(), value);
+                    }
+                }
+            }
+        }
         let pretty_json = serde_json::to_string_pretty(&json_data)?;
         self.format_response(&pretty_json, prompt, instruction)
             .await
@@ -151,24 +160,27 @@ impl PromptClient {
         instruction: Option<&str>,
     ) -> Result<String, PromptError> {
         info!("[format_response] received instruction: {instruction:?}");
+        if instruction.is_none() {
+            return Ok(content.to_string());
+        }
 
         let output_instruction = instruction.unwrap_or("Answer the prompt from the #INPUT data.");
 
         let final_prompt = format!(
-            r##"You are a data formatting engine. Your sole purpose is to transform the #INPUT data based on the #PROMPT and #OUTPUT instructions. Do not add any explanations, apologies, or extra text.
+            r##"You are a dynamic parser. Your sole purpose is to parse the DATA based on the PROMPT and INSTRUCTION instructions. Do not add any explanations, apologies, or extra text.
 
-# PROMPT:
-{prompt}
-
-# OUTPUT:
+# INSTRUCTION:
 {output_instruction}
 
-# INPUT:
+# PROMPT (we use this for query and get belowed data):
+{prompt}
+
+# DATA (query from database from the prompt):
 {content}
 "##
         );
 
-        debug!("--> Prompt to Gemini for formatting: {}", &final_prompt);
+        println!("--> Prompt to Gemini for formatting: {}", &final_prompt);
         let request_body = GeminiRequest {
             contents: vec![Content {
                 parts: vec![Part { text: final_prompt }],
