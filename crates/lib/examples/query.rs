@@ -26,8 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     match client.execute_prompt(prompt, table_name).await {
-        Ok(result) => println!("Query Result:\n{}", result),
-        Err(e) => eprintln!("Error: {}", e),
+        Ok(result) => println!("Query Result:\n{result}"),
+        Err(e) => eprintln!("Error: {e}"),
     }
 
     Ok(())

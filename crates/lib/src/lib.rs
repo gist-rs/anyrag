@@ -35,7 +35,7 @@ impl PromptClient {
 
         let result = self.execute_bigquery_sql(&sql_query).await;
         if let Err(e) = &result {
-            error!("[execute_prompt] Error: {:?}", e);
+            error!("[execute_prompt] Error: {e:?}");
         }
         result
     }
@@ -46,19 +46,18 @@ impl PromptClient {
         prompt: &str,
         table_name: Option<&str>,
     ) -> Result<String, PromptError> {
-        info!("[get_sql_from_prompt] received prompt: {:?}", prompt);
+        info!("[get_sql_from_prompt] received prompt: {prompt:?}");
         let mut context = String::new();
 
         if let Some(table) = table_name {
             let schema = self.get_table_schema(table).await?;
             let schema_str = Self::format_schema_for_prompt(&schema);
-            context.push_str(&format!("Schema for `{}`: ({}). ", table, schema_str));
+            context.push_str(&format!("Schema for `{table}`: ({schema_str}). "));
         }
 
         let final_prompt = if !context.is_empty() {
             format!(
-                "You are a BigQuery SQL expert. Write a readonly SQL query that answers the user's question. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names. Expected output is a single SQL query only.\n\n# Context\n{}\n\n# User question\n{}",
-                context, prompt
+                "You are a BigQuery SQL expert. Write a readonly SQL query that answers the user's question. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names. Expected output is a single SQL query only.\n\n# Context\n{context}\n\n# User question\n{prompt}"
             )
         } else {
             prompt.to_string()
@@ -108,7 +107,7 @@ impl PromptClient {
             .unwrap_or_else(|| raw_response.trim().to_string());
 
         if let Some(table) = table_name {
-            sql_query = sql_query.replace("`your_table_name`", &format!("`{}`", table));
+            sql_query = sql_query.replace("`your_table_name`", &format!("`{table}`"));
             sql_query = sql_query.replace("your_table_name", table);
         }
 
@@ -129,8 +128,7 @@ impl PromptClient {
         let parts: Vec<&str> = table_name.split('.').collect();
         if parts.len() != 3 {
             return Err(PromptError::BigQueryExecution(format!(
-                "Invalid table name format: {}",
-                table_name
+                "Invalid table name format: {table_name}"
             )));
         }
         let project_id = parts[0];
@@ -157,7 +155,13 @@ impl PromptClient {
         if let Some(fields) = &schema.fields {
             fields
                 .iter()
-                .map(|field| format!("{} {:?}", field.name, field.r#type))
+                .map(|field| {
+                    format!(
+                        "{field_name} {field_type:?}",
+                        field_name = field.name,
+                        field_type = field.r#type
+                    )
+                })
                 .collect::<Vec<String>>()
                 .join(", ")
         } else {
@@ -167,7 +171,7 @@ impl PromptClient {
 
     /// Executes a SQL query on BigQuery.
     async fn execute_bigquery_sql(&self, sql_query: &str) -> Result<String, PromptError> {
-        info!("--> Executing BigQuery SQL: {}", sql_query);
+        info!("--> Executing BigQuery SQL: {sql_query}");
         let response = self
             .bigquery_client
             .job()
@@ -188,7 +192,7 @@ impl PromptClient {
         while results.next_row() {
             for name in &column_names {
                 let value = results.get_json_value_by_name(name).unwrap();
-                result_string.push_str(&format!("{}: {:?}, ", name, value));
+                result_string.push_str(&format!("{name}: {value:?}, "));
             }
             result_string.push('\n');
         }

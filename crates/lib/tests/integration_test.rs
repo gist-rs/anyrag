@@ -32,7 +32,7 @@ async fn test_execute_prompt_success() {
         .await;
 
     if let Err(e) = &result {
-        eprintln!("Error in test_execute_prompt_success: {}", e);
+        eprintln!("Error in test_execute_prompt_success: {e}");
     }
     assert!(result.is_ok());
     let output = result.unwrap();

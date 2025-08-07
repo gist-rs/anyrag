@@ -45,30 +45,30 @@ impl IntoResponse for AppError {
                     ),
                     PromptError::GeminiRequest(e) => (
                         StatusCode::BAD_GATEWAY,
-                        format!("Request to Gemini API failed: {}", e),
+                        format!("Request to Gemini API failed: {e}"),
                     ),
                     PromptError::GeminiDeserialization(e) => (
                         StatusCode::BAD_GATEWAY,
-                        format!("Failed to deserialize Gemini response: {}", e),
+                        format!("Failed to deserialize Gemini response: {e}"),
                     ),
                     PromptError::GeminiApi(e) => {
-                        (StatusCode::BAD_GATEWAY, format!("Gemini API error: {}", e))
+                        (StatusCode::BAD_GATEWAY, format!("Gemini API error: {e}"))
                     }
                     PromptError::BigQueryClient(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("BigQuery client error: {}", e),
+                        format!("BigQuery client error: {e}"),
                     ),
                     PromptError::BigQueryExecution(e) => (
                         StatusCode::BAD_REQUEST,
-                        format!("BigQuery execution failed: {}", e),
+                        format!("BigQuery execution failed: {e}"),
                     ),
                     PromptError::Regex(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Internal regex error: {}", e),
+                        format!("Internal regex error: {e}"),
                     ),
                     PromptError::ReqwestClientBuild(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to build HTTP client: {}", e),
+                        format!("Failed to build HTTP client: {e}"),
                     ),
                 }
             }
