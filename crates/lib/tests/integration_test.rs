@@ -15,6 +15,7 @@ static INIT: Once = Once::new();
 /// Initializes the tracing subscriber for tests.
 fn setup_tracing() {
     INIT.call_once(|| {
+        dotenv().ok();
         tracing_subscriber::fmt::init();
     });
 }
@@ -23,7 +24,6 @@ fn setup_tracing() {
 #[tokio::test]
 async fn test_execute_prompt_success() {
     setup_tracing();
-    dotenv().ok();
     let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
     let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
@@ -59,7 +59,6 @@ async fn test_execute_prompt_success() {
 #[tokio::test]
 async fn test_execute_prompt_invalid_sql() {
     setup_tracing();
-    dotenv().ok();
     let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
     let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
@@ -86,7 +85,6 @@ async fn test_execute_prompt_invalid_sql() {
 #[tokio::test]
 async fn test_builder_missing_ai_provider() {
     setup_tracing();
-    dotenv().ok();
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let builder_result = PromptClientBuilder::default()
@@ -105,7 +103,6 @@ async fn test_builder_missing_ai_provider() {
 #[tokio::test]
 async fn test_builder_missing_storage_provider() {
     setup_tracing();
-    dotenv().ok();
     let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
     let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
 
