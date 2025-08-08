@@ -32,6 +32,7 @@ pub struct Config {
     pub ai_provider: String,
     pub ai_api_url: String,
     pub ai_api_key: Option<String>,
+    pub ai_model: Option<String>,
     pub project_id: String,
     pub port: u16,
 }
@@ -48,6 +49,8 @@ pub fn get_config() -> Result<Config, ConfigError> {
 
     let ai_api_key = env::var("AI_API_KEY").ok();
 
+    let ai_model = env::var("AI_MODEL").ok();
+
     let project_id = env::var("BIGQUERY_PROJECT_ID")
         .map_err(|_| ConfigError::Missing("BIGQUERY_PROJECT_ID".to_string()))?;
 
@@ -62,6 +65,7 @@ pub fn get_config() -> Result<Config, ConfigError> {
         ai_provider,
         ai_api_url,
         ai_api_key,
+        ai_model,
         project_id,
         port,
     })

@@ -24,6 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ai_provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "gemini".to_string());
     let api_url = env::var("AI_API_URL").expect("AI_API_URL environment variable not set");
     let api_key = env::var("AI_API_KEY").ok();
+    let ai_model = env::var("AI_MODEL").ok();
     let project_id =
         env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID environment variable not set");
 
@@ -33,7 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Box::new(GeminiProvider::new(api_url, key)?)
                 as Box<dyn anyquery::providers::ai::AiProvider>
         }
-        "local" => Box::new(LocalAiProvider::new(api_url, api_key)?)
+        "local" => Box::new(LocalAiProvider::new(api_url, api_key, ai_model)?)
             as Box<dyn anyquery::providers::ai::AiProvider>,
         _ => return Err(format!("Unsupported AI provider: {ai_provider_name}").into()),
     };

@@ -7,8 +7,10 @@ use std::fmt::Debug;
 // --- OpenAI-compatible request and response structures ---
 
 #[derive(Serialize)]
-struct LocalAiRequest {
+struct LocalAiRequest<'a> {
     messages: Vec<LocalAiMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<&'a str>,
     temperature: f32,
     max_tokens: i32,
     stream: bool,
@@ -38,11 +40,16 @@ pub struct LocalAiProvider {
     client: ReqwestClient,
     api_url: String,
     api_key: Option<String>,
+    model: Option<String>,
 }
 
 impl LocalAiProvider {
     /// Creates a new `LocalAiProvider`.
-    pub fn new(api_url: String, api_key: Option<String>) -> Result<Self, PromptError> {
+    pub fn new(
+        api_url: String,
+        api_key: Option<String>,
+        model: Option<String>,
+    ) -> Result<Self, PromptError> {
         let client = ReqwestClient::builder()
             .build()
             .map_err(PromptError::ReqwestClientBuild)?;
@@ -50,6 +57,7 @@ impl LocalAiProvider {
             client,
             api_url,
             api_key,
+            model,
         })
     }
 }
@@ -71,6 +79,7 @@ impl AiProvider for LocalAiProvider {
 
         let request_body = LocalAiRequest {
             messages,
+            model: self.model.as_deref(),
             temperature: 0.0,
             max_tokens: 1500,
             stream: false,

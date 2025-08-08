@@ -98,8 +98,11 @@ async fn main() -> anyhow::Result<()> {
             Box::new(GeminiProvider::new(config.ai_api_url, api_key)?)
                 as Box<dyn anyquery::providers::ai::AiProvider>
         }
-        "local" => Box::new(LocalAiProvider::new(config.ai_api_url, config.ai_api_key)?)
-            as Box<dyn anyquery::providers::ai::AiProvider>,
+        "local" => Box::new(LocalAiProvider::new(
+            config.ai_api_url,
+            config.ai_api_key,
+            config.ai_model,
+        )?) as Box<dyn anyquery::providers::ai::AiProvider>,
         _ => {
             return Err(anyhow::anyhow!(
                 "Unsupported AI provider: {}",
