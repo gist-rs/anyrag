@@ -3,10 +3,11 @@ use async_trait::async_trait;
 use reqwest::Client as ReqwestClient;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use tracing::debug;
 
 // --- OpenAI-compatible request and response structures ---
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 struct LocalAiRequest<'a> {
     messages: Vec<LocalAiMessage>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -85,6 +86,7 @@ impl AiProvider for LocalAiProvider {
             stream: false,
         };
 
+        debug!(payload = ?request_body, "--> Sending request to Local AI");
         let mut request_builder = self.client.post(&self.api_url);
 
         if let Some(key) = &self.api_key {

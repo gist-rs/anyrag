@@ -7,7 +7,6 @@ use gcp_bigquery_client::{
     },
     Client,
 };
-use log::info;
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -15,6 +14,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::RwLock;
+use tracing::debug;
 
 /// A provider for interacting with Google BigQuery.
 #[derive(Clone)]
@@ -48,9 +48,13 @@ impl Debug for BigQueryProvider {
 
 #[async_trait]
 impl Storage for BigQueryProvider {
+    fn name(&self) -> &str {
+        "BigQuery"
+    }
+
     /// Executes a SQL query on BigQuery and returns the result as a JSON string.
     async fn execute_sql(&self, sql_query: &str) -> Result<String, PromptError> {
-        info!("--> Executing BigQuery SQL: {sql_query}");
+        debug!(sql = %sql_query, "--> Executing BigQuery SQL");
         let response = self
             .client
             .job()

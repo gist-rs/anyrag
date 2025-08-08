@@ -3,20 +3,21 @@ use async_trait::async_trait;
 use reqwest::Client as ReqwestClient;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+use tracing::debug;
 
 // --- Gemini-specific request and response structures ---
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct GeminiRequest {
     contents: Vec<Content>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct Content {
     parts: Vec<Part>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct Part {
     text: String,
 }
@@ -76,6 +77,8 @@ impl AiProvider for GeminiProvider {
                 }],
             }],
         };
+
+        debug!(payload = ?request_body, "--> Sending request to Gemini");
 
         let response = self
             .client

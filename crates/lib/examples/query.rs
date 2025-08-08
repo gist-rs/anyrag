@@ -7,6 +7,7 @@ use std::env;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tracing_subscriber::fmt::init();
     dotenv().ok();
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {

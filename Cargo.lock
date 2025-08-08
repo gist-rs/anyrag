@@ -40,13 +40,13 @@ dependencies = [
  "dotenvy",
  "dyn-clone",
  "gcp-bigquery-client",
- "log",
  "regex",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 

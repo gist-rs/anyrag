@@ -11,8 +11,8 @@ pub use errors::PromptError;
 pub use types::{PromptClient, PromptClientBuilder};
 
 use gcp_bigquery_client::model::table_schema::TableSchema;
-use log::{debug, error, info};
 use regex::Regex;
+use tracing::{debug, error, info};
 
 impl PromptClient {
     /// Executes a natural language prompt.
@@ -70,7 +70,15 @@ impl PromptClient {
 
         let final_prompt = if !context.is_empty() {
             format!(
-                "You are a BigQuery SQL expert. Write a readonly SQL query that answers the user's question. {alias_instruction} Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names. Expected output is a single SQL query only.\n\n# Context\n{context}\n\n# User question\n{prompt}"
+                "You are a {db_name} SQL expert. Write a readonly SQL query that answers the user's question.\n\n\
+                Follow these rules to create production-grade SQL:\n\
+                1. For questions about \"who\", \"what\", or \"list\", use DISTINCT to avoid duplicate results.\n\
+                2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).\n\
+                3. For date filtering, prefer using `EXTRACT(YEAR FROM your_column)` over functions like `FORMAT_TIMESTAMP`.\n\n\
+                {alias_instruction}\n\n\
+                Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names. Expected output is a single SQL query only.\n\n\
+                # Context\n{context}\n\n# User question\n{prompt}",
+                db_name = self.storage_provider.name()
             )
         } else {
             prompt.to_string()

@@ -11,6 +11,9 @@ use std::sync::Arc;
 /// schema information from different database providers (e.g., BigQuery, SQLite).
 #[async_trait]
 pub trait Storage: Send + Sync + DynClone + Debug {
+    /// Returns the name of the storage provider (e.g., "BigQuery", "SQLite").
+    fn name(&self) -> &str;
+
     /// Executes a SQL query against the storage provider.
     ///
     /// The result should be a JSON formatted string.
