@@ -27,6 +27,29 @@ anyrag/
 └── README.md          # This file
 ```
 
+## Deployment to Google Cloud Run
+
+This project includes a comprehensive script to automate deployment to Google Cloud Run. The script handles creating secrets, setting IAM permissions, building the container, and deploying the service.
+
+### Prerequisites
+
+-   The [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) must be installed and initialized.
+-   You must have a Google Cloud project with billing enabled.
+-   Your `crates/server/.env` file must be created and contain your `AI_API_KEY` and `BIGQUERY_PROJECT_ID`.
+
+### How to Deploy
+
+1.  **Make the script executable:**
+    ```sh
+    chmod +x deploy.sh
+    ```
+
+2.  **Run the deployment script, passing your Google Cloud Project ID as an argument:**
+    ```sh
+    ./deploy.sh your-gcp-project-id
+    ```
+    The script will guide you through the authentication process and handle all the necessary steps to get your service live. Upon completion, it will output the URL for your deployed service.
+
 ## Running Tests
 
 You can run all tests for the entire workspace from the root directory:

@@ -1,0 +1,33 @@
+#
+# Google Cloud Build configuration for the anyrag-server.
+#
+# This file defines the steps for building the Docker image for the application.
+# It is designed to be triggered by the `deploy.sh` script.
+#
+steps:
+  # This step uses the standard Docker builder to build the image.
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      # Build the image and tag it with the project ID and service name.
+      # The ${_SERVICE_NAME} is a substitution variable provided
+      # by Cloud Build at runtime. The deploy script passes this value.
+      # We use a static ':latest' tag, which is reliable for manual builds.
+      - "build"
+      - "--tag=gcr.io/${PROJECT_ID}/${_SERVICE_NAME}:latest"
+      # Specify the path to the Dockerfile, as it's not in the root.
+      - "--file=crates/server/Dockerfile"
+      # The build context is the root of the workspace directory.
+      - "."
+
+images:
+  # After a successful build, Cloud Build will push this image to Google Container Registry.
+  - "gcr.io/${PROJECT_ID}/${_SERVICE_NAME}:latest"
+
+# Optional: Set a timeout for the build to prevent it from running indefinitely.
+timeout: "1800s" # 30 minutes
+
+# Define substitutions that can be passed to this build config.
+# A default value is provided for _SERVICE_NAME, but it will be
+# overridden by the gcloud builds submit command in the deploy script.
+substitutions:
+  _SERVICE_NAME: "anyrag-server"
