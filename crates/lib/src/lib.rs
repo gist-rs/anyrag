@@ -70,25 +70,31 @@ impl PromptClient {
             None => "If the query uses an aggregate function or returns a single column, choose a descriptive, single-word, lowercase alias for the result based on the user's question (e.g., for 'how many users', use `count`; for 'who is the manager', use `manager`).".to_string(),
         };
 
-        let final_prompt = if !context.is_empty() {
+        let system_prompt = format!(
+            "You are a {db_name} SQL expert. Write a readonly SQL query that answers the user's question. Expected output is a single SQL query only.",
+            db_name = self.storage_provider.name()
+        );
+
+        let user_prompt = if !context.is_empty() {
             format!(
-                "You are a {db_name} SQL expert. Write a readonly SQL query that answers the user's question.\n\n\
-                Follow these rules to create production-grade SQL:\n\
+                "Follow these rules to create production-grade SQL:\n\
                 1. For questions about \"who\", \"what\", or \"list\", use DISTINCT to avoid duplicate results.\n\
                 2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).\n\
                 3. For date filtering, prefer using `EXTRACT(YEAR FROM your_column)` over functions like `FORMAT_TIMESTAMP`.\n\n\
                 {alias_instruction}\n\n\
-                Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names. Expected output is a single SQL query only.\n\n\
+                Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.\n\n\
                 # Context\n{context}\n\n# User question\n{prompt}",
-                db_name = self.storage_provider.name()
             )
         } else {
             prompt.to_string()
         };
 
-        debug!("--> Prompt to AI Provider: {}", &final_prompt);
+        debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider");
 
-        let raw_response = self.ai_provider.generate_sql(&final_prompt).await?;
+        let raw_response = self
+            .ai_provider
+            .generate(&system_prompt, &user_prompt)
+            .await?;
 
         debug!("<-- SQL from Gemini: {}", &raw_response);
 
@@ -147,10 +153,9 @@ impl PromptClient {
 
         info!("[format_response] received instruction: {instruction:?}");
 
-        let final_prompt = format!(
-            r##"You are a data formatting engine. Your sole purpose is to transform the #INPUT data based on the #PROMPT and #OUTPUT instructions. Do not add any explanations, apologies, or extra text.
-
-# PROMPT:
+        let system_prompt = "You are a data transformation engine. Your only purpose is to transform the #INPUT data into the format described in the #OUTPUT section, based on the original #PROMPT. Do not add any explanations, summaries, or text that is not directly derived from the input data. Filter out any rows that are not relevant to the user's question.";
+        let user_prompt = format!(
+            r##"# PROMPT:
 {prompt}
 
 # OUTPUT:
@@ -161,11 +166,8 @@ impl PromptClient {
 "##,
         );
 
-        debug!(
-            "--> Prompt to AI Provider for formatting: {}",
-            &final_prompt
-        );
+        debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider for formatting");
 
-        self.ai_provider.generate_sql(&final_prompt).await
+        self.ai_provider.generate(system_prompt, &user_prompt).await
     }
 }

@@ -12,10 +12,11 @@ use std::fmt::Debug;
 /// using different Large Language Models (e.g., Gemini, local models).
 #[async_trait]
 pub trait AiProvider: Send + Sync + Debug + DynClone {
-    /// Generates a SQL query from a given prompt.
+    /// Generates a response from a given system and user prompt.
     ///
-    /// The result should be a string containing a valid SQL query.
-    async fn generate_sql(&self, prompt: &str) -> Result<String, PromptError>;
+    /// The result should be a string containing the AI's response.
+    async fn generate(&self, system_prompt: &str, user_prompt: &str)
+        -> Result<String, PromptError>;
 }
 
 dyn_clone::clone_trait_object!(AiProvider);

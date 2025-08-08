@@ -65,16 +65,20 @@ impl LocalAiProvider {
 
 #[async_trait]
 impl AiProvider for LocalAiProvider {
-    /// Generates a SQL query using a local or OpenAI-compatible API.
-    async fn generate_sql(&self, prompt: &str) -> Result<String, PromptError> {
+    /// Generates a response from a given system and user prompt.
+    async fn generate(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, PromptError> {
         let messages = vec![
             LocalAiMessage {
                 role: "system".to_string(),
-                content: "You are a master at writing BigQuery SQL. The user will provide a prompt and context. Your only output should be a single, valid, readonly BigQuery SQL query. Do not add any explanations, introductory text, or markdown formatting.".to_string(),
+                content: system_prompt.to_string(),
             },
             LocalAiMessage {
                 role: "user".to_string(),
-                content: prompt.to_string(),
+                content: user_prompt.to_string(),
             },
         ];
 

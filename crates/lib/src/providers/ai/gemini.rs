@@ -68,12 +68,17 @@ impl GeminiProvider {
 
 #[async_trait]
 impl AiProvider for GeminiProvider {
-    /// Generates a SQL query using the Gemini API.
-    async fn generate_sql(&self, prompt: &str) -> Result<String, PromptError> {
+    /// Generates a response from a given prompt.
+    async fn generate(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, PromptError> {
+        let combined_prompt = format!("{system_prompt}\n\n{user_prompt}");
         let request_body = GeminiRequest {
             contents: vec![Content {
                 parts: vec![Part {
-                    text: prompt.to_string(),
+                    text: combined_prompt,
                 }],
             }],
         };
