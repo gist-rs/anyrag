@@ -63,10 +63,12 @@ impl PromptClient {
             context.push_str(&format!("Schema for `{table}`: ({schema_str}). "));
         }
 
-        let alias_instruction = format!(
-            "If the query uses an aggregate function like COUNT, SUM, etc., alias the result with `AS {}`.",
-            answer_key.unwrap_or("answer")
-        );
+        let alias_instruction = match answer_key {
+            Some(key) => format!(
+                "If the query uses an aggregate function or returns a single column, alias the result with `AS {key}`."
+            ),
+            None => "If the query uses an aggregate function or returns a single column, choose a descriptive, single-word, lowercase alias for the result based on the user's question (e.g., for 'how many users', use `count`; for 'who is the manager', use `manager`).".to_string(),
+        };
 
         let final_prompt = if !context.is_empty() {
             format!(
