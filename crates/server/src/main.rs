@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
-use tracing::{info, Level};
+use tracing::{debug, info};
 use tracing_subscriber::FmtSubscriber;
 
 /// The shared application state.
@@ -81,13 +81,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize tracing subscriber
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::INFO)
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .compact()
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     // Get configuration
     let config = get_config()?;
+    debug!(?config, "Server configuration loaded");
 
     // Build the AI provider based on configuration
     let ai_provider = match config.ai_provider.as_str() {
