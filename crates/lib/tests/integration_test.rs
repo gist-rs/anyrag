@@ -5,7 +5,7 @@
 //! **Note:** These tests require a valid Gemini API key and a BigQuery project with appropriate permissions.
 //! You should set the `GEMINI_API_URL`, `GEMINI_API_KEY` and `BIGQUERY_PROJECT_ID` environment variables before running the tests.
 
-use anyquery::{providers::ai::gemini::GeminiProvider, PromptClientBuilder, PromptError};
+use anyrag::{providers::ai::gemini::GeminiProvider, PromptClientBuilder, PromptError};
 use dotenvy::dotenv;
 use std::env;
 use std::sync::Once;

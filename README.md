@@ -1,10 +1,10 @@
-# AnyQuery: Natural Language to SQL
+# AnyRag: Natural Language to SQL and get RAG response as desired
 
 This project is a workspace containing a Rust-based toolset to translate natural language prompts into BigQuery SQL queries and execute them. It leverages Google's Gemini API for translation and integrates directly with the Google BigQuery API.
 
 The workspace consists of two main crates:
--   **`anyquery`**: A library providing the core logic for prompt-to-SQL conversion and BigQuery interaction.
--   **`anyquery-server`**: A lightweight web server built with `axum` that exposes the library's functionality via a REST API.
+-   **`anyrag`**: A library providing the core logic for prompt-to-SQL conversion and BigQuery interaction.
+-   **`anyrag-server`**: A lightweight web server built with `axum` that exposes the library's functionality via a REST API.
 
 ## Features
 
@@ -18,7 +18,7 @@ The workspace consists of two main crates:
 ## Project Structure
 
 ```
-anyquery/
+anyrag/
 ├── Cargo.toml         # Workspace configuration
 ├── crates/
 │   ├── lib/           # The core logic library
@@ -70,7 +70,7 @@ The server is configured using environment variables. You can create a `.env` fi
 **Optional Environment Variables:**
 
 *   `GEMINI_API_URL`: The URL for the Gemini API. Defaults to a known Gemini model endpoint.
-*   `RUST_LOG`: Sets the logging level. For example, `RUST_LOG=info,anyquery=debug`.
+*   `RUST_LOG`: Sets the logging level. For example, `RUST_LOG=info,anyrag=debug`.
 *   `PORT`: The port for the server to listen on. Defaults to `8080`.
 
 ## Running the Server Locally
@@ -97,10 +97,10 @@ You can run tests from the workspace root.
 *   **Run tests for a specific crate:**
     ```sh
     # Test the library
-    cargo test -p anyquery
+    cargo test -p anyrag
 
     # Test the server
-    cargo test -p anyquery-server
+    cargo test -p anyrag-server
     ```
 
 ## Docker Deployment
@@ -109,7 +109,7 @@ A `Dockerfile` is provided in the `crates/server` directory to build a container
 
 1.  **Build the Docker image** from the workspace root:
     ```sh
-    docker build -t anyquery-server -f crates/server/Dockerfile .
+    docker build -t anyrag-server -f crates/server/Dockerfile .
     ```
     This command uses the workspace root as the build context, which is necessary for the `Dockerfile` to access all required files.
 
@@ -120,7 +120,7 @@ A `Dockerfile` is provided in the `crates/server` directory to build a container
       -e GEMINI_API_KEY="your_gemini_api_key" \
       -e BIGQUERY_PROJECT_ID="your-gcp-project-id" \
       --name bq-tools-server \
-      anyquery-server
+      anyrag-server
     ```
     The server will be accessible at `http://localhost:8080`. You can use the `/health` endpoint to check if it's running.
 

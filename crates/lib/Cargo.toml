@@ -1,10 +1,10 @@
 [package]
-name = "anyquery"
+name = "anyrag"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "anyquery"
+name = "anyrag"
 path = "src/lib.rs"
 
 [dependencies]

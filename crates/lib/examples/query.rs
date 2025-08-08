@@ -1,4 +1,4 @@
-use anyquery::{
+use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
     PromptClientBuilder,
 };
@@ -33,10 +33,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "gemini" => {
             let key = api_key.expect("AI_API_KEY is required for gemini provider");
             Box::new(GeminiProvider::new(api_url, key)?)
-                as Box<dyn anyquery::providers::ai::AiProvider>
+                as Box<dyn anyrag::providers::ai::AiProvider>
         }
         "local" => Box::new(LocalAiProvider::new(api_url, api_key, ai_model)?)
-            as Box<dyn anyquery::providers::ai::AiProvider>,
+            as Box<dyn anyrag::providers::ai::AiProvider>,
         _ => return Err(format!("Unsupported AI provider: {ai_provider_name}").into()),
     };
 

@@ -2,7 +2,7 @@ mod config;
 mod errors;
 
 use crate::{config::get_config, errors::AppError};
-use anyquery::{
+use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
     PromptClient, PromptClientBuilder,
 };
@@ -96,13 +96,13 @@ async fn main() -> anyhow::Result<()> {
                 .ai_api_key
                 .ok_or_else(|| anyhow::anyhow!("AI_API_KEY is required for the gemini provider"))?;
             Box::new(GeminiProvider::new(config.ai_api_url, api_key)?)
-                as Box<dyn anyquery::providers::ai::AiProvider>
+                as Box<dyn anyrag::providers::ai::AiProvider>
         }
         "local" => Box::new(LocalAiProvider::new(
             config.ai_api_url,
             config.ai_api_key,
             config.ai_model,
-        )?) as Box<dyn anyquery::providers::ai::AiProvider>,
+        )?) as Box<dyn anyrag::providers::ai::AiProvider>,
         _ => {
             return Err(anyhow::anyhow!(
                 "Unsupported AI provider: {}",

@@ -69,7 +69,7 @@ COPY . .
 # to a predictable location for the next stage.
 RUN RUST_TARGET=$(cat /app/rust_target) && \
     cargo build \
-    --package anyquery-server \
+    --package anyrag-server \
     --release \
     --target "${RUST_TARGET}" \
     --locked && \

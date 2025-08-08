@@ -1,4 +1,4 @@
-use anyquery::PromptError;
+use anyrag::PromptError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -12,7 +12,7 @@ use tracing::error;
 /// This enum encapsulates different kinds of errors that can occur within the server,
 /// allowing them to be converted into appropriate HTTP responses.
 pub enum AppError {
-    /// Errors originating from the `anyquery`.
+    /// Errors originating from the `anyrag`.
     Prompt(PromptError),
     /// Generic internal server errors.
     Internal(anyhow::Error),
