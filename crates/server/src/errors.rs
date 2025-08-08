@@ -39,20 +39,20 @@ impl IntoResponse for AppError {
                 // Log the original error for debugging purposes
                 error!("PromptError: {:?}", err);
                 match err {
-                    PromptError::MissingApiKey | PromptError::MissingStorageProvider => (
+                    PromptError::MissingAiProvider | PromptError::MissingStorageProvider => (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Server is not configured correctly.".to_string(),
                     ),
-                    PromptError::GeminiRequest(e) => (
+                    PromptError::AiRequest(e) => (
                         StatusCode::BAD_GATEWAY,
-                        format!("Request to Gemini API failed: {e}"),
+                        format!("Request to AI provider failed: {e}"),
                     ),
-                    PromptError::GeminiDeserialization(e) => (
+                    PromptError::AiDeserialization(e) => (
                         StatusCode::BAD_GATEWAY,
-                        format!("Failed to deserialize Gemini response: {e}"),
+                        format!("Failed to deserialize AI provider response: {e}"),
                     ),
-                    PromptError::GeminiApi(e) => {
-                        (StatusCode::BAD_GATEWAY, format!("Gemini API error: {e}"))
+                    PromptError::AiApi(e) => {
+                        (StatusCode::BAD_GATEWAY, format!("AI provider error: {e}"))
                     }
                     PromptError::StorageConnection(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,

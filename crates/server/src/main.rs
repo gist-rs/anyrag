@@ -2,7 +2,10 @@ mod config;
 mod errors;
 
 use crate::{config::get_config, errors::AppError};
-use anyquery::{PromptClient, PromptClientBuilder};
+use anyquery::{
+    providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
+    PromptClient, PromptClientBuilder,
+};
 use axum::{
     extract::State,
     routing::{get, post},
@@ -86,10 +89,28 @@ async fn main() -> anyhow::Result<()> {
     // Get configuration
     let config = get_config()?;
 
+    // Build the AI provider based on configuration
+    let ai_provider = match config.ai_provider.as_str() {
+        "gemini" => {
+            let api_key = config
+                .ai_api_key
+                .ok_or_else(|| anyhow::anyhow!("AI_API_KEY is required for the gemini provider"))?;
+            Box::new(GeminiProvider::new(config.ai_api_url, api_key)?)
+                as Box<dyn anyquery::providers::ai::AiProvider>
+        }
+        "local" => Box::new(LocalAiProvider::new(config.ai_api_url, config.ai_api_key)?)
+            as Box<dyn anyquery::providers::ai::AiProvider>,
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unsupported AI provider: {}",
+                config.ai_provider
+            ))
+        }
+    };
+
     // Build the PromptClient
     let prompt_client = PromptClientBuilder::new()
-        .gemini_url(config.gemini_api_url)
-        .gemini_api_key(config.gemini_api_key)
+        .ai_provider(ai_provider)
         .bigquery_storage(config.project_id)
         .await?
         .build()?;

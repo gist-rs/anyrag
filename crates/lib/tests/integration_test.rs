@@ -5,21 +5,31 @@
 //! **Note:** These tests require a valid Gemini API key and a BigQuery project with appropriate permissions.
 //! You should set the `GEMINI_API_URL`, `GEMINI_API_KEY` and `BIGQUERY_PROJECT_ID` environment variables before running the tests.
 
-use anyquery::{PromptClientBuilder, PromptError};
+use anyquery::{providers::ai::gemini::GeminiProvider, PromptClientBuilder, PromptError};
 use dotenvy::dotenv;
 use std::env;
+use std::sync::Once;
+
+static INIT: Once = Once::new();
+
+/// Initializes the tracing subscriber for tests.
+fn setup_tracing() {
+    INIT.call_once(|| {
+        tracing_subscriber::fmt::init();
+    });
+}
 
 /// Tests the successful execution of a valid prompt.
 #[tokio::test]
 async fn test_execute_prompt_success() {
+    setup_tracing();
     dotenv().ok();
-    let gemini_url = env::var("GEMINI_API_URL").expect("GEMINI_API_URL not set");
-    let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
+    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .gemini_url(gemini_url)
-        .gemini_api_key(gemini_api_key)
+        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -48,14 +58,14 @@ async fn test_execute_prompt_success() {
 /// Tests the handling of an invalid prompt that doesn't generate a valid SQL query.
 #[tokio::test]
 async fn test_execute_prompt_invalid_sql() {
+    setup_tracing();
     dotenv().ok();
-    let gemini_url = env::var("GEMINI_API_URL").expect("GEMINI_API_URL not set");
-    let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
+    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .gemini_url(gemini_url)
-        .gemini_api_key(gemini_api_key)
+        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -72,9 +82,10 @@ async fn test_execute_prompt_invalid_sql() {
     );
 }
 
-/// Tests that the builder returns an error if the API key is missing.
+/// Tests that the builder returns an error if the ai provider is missing.
 #[tokio::test]
-async fn test_builder_missing_api_key() {
+async fn test_builder_missing_ai_provider() {
+    setup_tracing();
     dotenv().ok();
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
@@ -86,20 +97,20 @@ async fn test_builder_missing_api_key() {
 
     assert!(matches!(
         builder_result.unwrap_err(),
-        PromptError::MissingApiKey
+        PromptError::MissingAiProvider
     ));
 }
 
 /// Tests that the builder returns an error if the storage provider is missing.
 #[tokio::test]
 async fn test_builder_missing_storage_provider() {
+    setup_tracing();
     dotenv().ok();
-    let gemini_url = env::var("GEMINI_API_URL").expect("GEMINI_API_URL not set");
-    let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
+    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
 
     let builder_result = PromptClientBuilder::default()
-        .gemini_url(gemini_url)
-        .gemini_api_key(gemini_api_key)
+        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
         .build();
 
     assert!(matches!(
@@ -111,14 +122,14 @@ async fn test_builder_missing_storage_provider() {
 /// Tests the successful execution of a valid prompt with a formatting instruction.
 #[tokio::test]
 async fn test_execute_prompt_with_formatting() {
+    setup_tracing();
     dotenv().ok();
-    let gemini_url = env::var("GEMINI_API_URL").expect("GEMINI_API_URL not set");
-    let gemini_api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY not set");
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
+    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .gemini_url(gemini_url)
-        .gemini_api_key(gemini_api_key)
+        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
         .bigquery_storage(project_id)
         .await
         .unwrap()

@@ -14,8 +14,6 @@ use gcp_bigquery_client::model::table_schema::TableSchema;
 use log::{debug, error, info};
 use regex::Regex;
 
-use types::{Content, GeminiRequest, GeminiResponse, Part};
-
 impl PromptClient {
     /// Executes a natural language prompt.
     ///
@@ -49,7 +47,7 @@ impl PromptClient {
             .await
     }
 
-    /// Converts a natural language prompt to a SQL query using the Gemini API.
+    /// Converts a natural language prompt to a SQL query using the configured AI provider.
     async fn get_sql_from_prompt(
         &self,
         prompt: &str,
@@ -78,42 +76,14 @@ impl PromptClient {
             prompt.to_string()
         };
 
-        debug!("--> Prompt to Gemini: {}", &final_prompt);
-        let request_body = GeminiRequest {
-            contents: vec![Content {
-                parts: vec![Part { text: final_prompt }],
-            }],
-        };
+        debug!("--> Prompt to AI Provider: {}", &final_prompt);
 
-        let response = self
-            .gemini_client
-            .post(&self.gemini_url)
-            .query(&[("key", &self.gemini_api_key)])
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(PromptError::GeminiRequest)?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(PromptError::GeminiApi(error_text));
-        }
-
-        let gemini_response: GeminiResponse = response
-            .json()
-            .await
-            .map_err(PromptError::GeminiDeserialization)?;
-
-        let raw_response = gemini_response
-            .candidates
-            .first()
-            .and_then(|c| c.content.parts.first())
-            .map(|p| p.text.clone())
-            .unwrap_or_default();
+        let raw_response = self.ai_provider.generate_sql(&final_prompt).await?;
 
         debug!("<-- SQL from Gemini: {}", &raw_response);
 
         // Regex to extract SQL from markdown code blocks.
+        // Regex to extract SQL from markdown code blocks, which many models use.
         let re = Regex::new(r"```(?:sql\n)?([\s\S]*?)```")?;
         let mut sql_query = re
             .captures(&raw_response)
@@ -153,66 +123,39 @@ impl PromptClient {
         }
     }
 
+    /// Formats the raw query result using the AI provider if an instruction is given.
     async fn format_response(
         &self,
         content: &str,
         prompt: &str,
         instruction: Option<&str>,
     ) -> Result<String, PromptError> {
-        info!("[format_response] received instruction: {instruction:?}");
-        if instruction.is_none() {
-            return Ok(content.to_string());
-        }
-
-        let output_instruction = instruction.unwrap_or("Answer the prompt from the #INPUT data.");
-
-        let final_prompt = format!(
-            r##"You are a dynamic parser. Your sole purpose is to parse the DATA based on the PROMPT and INSTRUCTION instructions. Do not add any explanations, apologies, or extra text.
-
-# INSTRUCTION:
-{output_instruction}
-
-# PROMPT (we use this for query and get belowed data):
-{prompt}
-
-# DATA (query from database from the prompt):
-{content}
-"##
-        );
-
-        debug!("--> Prompt to Gemini for formatting: {}", &final_prompt);
-        let request_body = GeminiRequest {
-            contents: vec![Content {
-                parts: vec![Part { text: final_prompt }],
-            }],
+        let instruction = match instruction {
+            Some(inst) => inst,
+            None => return Ok(content.to_string()),
         };
 
-        let response = self
-            .gemini_client
-            .post(&self.gemini_url)
-            .query(&[("key", &self.gemini_api_key)])
-            .json(&request_body)
-            .send()
-            .await
-            .map_err(PromptError::GeminiRequest)?;
+        info!("[format_response] received instruction: {instruction:?}");
 
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(PromptError::GeminiApi(error_text));
-        }
+        let final_prompt = format!(
+            r##"You are a data formatting engine. Your sole purpose is to transform the #INPUT data based on the #PROMPT and #OUTPUT instructions. Do not add any explanations, apologies, or extra text.
 
-        let gemini_response: GeminiResponse = response
-            .json()
-            .await
-            .map_err(PromptError::GeminiDeserialization)?;
+# PROMPT:
+{prompt}
 
-        let raw_response = gemini_response
-            .candidates
-            .first()
-            .and_then(|c| c.content.parts.first())
-            .map(|p| p.text.clone())
-            .unwrap_or_default();
+# OUTPUT:
+{instruction}
 
-        Ok(raw_response)
+# INPUT:
+{content}
+"##,
+        );
+
+        debug!(
+            "--> Prompt to AI Provider for formatting: {}",
+            &final_prompt
+        );
+
+        self.ai_provider.generate_sql(&final_prompt).await
     }
 }

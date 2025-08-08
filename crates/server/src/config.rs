@@ -29,8 +29,9 @@ impl std::error::Error for ConfigError {}
 /// This configuration is loaded from environment variables.
 #[derive(Debug)]
 pub struct Config {
-    pub gemini_api_url: String,
-    pub gemini_api_key: String,
+    pub ai_provider: String,
+    pub ai_api_url: String,
+    pub ai_api_key: Option<String>,
     pub project_id: String,
     pub port: u16,
 }
@@ -40,14 +41,15 @@ pub struct Config {
 /// Returns a `Result` containing the `Config` struct on success,
 /// or a `ConfigError` if a required variable is missing or invalid.
 pub fn get_config() -> Result<Config, ConfigError> {
-    let gemini_api_key = env::var("GEMINI_API_KEY")
-        .map_err(|_| ConfigError::Missing("GEMINI_API_KEY".to_string()))?;
+    let ai_provider = env::var("AI_PROVIDER").unwrap_or_else(|_| "gemini".to_string());
+
+    let ai_api_url =
+        env::var("AI_API_URL").map_err(|_| ConfigError::Missing("AI_API_URL".to_string()))?;
+
+    let ai_api_key = env::var("AI_API_KEY").ok();
 
     let project_id = env::var("BIGQUERY_PROJECT_ID")
         .map_err(|_| ConfigError::Missing("BIGQUERY_PROJECT_ID".to_string()))?;
-
-    let gemini_api_url = env::var("GEMINI_API_URL")
-        .unwrap_or_else(|_| "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent".to_string());
 
     let port = match env::var("PORT") {
         Ok(val) => val
@@ -57,8 +59,9 @@ pub fn get_config() -> Result<Config, ConfigError> {
     };
 
     Ok(Config {
-        gemini_api_url,
-        gemini_api_key,
+        ai_provider,
+        ai_api_url,
+        ai_api_key,
         project_id,
         port,
     })

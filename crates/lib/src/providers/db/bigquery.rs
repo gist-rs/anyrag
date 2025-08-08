@@ -1,4 +1,4 @@
-use crate::{errors::PromptError, providers::storage::Storage};
+use crate::{errors::PromptError, providers::db::storage::Storage};
 use async_trait::async_trait;
 use gcp_bigquery_client::{
     model::{

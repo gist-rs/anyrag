@@ -6,18 +6,18 @@ use thiserror::Error;
 pub enum PromptError {
     #[error("Failed to build Reqwest client: {0}")]
     ReqwestClientBuild(reqwest::Error),
-    #[error("Failed to send request to Gemini API: {0}")]
-    GeminiRequest(reqwest::Error),
-    #[error("Failed to deserialize Gemini API response: {0}")]
-    GeminiDeserialization(reqwest::Error),
-    #[error("Gemini API returned an error: {0}")]
-    GeminiApi(String),
+    #[error("Failed to send request to the AI provider: {0}")]
+    AiRequest(reqwest::Error),
+    #[error("Failed to deserialize AI provider response: {0}")]
+    AiDeserialization(reqwest::Error),
+    #[error("AI provider returned an error: {0}")]
+    AiApi(String),
     #[error("Storage provider connection error: {0}")]
     StorageConnection(String),
     #[error("Storage query execution failed: {0}")]
     StorageQueryFailed(String),
-    #[error("API key is missing")]
-    MissingApiKey,
+    #[error("AI provider is missing")]
+    MissingAiProvider,
     #[error("Storage provider is missing")]
     MissingStorageProvider,
     #[error("Regex error: {0}")]

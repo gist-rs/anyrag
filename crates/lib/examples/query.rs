@@ -1,4 +1,7 @@
-use anyquery::PromptClientBuilder;
+use anyquery::{
+    providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
+    PromptClientBuilder,
+};
 use dotenvy::dotenv;
 use std::env;
 
@@ -18,14 +21,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let table_name = args.get(2).map(|s| s.as_str());
     let instruction = args.get(3).map(|s| s.as_str());
     let answer_key = args.get(4).map(|s| s.as_str());
-    let api_url = env::var("GEMINI_API_URL").expect("GEMINI_API_URL environment variable not set");
-    let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY environment variable not set");
+    let ai_provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "gemini".to_string());
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL environment variable not set");
+    let api_key = env::var("AI_API_KEY").ok();
     let project_id =
         env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID environment variable not set");
 
+    let ai_provider = match ai_provider_name.as_str() {
+        "gemini" => {
+            let key = api_key.expect("AI_API_KEY is required for gemini provider");
+            Box::new(GeminiProvider::new(api_url, key)?)
+                as Box<dyn anyquery::providers::ai::AiProvider>
+        }
+        "local" => Box::new(LocalAiProvider::new(api_url, api_key)?)
+            as Box<dyn anyquery::providers::ai::AiProvider>,
+        _ => return Err(format!("Unsupported AI provider: {ai_provider_name}").into()),
+    };
+
     let client = PromptClientBuilder::new()
-        .gemini_url(api_url)
-        .gemini_api_key(api_key)
+        .ai_provider(ai_provider)
         .bigquery_storage(project_id)
         .await?
         .build()?;

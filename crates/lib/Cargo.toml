@@ -21,3 +21,4 @@ dyn-clone = { workspace = true }
 
 [dev-dependencies]
 dotenvy = "0.15.7"
+tracing-subscriber = { workspace = true }

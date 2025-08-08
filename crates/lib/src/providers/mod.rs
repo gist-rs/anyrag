@@ -1,2 +1,2 @@
-pub mod bigquery;
-pub mod storage;
+pub mod ai;
+pub mod db;
