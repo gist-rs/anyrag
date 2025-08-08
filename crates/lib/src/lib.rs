@@ -80,7 +80,9 @@ impl PromptClient {
                 "Follow these rules to create production-grade SQL:\n\
                 1. For questions about \"who\", \"what\", or \"list\", use DISTINCT to avoid duplicate results.\n\
                 2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).\n\
-                3. For date filtering, prefer using `EXTRACT(YEAR FROM your_column)` over functions like `FORMAT_TIMESTAMP`.\n\n\
+                3. For date filtering, prefer using `EXTRACT(YEAR FROM your_column)` over functions like `FORMAT_TIMESTAMP`.\n\
+                4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).\n\
+                5. If a Japanese name includes an honorific like \"さん\", remove the honorific before using the name in the query.\n\n\
                 {alias_instruction}\n\n\
                 Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.\n\n\
                 # Context\n{context}\n\n# User question\n{prompt}",
