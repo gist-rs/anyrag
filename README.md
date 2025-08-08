@@ -119,7 +119,7 @@ A `Dockerfile` is provided in the `crates/server` directory to build a container
       -p 8080:8080 \
       -e GEMINI_API_KEY="your_gemini_api_key" \
       -e BIGQUERY_PROJECT_ID="your-gcp-project-id" \
-      --name bq-tools-server \
+      --name anyrag-server \
       anyrag-server
     ```
     The server will be accessible at `http://localhost:8080`. You can use the `/health` endpoint to check if it's running.
