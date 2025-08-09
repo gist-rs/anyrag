@@ -5,23 +5,18 @@
 //! **Note:** These tests require a valid AI provider API key and a BigQuery project with appropriate permissions.
 //! You should set the `AI_API_URL`, `AI_API_KEY`, and `BIGQUERY_PROJECT_ID` environment variables before running the tests.
 
+// This declaration makes the `common` module available to the tests in this file.
+mod common;
+
+use crate::common::setup_tracing;
 use anyrag::{
-    providers::ai::gemini::GeminiProvider, ExecutePromptOptions, PromptClientBuilder, PromptError,
+    providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
+    ExecutePromptOptions, PromptClientBuilder, PromptError,
 };
-use dotenvy::dotenv;
+use httpmock::prelude::*;
+use serde_json::json;
 use std::env;
-use std::sync::Once;
 use tracing::debug;
-
-static INIT: Once = Once::new();
-
-/// Initializes the tracing subscriber for tests.
-fn setup_tracing() {
-    INIT.call_once(|| {
-        dotenv().ok();
-        tracing_subscriber::fmt::init();
-    });
-}
 
 /// Tests the successful execution of a valid prompt.
 #[tokio::test]
@@ -151,8 +146,6 @@ async fn test_execute_prompt_with_formatting() {
     assert!(result.is_ok());
     let output = result.unwrap();
 
-    println!("{output}");
-
     // The alias is chosen by the model, so we check that the raw key isn't present
     // and that the expected formatted number is.
     assert!(!output.contains("f0_"));
@@ -238,4 +231,67 @@ async fn test_execute_with_custom_format_prompt() {
     // Check for the original number and the winky face.
     assert!(output.contains("27,894"));
     assert!(output.contains(";)"));
+}
+
+/// Tests the query generation step with the LocalAiProvider using a mock server.
+/// This test isolates the AI provider interaction from the storage provider.
+#[tokio::test]
+async fn test_get_query_from_prompt_local_provider() {
+    setup_tracing();
+
+    // 1. Setup Mock Server
+    let server = MockServer::start();
+    let mock_model = "test-model";
+
+    // 2. Define the mock response from the AI.
+    let mock_response_body = json!({
+        "choices": [{
+            "message": {
+                "role": "assistant",
+                "content": "```sql\nSELECT * FROM mock_table;\n```"
+            }
+        }]
+    });
+
+    // 3. Configure the mock server.
+    // We only care that it receives a POST to the correct path. We don't
+    // check the body, which makes the test less brittle to prompt changes.
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/v1/chat/completions");
+        then.status(200)
+            .header("content-type", "application/json")
+            .json_body(mock_response_body);
+    });
+
+    // 4. Setup Client with LocalAiProvider pointing to the mock server.
+    let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
+    let api_url = server.url("/v1/chat/completions");
+    let ai_provider =
+        Box::new(LocalAiProvider::new(api_url, None, Some(mock_model.to_string())).unwrap());
+
+    let client = PromptClientBuilder::default()
+        .ai_provider(ai_provider)
+        .bigquery_storage(project_id)
+        .await
+        .unwrap()
+        .build()
+        .unwrap();
+
+    // 5. Execute the prompt.
+    // Note: This uses a real BigQuery connection to get the schema for context,
+    // but the actual AI call to generate the query is mocked.
+    let options = ExecutePromptOptions {
+        prompt: "This prompt will be sent to the mock AI".to_string(),
+        table_name: Some("bigquery-public-data.samples.shakespeare".to_string()),
+        ..Default::default()
+    };
+
+    // We call `get_query_from_prompt` directly to test only the query generation part.
+    let query_result = client.get_query_from_prompt(&options).await;
+
+    // 6. Assertions
+    mock.assert(); // Verify the mock server was called exactly once.
+    assert!(query_result.is_ok());
+    let query = query_result.unwrap();
+    assert_eq!(query, "SELECT * FROM mock_table;");
 }

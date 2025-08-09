@@ -21,4 +21,5 @@ dyn-clone = { workspace = true }
 
 [dev-dependencies]
 dotenvy = "0.15.7"
+httpmock = "0.7.0"
 tracing-subscriber = { workspace = true }

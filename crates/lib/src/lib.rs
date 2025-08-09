@@ -93,7 +93,8 @@ impl PromptClient {
     }
 
     /// Converts a natural language prompt to a query using the configured AI provider.
-    async fn get_query_from_prompt(
+    /// This is public to allow for testing the query generation step in isolation.
+    pub async fn get_query_from_prompt(
         &self,
         options: &ExecutePromptOptions,
     ) -> Result<String, PromptError> {
