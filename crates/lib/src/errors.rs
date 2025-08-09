@@ -14,8 +14,8 @@ pub enum PromptError {
     AiApi(String),
     #[error("Storage provider connection error: {0}")]
     StorageConnection(String),
-    #[error("Storage query execution failed: {0}")]
-    StorageQueryFailed(String),
+    #[error("Storage operation failed: {0}")]
+    StorageOperationFailed(String),
     #[error("AI provider is missing")]
     MissingAiProvider,
     #[error("Storage provider is missing")]
@@ -28,6 +28,6 @@ pub enum PromptError {
 
 impl From<BQError> for PromptError {
     fn from(err: BQError) -> Self {
-        PromptError::StorageQueryFailed(err.to_string())
+        PromptError::StorageOperationFailed(err.to_string())
     }
 }

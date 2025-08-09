@@ -1,14 +1,17 @@
 //! # Integration Tests
 //!
-//! This file contains integration tests for the `natural_language_to_sql` crate.
+//! This file contains integration tests for the `anyrag` crate.
 //!
-//! **Note:** These tests require a valid Gemini API key and a BigQuery project with appropriate permissions.
-//! You should set the `GEMINI_API_URL`, `GEMINI_API_KEY` and `BIGQUERY_PROJECT_ID` environment variables before running the tests.
+//! **Note:** These tests require a valid AI provider API key and a BigQuery project with appropriate permissions.
+//! You should set the `AI_API_URL`, `AI_API_KEY`, and `BIGQUERY_PROJECT_ID` environment variables before running the tests.
 
-use anyrag::{providers::ai::gemini::GeminiProvider, PromptClientBuilder, PromptError};
+use anyrag::{
+    providers::ai::gemini::GeminiProvider, ExecutePromptOptions, PromptClientBuilder, PromptError,
+};
 use dotenvy::dotenv;
 use std::env;
 use std::sync::Once;
+use tracing::debug;
 
 static INIT: Once = Once::new();
 
@@ -37,15 +40,13 @@ async fn test_execute_prompt_success() {
         .unwrap();
 
     // This prompt assumes you have a public dataset like `bigquery-public-data.samples.shakespeare`
-    let prompt = "Count the number of distinct corpus in the shakespeare dataset";
-    let result = client
-        .execute_prompt(
-            prompt,
-            Some("bigquery-public-data.samples.shakespeare"),
-            None,
-            None,
-        )
-        .await;
+    let options = ExecutePromptOptions {
+        prompt: "Count the number of distinct corpus in the shakespeare dataset".to_string(),
+        table_name: Some("bigquery-public-data.samples.shakespeare".to_string()),
+        ..Default::default()
+    };
+
+    let result = client.execute_prompt_with_options(options).await;
 
     if let Err(e) = &result {
         eprintln!("Error in test_execute_prompt_success: {e}");
@@ -55,9 +56,9 @@ async fn test_execute_prompt_success() {
     assert!(!output.is_empty());
 }
 
-/// Tests the handling of an invalid prompt that doesn't generate a valid SQL query.
+/// Tests the handling of an invalid prompt that doesn't generate a valid query.
 #[tokio::test]
-async fn test_execute_prompt_invalid_sql() {
+async fn test_execute_prompt_invalid_query() {
     setup_tracing();
     let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
     let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
@@ -71,13 +72,16 @@ async fn test_execute_prompt_invalid_sql() {
         .build()
         .unwrap();
 
-    let prompt = "this is not a valid query";
-    let result = client.execute_prompt(prompt, None, None, None).await;
+    let options = ExecutePromptOptions {
+        prompt: "this is not a valid query".to_string(),
+        ..Default::default()
+    };
+    let result = client.execute_prompt_with_options(options).await;
 
     assert!(result.is_ok());
     assert_eq!(
         result.unwrap(),
-        "The prompt did not result in a valid SQL query."
+        "The prompt did not result in a valid query."
     );
 }
 
@@ -120,7 +124,6 @@ async fn test_builder_missing_storage_provider() {
 #[tokio::test]
 async fn test_execute_prompt_with_formatting() {
     setup_tracing();
-    dotenv().ok();
     let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
     let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
@@ -133,12 +136,14 @@ async fn test_execute_prompt_with_formatting() {
         .build()
         .unwrap();
 
-    let prompt = "What is the total word_count for the corpus 'kinghenryv'?";
-    let table_name = "bigquery-public-data.samples.shakespeare";
-    let instruction = "Answer with only the number with thousand format.";
-    let result = client
-        .execute_prompt(prompt, Some(table_name), Some(instruction), None)
-        .await;
+    let options = ExecutePromptOptions {
+        prompt: "What is the total word_count for the corpus 'kinghenryv'?".to_string(),
+        table_name: Some("bigquery-public-data.samples.shakespeare".to_string()),
+        instruction: Some("Answer with only the number with thousand format.".to_string()),
+        ..Default::default()
+    };
+
+    let result = client.execute_prompt_with_options(options).await;
 
     if let Err(e) = &result {
         eprintln!("Error in test_execute_prompt_with_formatting: {e}");
@@ -148,6 +153,89 @@ async fn test_execute_prompt_with_formatting() {
 
     println!("{output}");
 
-    assert!(!output.contains("f0_")); // Should not contain the raw JSON key
+    // The alias is chosen by the model, so we check that the raw key isn't present
+    // and that the expected formatted number is.
+    assert!(!output.contains("f0_"));
     assert!(output.contains("27,894"));
+}
+
+/// Tests using a custom system prompt for query generation.
+#[tokio::test]
+async fn test_execute_with_custom_query_prompt() {
+    setup_tracing();
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
+    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
+    let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
+
+    let client = PromptClientBuilder::default()
+        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .bigquery_storage(project_id)
+        .await
+        .unwrap()
+        .build()
+        .unwrap();
+
+    // This prompt forces the AI to act as a translator, not a SQL expert.
+    // The expected output is the Japanese translation of the prompt.
+    let options = ExecutePromptOptions {
+        prompt: "hello".to_string(),
+        system_prompt_template: Some("You are a translator from English to Japanese.".to_string()),
+        ..Default::default()
+    };
+
+    let result = client.execute_prompt_with_options(options).await;
+
+    if let Err(e) = &result {
+        eprintln!("Error in test_execute_with_custom_query_prompt: {e}");
+    }
+    assert!(result.is_ok());
+    let output = result.unwrap();
+
+    // The model should translate "hello" to "こんにちは".
+    assert!(output.contains("こんにちは"));
+}
+
+/// Tests using a custom system prompt for the final response formatting.
+#[tokio::test]
+async fn test_execute_with_custom_format_prompt() {
+    setup_tracing();
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
+    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
+    let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
+
+    let client = PromptClientBuilder::default()
+        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .bigquery_storage(project_id)
+        .await
+        .unwrap()
+        .build()
+        .unwrap();
+
+    // This prompt asks a regular question but has a custom formatting instruction
+    // that forces the model to add a winky face to its response.
+    let options = ExecutePromptOptions {
+        prompt: "What is the total word_count for the corpus 'kinghenryv'?".to_string(),
+        table_name: Some("bigquery-public-data.samples.shakespeare".to_string()),
+        instruction: Some(
+            "Answer with a natural sentence and the number with thousand format.".to_string(),
+        ),
+        format_system_prompt_template: Some(
+            "You are a friendly assistant who always ends every single response with a winky face ;)".to_string(),
+        ),
+        ..Default::default()
+    };
+
+    let result = client.execute_prompt_with_options(options).await;
+
+    if let Err(e) = &result {
+        eprintln!("Error in test_execute_with_custom_format_prompt: {e}");
+    }
+    assert!(result.is_ok());
+    let output = result.unwrap();
+
+    debug!("output 👉 {output}");
+
+    // Check for the original number and the winky face.
+    assert!(output.contains("27,894"));
+    assert!(output.contains(";)"));
 }

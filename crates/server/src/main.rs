@@ -11,7 +11,8 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use serde_json::Value;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -24,15 +25,6 @@ use tracing_subscriber::FmtSubscriber;
 #[derive(Clone)]
 struct AppState {
     prompt_client: Arc<PromptClient>,
-}
-
-/// The request body for the `/prompt` endpoint.
-#[derive(Deserialize)]
-struct PromptRequest {
-    prompt: String,
-    table_name: Option<String>,
-    instruction: Option<String>,
-    answer_key: Option<String>,
 }
 
 /// The response body for the `/prompt` endpoint.
@@ -53,22 +45,17 @@ async fn health_check() -> &'static str {
 
 /// The handler for the `/prompt` endpoint.
 ///
-/// This function takes a prompt and an optional table name, uses the `PromptClient`
-/// to execute it, and returns the result.
+/// This function takes a flexible JSON payload, passes it to the `PromptClient`,
+/// and returns the result.
 async fn prompt_handler(
     State(app_state): State<AppState>,
-    Json(payload): Json<PromptRequest>,
+    Json(payload): Json<Value>,
 ) -> Result<Json<PromptResponse>, AppError> {
-    info!("Received prompt: '{}'", payload.prompt);
+    info!("Received prompt payload: {:?}", payload);
 
     let result = app_state
         .prompt_client
-        .execute_prompt(
-            &payload.prompt,
-            payload.table_name.as_deref(),
-            payload.instruction.as_deref(),
-            payload.answer_key.as_deref(),
-        )
+        .execute_prompt_from_value(payload)
         .await?;
 
     Ok(Json(PromptResponse { result }))

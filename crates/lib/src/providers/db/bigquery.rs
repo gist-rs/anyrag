@@ -29,7 +29,7 @@ impl BigQueryProvider {
     pub async fn new(project_id: String) -> Result<Self, PromptError> {
         let client = Client::from_application_default_credentials()
             .await
-            .map_err(|e| PromptError::StorageQueryFailed(e.to_string()))?;
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
         Ok(Self {
             client,
             project_id,
@@ -52,21 +52,25 @@ impl Storage for BigQueryProvider {
         "BigQuery"
     }
 
-    /// Executes a SQL query on BigQuery and returns the result as a JSON string.
-    async fn execute_sql(&self, sql_query: &str) -> Result<String, PromptError> {
-        debug!(sql = %sql_query, "--> Executing BigQuery SQL");
+    fn language(&self) -> &str {
+        "SQL"
+    }
+
+    /// Executes a query on BigQuery and returns the result as a JSON string.
+    async fn execute_query(&self, query: &str) -> Result<String, PromptError> {
+        debug!(query = %query, "--> Executing BigQuery query");
         let response = self
             .client
             .job()
             .query(
                 &self.project_id,
                 QueryRequest {
-                    query: sql_query.to_string(),
+                    query: query.to_string(),
                     ..Default::default()
                 },
             )
             .await
-            .map_err(|e| PromptError::StorageQueryFailed(e.to_string()))?;
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
 
         let mut results = ResultSet::new_from_query_response(response);
         let mut json_results: Vec<Value> = Vec::new();
@@ -96,7 +100,7 @@ impl Storage for BigQueryProvider {
 
         let parts: Vec<&str> = table_name.split('.').collect();
         if parts.len() != 3 {
-            return Err(PromptError::StorageQueryFailed(format!(
+            return Err(PromptError::StorageOperationFailed(format!(
                 "Invalid table name format for BigQuery: {table_name}. Expected format: project.dataset.table"
             )));
         }
@@ -109,7 +113,7 @@ impl Storage for BigQueryProvider {
             .table()
             .get(project_id, dataset_id, table_id, None)
             .await
-            .map_err(|e| PromptError::StorageQueryFailed(e.to_string()))?;
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
 
         let schema = table.schema;
         let schema_arc = Arc::new(schema);

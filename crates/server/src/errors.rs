@@ -58,9 +58,9 @@ impl IntoResponse for AppError {
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Storage provider connection error: {e}"),
                     ),
-                    PromptError::StorageQueryFailed(e) => (
+                    PromptError::StorageOperationFailed(e) => (
                         StatusCode::BAD_REQUEST,
-                        format!("Storage query execution failed: {e}"),
+                        format!("Storage operation failed: {e}"),
                     ),
                     PromptError::Regex(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,

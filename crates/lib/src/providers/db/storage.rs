@@ -14,10 +14,13 @@ pub trait Storage: Send + Sync + DynClone + Debug {
     /// Returns the name of the storage provider (e.g., "BigQuery", "SQLite").
     fn name(&self) -> &str;
 
-    /// Executes a SQL query against the storage provider.
+    /// Returns the query language used by the storage provider (e.g., "SQL").
+    fn language(&self) -> &str;
+
+    /// Executes a query against the storage provider.
     ///
     /// The result should be a JSON formatted string.
-    async fn execute_sql(&self, sql: &str) -> Result<String, PromptError>;
+    async fn execute_query(&self, query: &str) -> Result<String, PromptError>;
 
     /// Retrieves the schema for a given table.
     async fn get_table_schema(&self, table_name: &str) -> Result<Arc<TableSchema>, PromptError>;
