@@ -4,12 +4,17 @@
 //! (e.g., SQL) using a configurable AI provider and execute them against a storage provider.
 
 pub mod errors;
+pub mod prompts;
 pub mod providers;
 pub mod types;
 
 pub use errors::PromptError;
 pub use types::{ExecutePromptOptions, PromptClient, PromptClientBuilder};
 
+use crate::prompts::{
+    DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT, DEFAULT_QUERY_SYSTEM_PROMPT,
+    DEFAULT_QUERY_USER_PROMPT,
+};
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use regex::Regex;
 use serde_json::Value;
@@ -31,7 +36,7 @@ impl PromptClient {
         options: ExecutePromptOptions,
     ) -> Result<String, PromptError> {
         // If a custom system prompt for the main task is provided, switch to generic mode.
-        if let Some(system_prompt) = options.system_prompt_template {
+        if let Some(system_prompt) = options.system_prompt_template.clone() {
             info!("[execute_prompt] Generic mode: custom system prompt provided.");
             // In this mode, we just send the prompts to the AI and return the response directly.
             let user_prompt = &options.prompt;
@@ -113,11 +118,11 @@ impl PromptClient {
         };
 
         // This is the default system prompt for query generation.
-        let system_prompt = format!(
-            "You are a {language} expert for {db_name}. Write a readonly {language} query that answers the user's question. Expected output is a single {language} query only.",
-            language = language,
-            db_name = self.storage_provider.name()
-        );
+        let system_prompt = options.system_prompt_template.clone().unwrap_or_else(|| {
+            DEFAULT_QUERY_SYSTEM_PROMPT
+                .replace("{language}", language)
+                .replace("{db_name}", self.storage_provider.name())
+        });
 
         let user_prompt = if let Some(template) = &options.user_prompt_template {
             template
@@ -126,18 +131,7 @@ impl PromptClient {
                 .replace("{prompt}", &options.prompt)
                 .replace("{alias_instruction}", &alias_instruction)
         } else if !context.is_empty() {
-            let default_user_template = "Follow these rules to create production-grade {language}:\n\
-                1. For questions about \"who\", \"what\", or \"list\", use DISTINCT to avoid duplicate results.\n\
-                2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).\n\
-                3. For date filtering, prefer using `EXTRACT(YEAR FROM your_column)` over functions like `FORMAT_TIMESTAMP`.\n\
-                4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).\n\
-                5. If a Japanese name includes an honorific like \"さん\", remove the honorific before using the name in the query.\n\
-                6. For keyword searches (e.g., 'Python'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.\n\n\
-                {alias_instruction}\n\n\
-                Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.\n\n\
-                # Context\n{context}\n\n# User question\n{prompt}";
-
-            default_user_template
+            DEFAULT_QUERY_USER_PROMPT
                 .replace("{language}", language)
                 .replace("{context}", &context)
                 .replace("{prompt}", &options.prompt)
@@ -212,27 +206,18 @@ impl PromptClient {
         let system_prompt = options
             .format_system_prompt_template
             .clone()
-            .unwrap_or_else(|| {
-                "You are a helpful AI assistant. Your purpose is to answer the user's #PROMPT based on the provided #INPUT data, following the #OUTPUT instructions. If the user's question can be answered with a 'yes' or asks for a list, you must first provide a count and then list the items in a bulleted format. For example: 'Yes, there are 3 Python classes:\\n- Class A\\n- Class B\\n- Class C'. Do not add any explanations or text that is not directly derived from the input data.".to_string()
-            });
+            .unwrap_or_else(|| DEFAULT_FORMAT_SYSTEM_PROMPT.to_string());
+
         let user_prompt = if let Some(template) = &options.format_user_prompt_template {
             template
                 .replace("{prompt}", &options.prompt)
                 .replace("{instruction}", instruction)
                 .replace("{content}", content)
         } else {
-            format!(
-                r##"# PROMPT:
-{}
-
-# OUTPUT:
-{}
-
-# INPUT:
-{}
-"##,
-                options.prompt, instruction, content
-            )
+            DEFAULT_FORMAT_USER_PROMPT
+                .replace("{prompt}", &options.prompt)
+                .replace("{instruction}", instruction)
+                .replace("{content}", content)
         };
 
         debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider for formatting");
