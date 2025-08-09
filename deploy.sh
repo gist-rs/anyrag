@@ -79,6 +79,11 @@ fi
 gcloud config set project "$PROJECT_ID"
 info "gcloud project set to '$PROJECT_ID'."
 
+# Enable cache https://github.com/GoogleContainerTools/kaniko
+gcloud config set run/platform managed
+gcloud config set builds/use_kaniko True
+gcloud config set builds/kaniko_cache_ttl 24
+
 info "Step 2: Enabling required Google Cloud services..."
 gcloud services enable \
   run.googleapis.com \
