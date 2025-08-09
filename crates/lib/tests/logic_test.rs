@@ -79,7 +79,6 @@ async fn test_today_in_context_and_direct_answer_handling() {
     let parsed_date = DateTime::parse_from_rfc2822(date_line.trim());
     assert!(
         parsed_date.is_ok(),
-        "The date string '{}' in the context should be a valid RFC 2822 datetime",
-        date_line
+        "The date string '{date_line}' in the context should be a valid RFC 2822 datetime"
     );
 }
