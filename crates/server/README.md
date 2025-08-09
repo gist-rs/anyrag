@@ -28,6 +28,24 @@ The service account or user running the application needs the following IAM role
 
 You can grant these roles using the `gcloud` CLI.
 
+## Environment Variable Configuration
+
+The server is configured using environment variables. For local development, you can create a `.env` file in this directory. For Docker, you can use an `--env-file` or pass variables with the `-e` flag.
+
+### Core Configuration
+-   `AI_API_KEY`: **(Required)** Your API key for the selected AI Provider.
+-   `BIGQUERY_PROJECT_ID`: **(Required)** The ID of your Google Cloud project.
+-   `AI_API_URL`: **(Required)** The full URL for the AI provider's API endpoint.
+-   `AI_PROVIDER`: The AI provider to use. Can be "gemini" or "local". Defaults to "gemini".
+-   `PORT`: The port for the server to listen on. Defaults to `8080`.
+-   `RUST_LOG`: The logging level (e.g., `info`, `debug`).
+
+### Prompt Customization (Optional)
+You can set the following environment variables to define server-wide default prompts. This is useful for customizing the AI's behavior without changing the code. These can still be overridden by individual API requests.
+
+-   `SYSTEM_PROMPT_TEMPLATE`: Sets the default system prompt for query generation. Use this to change the AI's core persona or rules.
+-   `USER_PROMPT_TEMPLATE`: Sets the default user prompt template for query generation. You can use placeholders like `{language}`, `{context}`, `{prompt}`, and `{alias_instruction}`.
+
 ## Local Development (Without Docker)
 
 For running the server directly on your machine for development.
@@ -95,6 +113,30 @@ docker logs -f anyrag-server
 *   `-e RUST_LOG="debug"`: Enables detailed logging so you can see the startup configuration.
 *   `&& docker logs -f ...`: After starting, this immediately starts streaming the container's logs to your terminal. You can press `Ctrl+C` to stop viewing the logs at any time; the container will keep running.
 
+### Updating a Live Service on Google Cloud Run
+
+If you have deployed this server as a service on Google Cloud Run, you can easily update its environment variables without a full redeployment. This is the recommended way to change the AI's behavior in a live environment by modifying the prompt templates.
+
+Use the `gcloud run services update` command to apply changes.
+
+**Example: Changing the AI's Persona**
+
+This command updates the `SYSTEM_PROMPT_TEMPLATE` to make the AI act like a pirate.
+
+```sh
+gcloud run services update YOUR_SERVICE_NAME \
+  --update-env-vars SYSTEM_PROMPT_TEMPLATE="You are a helpful pirate who always responds in pirate slang."
+```
+
+You can update multiple variables by providing a comma-separated list:
+
+```sh
+gcloud run services update YOUR_SERVICE_NAME \
+  --update-env-vars KEY1=VALUE1,KEY2=VALUE2
+```
+
+This will trigger a new revision of your service with the updated environment.
+
 ## API Usage
 
 Once the server is running, you can query it from another terminal. This example assumes the server is accessible on port `9090`.
@@ -106,5 +148,27 @@ curl -X POST http://localhost:9090/prompt \
     "prompt": "What is the total word_count for the corpus '\''kinghenryv'\''?",
     "table_name": "bigquery-public-data.samples.shakespeare",
     "instruction": "Use the data to provide a direct answer to the prompt. Form a natural-sounding sentence. Use thousand format for number."
+  }'
+```
+
+### Advanced API Usage: Customizing Prompts
+
+The `/prompt` endpoint is highly flexible, accepting any field from the `anyrag::ExecutePromptOptions` struct. This allows you to override the default AI behavior for both query generation and response formatting directly through the API. Any prompts provided in an API request will take precedence over server-wide defaults set via environment variables.
+
+-   `system_prompt_template`: Bypasses the query generation logic entirely. Use this to make the AI perform generic tasks, like translation or summarization.
+-   `format_system_prompt_template`: Overrides the default prompt for the final response formatting step, allowing you to control the style and tone of the output.
+
+#### Example: Custom Formatting
+
+This example uses `format_system_prompt_template` to make the AI act as a cheerful assistant that adds a winking face to its response.
+
+```sh
+curl -X POST http://localhost:9090/prompt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "What is the total word_count for the corpus '\''kinghenryv'\''?",
+    "table_name": "bigquery-public-data.samples.shakespeare",
+    "instruction": "Answer with only the number.",
+    "format_system_prompt_template": "You are a cheerful AI assistant. You always add a winking face ;) at the end of your response."
   }'
 ```

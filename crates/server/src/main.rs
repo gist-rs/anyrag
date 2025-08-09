@@ -4,7 +4,7 @@ mod errors;
 use crate::{config::get_config, errors::AppError};
 use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
-    PromptClient, PromptClientBuilder,
+    ExecutePromptOptions, PromptClient, PromptClientBuilder,
 };
 use axum::{
     extract::State,
@@ -21,10 +21,13 @@ use tracing_subscriber::FmtSubscriber;
 
 /// The shared application state.
 ///
-/// This struct holds the `PromptClient` which is shared across all handlers.
+/// This struct holds the `PromptClient` and default prompt templates
+/// which are shared across all handlers.
 #[derive(Clone)]
 struct AppState {
     prompt_client: Arc<PromptClient>,
+    system_prompt_template: Option<String>,
+    user_prompt_template: Option<String>,
 }
 
 /// The response body for the `/prompt` endpoint.
@@ -35,7 +38,7 @@ struct PromptResponse {
 
 /// The root handler.
 async fn root() -> &'static str {
-    "BigQuery Tools Server is running."
+    "anyrag server is running."
 }
 
 /// The health check handler.
@@ -45,17 +48,30 @@ async fn health_check() -> &'static str {
 
 /// The handler for the `/prompt` endpoint.
 ///
-/// This function takes a flexible JSON payload, passes it to the `PromptClient`,
-/// and returns the result.
+/// This function takes a flexible JSON payload, combines it with server-side
+/// default prompts (if any), and then executes it.
 async fn prompt_handler(
     State(app_state): State<AppState>,
     Json(payload): Json<Value>,
 ) -> Result<Json<PromptResponse>, AppError> {
-    info!("Received prompt payload: {:?}", payload);
+    info!("Received prompt payload: '{}'", payload);
+
+    let mut options: ExecutePromptOptions =
+        serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
+
+    // If the request doesn't specify a system prompt, use the server's default.
+    if options.system_prompt_template.is_none() {
+        options.system_prompt_template = app_state.system_prompt_template.clone();
+    }
+
+    // If the request doesn't specify a user prompt, use the server's default.
+    if options.user_prompt_template.is_none() {
+        options.user_prompt_template = app_state.user_prompt_template.clone();
+    }
 
     let result = app_state
         .prompt_client
-        .execute_prompt_from_value(payload)
+        .execute_prompt_with_options(options)
         .await?;
 
     Ok(Json(PromptResponse { result }))
@@ -109,6 +125,8 @@ async fn main() -> anyhow::Result<()> {
     // Create the application state
     let app_state = AppState {
         prompt_client: Arc::new(prompt_client),
+        system_prompt_template: config.system_prompt_template,
+        user_prompt_template: config.user_prompt_template,
     };
 
     // Build our application with routes

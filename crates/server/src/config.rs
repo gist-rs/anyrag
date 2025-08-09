@@ -35,6 +35,8 @@ pub struct Config {
     pub ai_model: Option<String>,
     pub project_id: String,
     pub port: u16,
+    pub system_prompt_template: Option<String>,
+    pub user_prompt_template: Option<String>,
 }
 
 /// Loads configuration from environment variables.
@@ -61,6 +63,9 @@ pub fn get_config() -> Result<Config, ConfigError> {
         Err(_) => 8080, // Default port
     };
 
+    let system_prompt_template = env::var("SYSTEM_PROMPT_TEMPLATE").ok();
+    let user_prompt_template = env::var("USER_PROMPT_TEMPLATE").ok();
+
     Ok(Config {
         ai_provider,
         ai_api_url,
@@ -68,5 +73,7 @@ pub fn get_config() -> Result<Config, ConfigError> {
         ai_model,
         project_id,
         port,
+        system_prompt_template,
+        user_prompt_template,
     })
 }
