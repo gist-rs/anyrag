@@ -30,3 +30,7 @@ serde_json = { workspace = true }
 # Other
 dotenvy = "0.15.7"
 anyhow = "1.0.98"
+
+[[test]]
+name = "override_test"
+path = "tests/override_test.rs"
