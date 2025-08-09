@@ -24,12 +24,12 @@ use tracing_subscriber::FmtSubscriber;
 /// This struct holds the `PromptClient` and default prompt templates
 /// which are shared across all handlers.
 #[derive(Clone)]
-struct AppState {
-    prompt_client: Arc<PromptClient>,
-    query_system_prompt_template: Option<String>,
-    query_user_prompt_template: Option<String>,
-    format_system_prompt_template: Option<String>,
-    format_user_prompt_template: Option<String>,
+pub struct AppState {
+    pub prompt_client: Arc<PromptClient>,
+    pub query_system_prompt_template: Option<String>,
+    pub query_user_prompt_template: Option<String>,
+    pub format_system_prompt_template: Option<String>,
+    pub format_user_prompt_template: Option<String>,
 }
 
 /// The response body for the `/prompt` endpoint.
@@ -83,23 +83,10 @@ async fn prompt_handler(
     Ok(Json(PromptResponse { result }))
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Load environment variables from .env file
-    dotenvy::dotenv().ok();
-
-    // Initialize tracing subscriber
-    let subscriber = FmtSubscriber::builder()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .compact()
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-
-    // Get configuration
+pub async fn run(listener: tokio::net::TcpListener) -> anyhow::Result<()> {
     let config = get_config()?;
     debug!(?config, "Server configuration loaded");
 
-    // Build the AI provider based on configuration
     let ai_provider = match config.ai_provider.as_str() {
         "gemini" => {
             let api_key = config
@@ -121,14 +108,12 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Build the PromptClient
     let prompt_client = PromptClientBuilder::new()
         .ai_provider(ai_provider)
         .bigquery_storage(config.project_id)
         .await?
         .build()?;
 
-    // Create the application state
     let app_state = AppState {
         prompt_client: Arc::new(prompt_client),
         query_system_prompt_template: config.query_system_prompt_template,
@@ -137,7 +122,6 @@ async fn main() -> anyhow::Result<()> {
         format_user_prompt_template: config.format_user_prompt_template,
     };
 
-    // Build our application with routes
     let app = Router::new()
         .route("/", get(root))
         .route("/health", get(health_check))
@@ -145,11 +129,94 @@ async fn main() -> anyhow::Result<()> {
         .with_state(app_state)
         .layer(TraceLayer::new_for_http());
 
-    // Run our app with hyper
-    let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
-    info!("listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!("listening on {}", listener.local_addr()?);
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
+
+    let subscriber = FmtSubscriber::builder()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .compact()
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    let config = get_config()?;
+    let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    info!("Server listening on {}", addr);
+    run(listener).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reqwest::Client;
+    use serde_json::json;
+    use tokio::net::TcpListener;
+    use tokio::time::{sleep, Duration};
+
+    async fn spawn_app() -> String {
+        dotenvy::dotenv().ok();
+        let _ = tracing_subscriber::fmt::try_init();
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Failed to bind random port");
+        let port = listener.local_addr().unwrap().port();
+        let address = format!("http://127.0.0.1:{port}");
+
+        tokio::spawn(async move {
+            if let Err(e) = run(listener).await {
+                eprintln!("Server error: {e}");
+            }
+        });
+
+        address
+    }
+
+    #[tokio::test]
+    async fn test_e2e_prompt_execution() {
+        let address = spawn_app().await;
+        sleep(Duration::from_secs(2)).await;
+        let client = Client::new();
+
+        let payload = json!({
+            "prompt": "What is the total word_count for the corpus 'kinghenryv'?",
+            "table_name": "bigquery-public-data.samples.shakespeare",
+            "instruction": "Answer with only the number, with thousand format."
+        });
+
+        let response = client
+            .post(format!("{address}/prompt"))
+            .json(&payload)
+            .send()
+            .await
+            .expect("Failed to execute request.");
+
+        assert!(
+            response.status().is_success(),
+            "Request failed with status: {}",
+            response.status()
+        );
+
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .expect("Failed to parse response JSON");
+
+        let result = body["result"]
+            .as_str()
+            .expect("Result field is not a string");
+
+        println!("E2E Test Response from server: '{result}'");
+        assert!(
+            result.contains("27,894"),
+            "Response did not contain the expected result."
+        );
+    }
 }

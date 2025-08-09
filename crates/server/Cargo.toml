@@ -31,6 +31,8 @@ serde_json = { workspace = true }
 dotenvy = "0.15.7"
 anyhow = "1.0.98"
 
-[[test]]
-name = "override_test"
-path = "tests/override_test.rs"
+[dev-dependencies]
+async-trait = { workspace = true }
+dyn-clone = { workspace = true }
+gcp-bigquery-client = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }

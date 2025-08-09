@@ -1,0 +1,271 @@
+use anyrag::{
+    providers::ai::AiProvider, providers::db::storage::Storage, ExecutePromptOptions, PromptClient,
+    PromptClientBuilder,
+};
+use async_trait::async_trait;
+
+use gcp_bigquery_client::model::table_schema::TableSchema;
+use std::fmt::Debug;
+use std::sync::{Arc, RwLock};
+use tokio;
+
+// --- Mock AI Provider for Testing ---
+#[derive(Clone, Debug)]
+struct MockAiProvider {
+    call_history: Arc<RwLock<Vec<(String, String)>>>,
+    responses: Arc<RwLock<Vec<String>>>,
+}
+
+impl MockAiProvider {
+    fn new(responses: Vec<String>) -> Self {
+        Self {
+            call_history: Arc::new(RwLock::new(Vec::new())),
+            responses: Arc::new(RwLock::new(responses.into_iter().rev().collect())),
+        }
+    }
+}
+
+#[async_trait]
+impl AiProvider for MockAiProvider {
+    async fn generate(
+        &self,
+        system_prompt: &str,
+        user_prompt: &str,
+    ) -> Result<String, anyrag::PromptError> {
+        self.call_history
+            .write()
+            .unwrap()
+            .push((system_prompt.to_string(), user_prompt.to_string()));
+
+        if let Some(response) = self.responses.write().unwrap().pop() {
+            Ok(response)
+        } else {
+            Ok("Default mock response".to_string())
+        }
+    }
+}
+
+// --- Mock Storage Provider for Testing ---
+#[derive(Clone, Debug)]
+struct MockStorageProvider;
+
+#[async_trait]
+impl Storage for MockStorageProvider {
+    fn name(&self) -> &str {
+        "MockDB"
+    }
+    fn language(&self) -> &str {
+        "SQL"
+    }
+    async fn execute_query(&self, _query: &str) -> Result<String, anyrag::PromptError> {
+        Ok("[]".to_string())
+    }
+    async fn get_table_schema(
+        &self,
+        _table_name: &str,
+    ) -> Result<Arc<TableSchema>, anyrag::PromptError> {
+        Ok(Arc::new(TableSchema::new(vec![])))
+    }
+}
+
+// --- Test Setup ---
+#[derive(Clone)]
+struct TestAppState {
+    prompt_client: Arc<PromptClient>,
+    query_system_prompt_template: Option<String>,
+    query_user_prompt_template: Option<String>,
+    format_system_prompt_template: Option<String>,
+    format_user_prompt_template: Option<String>,
+}
+
+fn setup_mock_app_state(
+    mock_provider: Box<dyn AiProvider>,
+    env_templates: (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ),
+) -> TestAppState {
+    let (
+        query_system_prompt_template,
+        query_user_prompt_template,
+        format_system_prompt_template,
+        format_user_prompt_template,
+    ) = env_templates;
+
+    let client = PromptClientBuilder::new()
+        .ai_provider(mock_provider)
+        .storage_provider(Box::new(MockStorageProvider))
+        .build()
+        .unwrap();
+
+    TestAppState {
+        prompt_client: Arc::new(client),
+        query_system_prompt_template,
+        query_user_prompt_template,
+        format_system_prompt_template,
+        format_user_prompt_template,
+    }
+}
+
+fn apply_server_defaults(
+    mut options: ExecutePromptOptions,
+    state: &TestAppState,
+) -> ExecutePromptOptions {
+    if options.system_prompt_template.is_none() {
+        options.system_prompt_template = state.query_system_prompt_template.clone();
+    }
+    if options.user_prompt_template.is_none() {
+        options.user_prompt_template = state.query_user_prompt_template.clone();
+    }
+    if options.format_system_prompt_template.is_none() {
+        options.format_system_prompt_template = state.format_system_prompt_template.clone();
+    }
+    if options.format_user_prompt_template.is_none() {
+        options.format_user_prompt_template = state.format_user_prompt_template.clone();
+    }
+    options
+}
+
+// --- Main Test Suite ---
+#[tokio::test]
+async fn test_full_prompt_override_logic() {
+    println!("--- Testing Full Prompt Override Logic ---");
+
+    async fn run_test_stage(
+        stage_name: &str,
+        env_templates: (
+            Option<String>,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ),
+        api_options: ExecutePromptOptions,
+        env_fallback_options: ExecutePromptOptions,
+        expected_api_string: &str,
+        expected_env_string: &str,
+        prompt_index: usize, // 0 for system, 1 for user
+        call_index: usize,   // 0 for query, 1 for format
+    ) {
+        println!("\n--- Stage: {} ---", stage_name);
+
+        // --- Test API > ENV ---
+        let api_responses = vec!["SELECT 1".to_string(), "Ok".to_string()];
+        let mock_provider_api = Box::new(MockAiProvider::new(api_responses));
+        let history_api = mock_provider_api.call_history.clone();
+        let env_state_api = setup_mock_app_state(mock_provider_api, env_templates.clone());
+
+        let final_api_options = apply_server_defaults(api_options.clone(), &env_state_api);
+        let _ = env_state_api
+            .prompt_client
+            .execute_prompt_with_options(final_api_options)
+            .await;
+
+        let api_history_read = history_api.read().unwrap();
+        let last_call_api = api_history_read.get(call_index).unwrap().clone();
+
+        let prompt_to_check_api = if prompt_index == 0 {
+            &last_call_api.0
+        } else {
+            &last_call_api.1
+        };
+        assert!(prompt_to_check_api.contains(expected_api_string));
+        println!("  - API > ENV: PASSED");
+
+        // --- Test ENV > Default ---
+        let env_responses = vec!["SELECT 1".to_string(), "Ok".to_string()];
+        let mock_provider_env = Box::new(MockAiProvider::new(env_responses));
+        let history_env = mock_provider_env.call_history.clone();
+        let env_state_env = setup_mock_app_state(mock_provider_env, env_templates);
+
+        let final_env_options = apply_server_defaults(env_fallback_options.clone(), &env_state_env);
+        let _ = env_state_env
+            .prompt_client
+            .execute_prompt_with_options(final_env_options)
+            .await;
+
+        let env_history_read = history_env.read().unwrap();
+        let last_call_env = env_history_read.get(call_index).unwrap().clone();
+
+        let prompt_to_check_env = if prompt_index == 0 {
+            &last_call_env.0
+        } else {
+            &last_call_env.1
+        };
+        assert!(prompt_to_check_env.contains(expected_env_string));
+        println!("  - ENV > Default: PASSED");
+    }
+
+    let base_query_options = ExecutePromptOptions {
+        prompt: "p".to_string(),
+        table_name: Some("t".to_string()),
+        ..Default::default()
+    };
+    let base_format_options = ExecutePromptOptions {
+        instruction: Some("i".to_string()),
+        ..base_query_options.clone()
+    };
+
+    run_test_stage(
+        "Query System Prompt",
+        (Some("[ENV_QUERY_SYSTEM]".to_string()), None, None, None),
+        ExecutePromptOptions {
+            system_prompt_template: Some("[API_QUERY_SYSTEM]".to_string()),
+            ..base_query_options.clone()
+        },
+        base_query_options.clone(),
+        "[API_QUERY_SYSTEM]",
+        "[ENV_QUERY_SYSTEM]",
+        0,
+        0,
+    )
+    .await;
+
+    run_test_stage(
+        "Query User Prompt",
+        (None, Some("[ENV_QUERY_USER]".to_string()), None, None),
+        ExecutePromptOptions {
+            user_prompt_template: Some("[API_QUERY_USER]".to_string()),
+            ..base_query_options.clone()
+        },
+        base_query_options.clone(),
+        "[API_QUERY_USER]",
+        "[ENV_QUERY_USER]",
+        1,
+        0,
+    )
+    .await;
+
+    run_test_stage(
+        "Format System Prompt",
+        (None, None, Some("[ENV_FORMAT_SYSTEM]".to_string()), None),
+        ExecutePromptOptions {
+            format_system_prompt_template: Some("[API_FORMAT_SYSTEM]".to_string()),
+            ..base_format_options.clone()
+        },
+        base_format_options.clone(),
+        "[API_FORMAT_SYSTEM]",
+        "[ENV_FORMAT_SYSTEM]",
+        0,
+        1,
+    )
+    .await;
+
+    run_test_stage(
+        "Format User Prompt",
+        (None, None, None, Some("[ENV_FORMAT_USER]".to_string())),
+        ExecutePromptOptions {
+            format_user_prompt_template: Some("[API_FORMAT_USER]".to_string()),
+            ..base_format_options.clone()
+        },
+        base_format_options.clone(),
+        "[API_FORMAT_USER]",
+        "[ENV_FORMAT_USER]",
+        1,
+        1,
+    )
+    .await;
+
+    println!("\nComprehensive override test finished successfully.");
+}

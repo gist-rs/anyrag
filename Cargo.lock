@@ -56,9 +56,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "anyrag",
+ "async-trait",
  "axum",
  "dotenvy",
+ "dyn-clone",
+ "gcp-bigquery-client",
  "openssl",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
