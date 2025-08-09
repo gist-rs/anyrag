@@ -1,7 +1,10 @@
-mod config;
+pub mod config;
 mod errors;
 
-use crate::{config::get_config, errors::AppError};
+use self::{
+    config::{get_config, Config},
+    errors::AppError,
+};
 use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
     ExecutePromptOptions, PromptClient, PromptClientBuilder,
@@ -30,6 +33,56 @@ pub struct AppState {
     pub query_user_prompt_template: Option<String>,
     pub format_system_prompt_template: Option<String>,
     pub format_user_prompt_template: Option<String>,
+}
+
+/// Builds the shared application state from the configuration.
+///
+/// This involves setting up the AI and storage providers.
+pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
+    let ai_provider = match config.ai_provider.as_str() {
+        "gemini" => {
+            let api_key = config
+                .ai_api_key
+                .ok_or_else(|| anyhow::anyhow!("AI_API_KEY is required for the gemini provider"))?;
+            Box::new(GeminiProvider::new(config.ai_api_url, api_key)?)
+                as Box<dyn anyrag::providers::ai::AiProvider>
+        }
+        "local" => Box::new(LocalAiProvider::new(
+            config.ai_api_url,
+            config.ai_api_key,
+            config.ai_model,
+        )?) as Box<dyn anyrag::providers::ai::AiProvider>,
+        _ => {
+            return Err(anyhow::anyhow!(
+                "Unsupported AI provider: {}",
+                config.ai_provider
+            ))
+        }
+    };
+
+    let prompt_client = PromptClientBuilder::new()
+        .ai_provider(ai_provider)
+        .bigquery_storage(config.project_id)
+        .await?
+        .build()?;
+
+    Ok(AppState {
+        prompt_client: Arc::new(prompt_client),
+        query_system_prompt_template: config.query_system_prompt_template,
+        query_user_prompt_template: config.query_user_prompt_template,
+        format_system_prompt_template: config.format_system_prompt_template,
+        format_user_prompt_template: config.format_user_prompt_template,
+    })
+}
+
+/// Creates the Axum router with all the application routes.
+pub fn create_router(app_state: AppState) -> Router {
+    Router::new()
+        .route("/", get(root))
+        .route("/health", get(health_check))
+        .route("/prompt", post(prompt_handler))
+        .with_state(app_state)
+        .layer(TraceLayer::new_for_http())
 }
 
 /// The response body for the `/prompt` endpoint.
@@ -83,51 +136,12 @@ async fn prompt_handler(
     Ok(Json(PromptResponse { result }))
 }
 
-pub async fn run(listener: tokio::net::TcpListener) -> anyhow::Result<()> {
-    let config = get_config()?;
+/// The main entry point for running the server.
+pub async fn run(listener: tokio::net::TcpListener, config: Config) -> anyhow::Result<()> {
     debug!(?config, "Server configuration loaded");
 
-    let ai_provider = match config.ai_provider.as_str() {
-        "gemini" => {
-            let api_key = config
-                .ai_api_key
-                .ok_or_else(|| anyhow::anyhow!("AI_API_KEY is required for the gemini provider"))?;
-            Box::new(GeminiProvider::new(config.ai_api_url, api_key)?)
-                as Box<dyn anyrag::providers::ai::AiProvider>
-        }
-        "local" => Box::new(LocalAiProvider::new(
-            config.ai_api_url,
-            config.ai_api_key,
-            config.ai_model,
-        )?) as Box<dyn anyrag::providers::ai::AiProvider>,
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unsupported AI provider: {}",
-                config.ai_provider
-            ))
-        }
-    };
-
-    let prompt_client = PromptClientBuilder::new()
-        .ai_provider(ai_provider)
-        .bigquery_storage(config.project_id)
-        .await?
-        .build()?;
-
-    let app_state = AppState {
-        prompt_client: Arc::new(prompt_client),
-        query_system_prompt_template: config.query_system_prompt_template,
-        query_user_prompt_template: config.query_user_prompt_template,
-        format_system_prompt_template: config.format_system_prompt_template,
-        format_user_prompt_template: config.format_user_prompt_template,
-    };
-
-    let app = Router::new()
-        .route("/", get(root))
-        .route("/health", get(health_check))
-        .route("/prompt", post(prompt_handler))
-        .with_state(app_state)
-        .layer(TraceLayer::new_for_http());
+    let app_state = build_app_state(config).await?;
+    let app = create_router(app_state);
 
     info!("listening on {}", listener.local_addr()?);
     axum::serve(listener, app).await?;
@@ -136,6 +150,7 @@ pub async fn run(listener: tokio::net::TcpListener) -> anyhow::Result<()> {
 }
 
 #[tokio::main]
+#[cfg_attr(test, allow(dead_code))]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
@@ -149,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!("Server listening on {}", addr);
-    run(listener).await
+    run(listener, config).await
 }
 
 #[cfg(test)]
@@ -162,7 +177,13 @@ mod tests {
 
     async fn spawn_app() -> String {
         dotenvy::dotenv().ok();
-        let _ = tracing_subscriber::fmt::try_init();
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .compact()
+            .try_init();
+
+        // The test loads its own config but binds to a random port to avoid conflicts.
+        let config = get_config().expect("Failed to read configuration for test");
 
         let listener = TcpListener::bind("127.0.0.1:0")
             .await
@@ -171,10 +192,13 @@ mod tests {
         let address = format!("http://127.0.0.1:{port}");
 
         tokio::spawn(async move {
-            if let Err(e) = run(listener).await {
+            if let Err(e) = run(listener, config).await {
                 eprintln!("Server error: {e}");
             }
         });
+
+        // Give the server a moment to start
+        sleep(Duration::from_millis(100)).await;
 
         address
     }
@@ -182,7 +206,6 @@ mod tests {
     #[tokio::test]
     async fn test_e2e_prompt_execution() {
         let address = spawn_app().await;
-        sleep(Duration::from_secs(2)).await;
         let client = Client::new();
 
         let payload = json!({

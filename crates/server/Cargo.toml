@@ -36,3 +36,13 @@ async-trait = { workspace = true }
 dyn-clone = { workspace = true }
 gcp-bigquery-client = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+
+[[test]]
+name = "config_test"
+path = "tests/config_test.rs"
+harness = true
+
+[[test]]
+name = "server_test"
+path = "tests/server_test.rs"
+harness = true

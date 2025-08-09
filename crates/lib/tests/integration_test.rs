@@ -8,7 +8,7 @@
 // This declaration makes the `common` module available to the tests in this file.
 mod common;
 
-use crate::common::setup_tracing;
+use crate::common::{setup_tracing, MockStorageProvider};
 use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
     ExecutePromptOptions, PromptClientBuilder, PromptError,
@@ -19,6 +19,7 @@ use std::env;
 use tracing::debug;
 
 /// Tests the successful execution of a valid prompt.
+#[cfg(test)]
 #[tokio::test]
 async fn test_execute_prompt_success() {
     setup_tracing();
@@ -294,4 +295,74 @@ async fn test_get_query_from_prompt_local_provider() {
     assert!(query_result.is_ok());
     let query = query_result.unwrap();
     assert_eq!(query, "SELECT * FROM mock_table;");
+}
+
+/// Tests that a storage provider error is handled correctly.
+#[tokio::test]
+async fn test_execute_prompt_storage_error() {
+    setup_tracing();
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
+    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
+    let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
+
+    let client = PromptClientBuilder::default()
+        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .bigquery_storage(project_id)
+        .await
+        .unwrap()
+        .build()
+        .unwrap();
+
+    // Use an invalid table name that will cause a BigQuery error.
+    let options = ExecutePromptOptions {
+        prompt: "This should fail".to_string(),
+        table_name: Some(
+            "non_existent_project.non_existent_dataset.non_existent_table".to_string(),
+        ),
+        ..Default::default()
+    };
+
+    let result = client.execute_prompt_with_options(options).await;
+
+    assert!(result.is_err());
+    assert!(matches!(
+        result.unwrap_err(),
+        PromptError::StorageOperationFailed(_)
+    ));
+}
+
+/// Tests that an AI provider API error is handled correctly.
+#[tokio::test]
+async fn test_execute_prompt_ai_provider_error() {
+    setup_tracing();
+
+    // 1. Setup Mock Server to return an error
+    let server = MockServer::start();
+    let mock = server.mock(|when, then| {
+        when.method(POST).path("/v1/chat/completions");
+        then.status(500).body("Internal Server Error");
+    });
+
+    // 2. Setup Client with LocalAiProvider pointing to the mock server
+    let api_url = server.url("/v1/chat/completions");
+    let ai_provider = Box::new(LocalAiProvider::new(api_url, None, None).unwrap());
+
+    let client = PromptClientBuilder::default()
+        .ai_provider(ai_provider)
+        .storage_provider(Box::new(MockStorageProvider)) // Use a mock storage to isolate the test
+        .build()
+        .unwrap();
+
+    // 3. Execute the prompt
+    let options = ExecutePromptOptions {
+        prompt: "This prompt will trigger an AI error".to_string(),
+        ..Default::default()
+    };
+
+    let result = client.execute_prompt_with_options(options).await;
+
+    // 4. Assertions
+    mock.assert();
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), PromptError::AiApi(_)));
 }

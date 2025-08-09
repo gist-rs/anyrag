@@ -1,73 +1,15 @@
-use anyrag::{
-    providers::ai::AiProvider, providers::db::storage::Storage, ExecutePromptOptions, PromptClient,
-    PromptClientBuilder,
-};
-use async_trait::async_trait;
+// This declaration makes the `common` module available to the tests in this file.
+mod common;
 
-use gcp_bigquery_client::model::table_schema::TableSchema;
-use std::fmt::Debug;
-use std::sync::{Arc, RwLock};
-
-// --- Mock AI Provider for Testing ---
-#[derive(Clone, Debug)]
-struct MockAiProvider {
-    call_history: Arc<RwLock<Vec<(String, String)>>>,
-    responses: Arc<RwLock<Vec<String>>>,
-}
-
-impl MockAiProvider {
-    fn new(responses: Vec<String>) -> Self {
-        Self {
-            call_history: Arc::new(RwLock::new(Vec::new())),
-            responses: Arc::new(RwLock::new(responses.into_iter().rev().collect())),
-        }
-    }
-}
-
-#[async_trait]
-impl AiProvider for MockAiProvider {
-    async fn generate(
-        &self,
-        system_prompt: &str,
-        user_prompt: &str,
-    ) -> Result<String, anyrag::PromptError> {
-        self.call_history
-            .write()
-            .unwrap()
-            .push((system_prompt.to_string(), user_prompt.to_string()));
-
-        if let Some(response) = self.responses.write().unwrap().pop() {
-            Ok(response)
-        } else {
-            Ok("Default mock response".to_string())
-        }
-    }
-}
-
-// --- Mock Storage Provider for Testing ---
-#[derive(Clone, Debug)]
-struct MockStorageProvider;
-
-#[async_trait]
-impl Storage for MockStorageProvider {
-    fn name(&self) -> &str {
-        "MockDB"
-    }
-    fn language(&self) -> &str {
-        "SQL"
-    }
-    async fn execute_query(&self, _query: &str) -> Result<String, anyrag::PromptError> {
-        Ok("[]".to_string())
-    }
-    async fn get_table_schema(
-        &self,
-        _table_name: &str,
-    ) -> Result<Arc<TableSchema>, anyrag::PromptError> {
-        Ok(Arc::new(TableSchema::new(vec![])))
-    }
-}
+use crate::common::{MockAiProvider, MockStorageProvider};
+use anyrag::{providers::ai::AiProvider, ExecutePromptOptions, PromptClient, PromptClientBuilder};
+use std::sync::Arc;
 
 // --- Test Setup ---
+// This section defines a simplified "app state" similar to the one in `anyrag-server`,
+// which allows for testing the logic of how server-wide default prompts are applied
+// and overridden by API requests.
+
 #[derive(Clone)]
 struct TestAppState {
     prompt_client: Arc<PromptClient>,
@@ -95,7 +37,7 @@ fn setup_mock_app_state(
 
     let client = PromptClientBuilder::new()
         .ai_provider(mock_provider)
-        .storage_provider(Box::new(MockStorageProvider))
+        .storage_provider(Box::new(MockStorageProvider)) // Use the shared mock
         .build()
         .unwrap();
 
@@ -108,6 +50,8 @@ fn setup_mock_app_state(
     }
 }
 
+/// Simulates the logic in the main server handler where environment-variable-based
+/// default prompts are applied if the incoming request doesn't provide its own.
 fn apply_server_defaults(
     mut options: ExecutePromptOptions,
     state: &TestAppState,
@@ -128,6 +72,11 @@ fn apply_server_defaults(
 }
 
 // --- Main Test Suite ---
+
+/// This test comprehensively verifies the prompt override logic.
+/// It ensures that prompts provided in an API request take precedence over
+/// server-wide defaults (simulated as environment variables), and that those
+/// server-wide defaults take precedence over the hardcoded defaults in the library.
 #[tokio::test]
 async fn test_full_prompt_override_logic() {
     println!("--- Testing Full Prompt Override Logic ---");
@@ -151,10 +100,13 @@ async fn test_full_prompt_override_logic() {
         println!("\n--- Stage: {stage_name} ---");
 
         // --- Test API > ENV ---
+        // Verifies that a prompt template passed in the API request body overrides
+        // any template set in the server's environment.
         let api_responses = vec!["SELECT 1".to_string(), "Ok".to_string()];
-        let mock_provider_api = Box::new(MockAiProvider::new(api_responses));
+        let mock_provider_api = MockAiProvider::new(api_responses);
         let history_api = mock_provider_api.call_history.clone();
-        let env_state_api = setup_mock_app_state(mock_provider_api, env_templates.clone());
+        let env_state_api =
+            setup_mock_app_state(Box::new(mock_provider_api), env_templates.clone());
 
         let final_api_options = apply_server_defaults(api_options.clone(), &env_state_api);
         let _ = env_state_api
@@ -176,10 +128,12 @@ async fn test_full_prompt_override_logic() {
         println!("  - API > ENV: PASSED");
 
         // --- Test ENV > Default ---
+        // Verifies that if no template is in the API request, the server's
+        // environment template is used instead of the library's default.
         let env_responses = vec!["SELECT 1".to_string(), "Ok".to_string()];
-        let mock_provider_env = Box::new(MockAiProvider::new(env_responses));
+        let mock_provider_env = MockAiProvider::new(env_responses);
         let history_env = mock_provider_env.call_history.clone();
-        let env_state_env = setup_mock_app_state(mock_provider_env, env_templates);
+        let env_state_env = setup_mock_app_state(Box::new(mock_provider_env), env_templates);
 
         let final_env_options = apply_server_defaults(env_fallback_options.clone(), &env_state_env);
         let _ = env_state_env
@@ -221,8 +175,8 @@ async fn test_full_prompt_override_logic() {
         base_query_options.clone(),
         "[API_QUERY_SYSTEM]",
         "[ENV_QUERY_SYSTEM]",
-        0,
-        0,
+        0, // Check system prompt
+        0, // Check first AI call (query generation)
     )
     .await;
 
@@ -236,8 +190,8 @@ async fn test_full_prompt_override_logic() {
         base_query_options.clone(),
         "[API_QUERY_USER]",
         "[ENV_QUERY_USER]",
-        1,
-        0,
+        1, // Check user prompt
+        0, // Check first AI call (query generation)
     )
     .await;
 
@@ -251,8 +205,8 @@ async fn test_full_prompt_override_logic() {
         base_format_options.clone(),
         "[API_FORMAT_SYSTEM]",
         "[ENV_FORMAT_SYSTEM]",
-        0,
-        1,
+        0, // Check system prompt
+        1, // Check second AI call (formatting)
     )
     .await;
 
@@ -266,8 +220,8 @@ async fn test_full_prompt_override_logic() {
         base_format_options.clone(),
         "[API_FORMAT_USER]",
         "[ENV_FORMAT_USER]",
-        1,
-        1,
+        1, // Check user prompt
+        1, // Check second AI call (formatting)
     )
     .await;
 
