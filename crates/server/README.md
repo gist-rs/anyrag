@@ -37,7 +37,7 @@ The server is configured using environment variables. For local development, you
 -   `BIGQUERY_PROJECT_ID`: **(Required)** The ID of your Google Cloud project.
 -   `AI_API_URL`: **(Required)** The full URL for the AI provider's API endpoint.
 -   `AI_PROVIDER`: The AI provider to use. Can be "gemini" or "local". Defaults to "gemini".
--   `PORT`: The port for the server to listen on. Defaults to `8080`.
+-   `PORT`: The port for the server to listen on. Defaults to `9090`.
 -   `RUST_LOG`: The logging level (e.g., `info`, `debug`).
 
 ### Prompt Customization (Optional)
@@ -77,7 +77,7 @@ In the `anyrag/crates/server/` directory, copy the `.env.example` file to `.env`
 
 ### Step 3: Place the Service Account Key
 
-Place your downloaded Google Cloud service account key file in the **workspace root** (`anyrag/`) and name it `admin.serviceAccount.json`.
+Place your downloaded Google Cloud service account key file in the **workspace root** (`anyrag/`) and name it `gcp_creds.json`.
 
 ### Step 4: Run the Docker Container
 
@@ -86,9 +86,9 @@ Execute this command from the **workspace root** (`anyrag/`):
 ```sh
 docker rm -f anyrag-server || true && \
 docker run --rm -d \
-  -p 9090:8080 \
+  -p 9090:9090 \
   --env-file ./crates/server/.env \
-  -v "$(pwd)/admin.serviceAccount.json:/app/gcp_creds.json:ro" \
+  -v "$(pwd)/gcp_creds.json:/app/gcp_creds.json:ro" \
   --name anyrag-server \
   anyrag-server && \
 docker logs -f anyrag-server

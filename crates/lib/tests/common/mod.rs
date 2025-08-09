@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! # Common Test Utilities
 //!
 //! This module provides shared utilities for testing, such as mock servers

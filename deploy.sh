@@ -156,7 +156,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --allow-unauthenticated \
   --set-env-vars "$ENV_VARS_FOR_GCLOUD" \
   --set-secrets="AI_API_KEY=${SECRET_NAME}:latest" \
-  --port 8080
+  --port 9090
 
 SERVICE_URL=$(gcloud run services describe "$SERVICE_NAME" --platform managed --region "$REGION" --format 'value(status.url)')
 

@@ -15,10 +15,17 @@ use crate::prompts::{
     DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT, DEFAULT_QUERY_SYSTEM_PROMPT,
     DEFAULT_QUERY_USER_PROMPT,
 };
+use chrono::Utc;
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use regex::Regex;
 use serde_json::Value;
 use tracing::{debug, error, info};
+
+/// Represents the result of a prompt that could be either a query or a direct answer.
+pub enum QueryOrAnswer {
+    Query(String),
+    Answer(String),
+}
 
 impl PromptClient {
     /// Executes a natural language prompt with detailed options.
@@ -45,22 +52,32 @@ impl PromptClient {
 
         // --- Default Mode: Query Generation & Execution ---
         info!("[execute_prompt] Query generation mode.");
-        let query = self.get_query_from_prompt(&options).await?;
+        let query_or_answer = self.get_query_from_prompt_internal(&options).await?;
 
-        if query.trim().is_empty() {
-            return Ok("The prompt did not result in a valid query.".to_string());
+        match query_or_answer {
+            QueryOrAnswer::Query(query) => {
+                if query.trim().is_empty() {
+                    return Ok("The prompt did not result in a valid query.".to_string());
+                }
+
+                let result = self.storage_provider.execute_query(&query).await;
+                if let Err(e) = &result {
+                    error!("[execute_prompt] Query execution error: {e:?}");
+                }
+                let result = result?;
+
+                // Pre-process the JSON to make it more readable for the model.
+                let json_data: serde_json::Value = serde_json::from_str(&result)?;
+                let pretty_json = serde_json::to_string_pretty(&json_data)?;
+                self.format_response(&pretty_json, &options).await
+            }
+            QueryOrAnswer::Answer(answer) => {
+                if answer.trim().is_empty() {
+                    return Ok("The prompt did not result in a valid query.".to_string());
+                }
+                Ok(answer)
+            }
         }
-
-        let result = self.storage_provider.execute_query(&query).await;
-        if let Err(e) = &result {
-            error!("[execute_prompt] Query execution error: {e:?}");
-        }
-        let result = result?;
-
-        // Pre-process the JSON to make it more readable for the model.
-        let json_data: serde_json::Value = serde_json::from_str(&result)?;
-        let pretty_json = serde_json::to_string_pretty(&json_data)?;
-        self.format_response(&pretty_json, &options).await
     }
 
     /// Executes a natural language prompt with basic parameters.
@@ -98,18 +115,26 @@ impl PromptClient {
         &self,
         options: &ExecutePromptOptions,
     ) -> Result<String, PromptError> {
+        match self.get_query_from_prompt_internal(options).await? {
+            QueryOrAnswer::Query(q) => Ok(q),
+            // For backward compatibility and simple testing, return empty string for non-queries.
+            QueryOrAnswer::Answer(_) => Ok(String::new()),
+        }
+    }
+
+    /// Internal version of `get_query_from_prompt` that distinguishes between queries and direct answers.
+    async fn get_query_from_prompt_internal(
+        &self,
+        options: &ExecutePromptOptions,
+    ) -> Result<QueryOrAnswer, PromptError> {
         info!(
             "[get_query_from_prompt] received prompt: {:?}",
             options.prompt
         );
-        let mut context = String::new();
-        let language = self.storage_provider.language();
 
-        if let Some(table) = &options.table_name {
-            let schema = self.storage_provider.get_table_schema(table).await?;
-            let schema_str = Self::format_schema_for_prompt(&schema);
-            context.push_str(&format!("Schema for `{table}`: ({schema_str}). "));
-        }
+        let today_datetime = Utc::now().to_rfc2822();
+        let mut context = format!("# TODAY\n{today_datetime}\n\n");
+        let language = self.storage_provider.language();
 
         let alias_instruction = match &options.answer_key {
             Some(key) => format!(
@@ -118,27 +143,58 @@ impl PromptClient {
             None => "If the query uses an aggregate function or returns a single column, choose a descriptive, single-word, lowercase alias for the result based on the user's question (e.g., for 'how many users', use `count`; for 'who is the manager', use `manager`).".to_string(),
         };
 
-        // This is the default system prompt for query generation.
-        let system_prompt = options.system_prompt_template.clone().unwrap_or_else(|| {
-            DEFAULT_QUERY_SYSTEM_PROMPT
-                .replace("{language}", language)
-                .replace("{db_name}", self.storage_provider.name())
-        });
+        // If a table name is provided, we assume a query is needed.
+        // Otherwise, it's a direct question to the AI.
+        let (system_prompt, user_prompt) = if options.table_name.is_some() {
+            // --- Logic for Query Generation ---
+            if let Some(table) = &options.table_name {
+                let schema = self.storage_provider.get_table_schema(table).await?;
+                let schema_str = Self::format_schema_for_prompt(&schema);
+                context.push_str(&format!("Schema for `{table}`: ({schema_str}). "));
+            }
 
-        let user_prompt = if let Some(template) = &options.user_prompt_template {
-            template
-                .replace("{language}", language)
-                .replace("{context}", &context)
-                .replace("{prompt}", &options.prompt)
-                .replace("{alias_instruction}", &alias_instruction)
-        } else if !context.is_empty() {
-            DEFAULT_QUERY_USER_PROMPT
-                .replace("{language}", language)
-                .replace("{context}", &context)
-                .replace("{prompt}", &options.prompt)
-                .replace("{alias_instruction}", &alias_instruction)
+            let system_prompt = options.system_prompt_template.clone().unwrap_or_else(|| {
+                DEFAULT_QUERY_SYSTEM_PROMPT
+                    .replace("{language}", language)
+                    .replace("{db_name}", self.storage_provider.name())
+            });
+
+            let user_prompt = if let Some(template) = &options.user_prompt_template {
+                template
+                    .replace("{language}", language)
+                    .replace("{context}", &context)
+                    .replace("{prompt}", &options.prompt)
+                    .replace("{alias_instruction}", &alias_instruction)
+            } else {
+                DEFAULT_QUERY_USER_PROMPT
+                    .replace("{language}", language)
+                    .replace("{context}", &context)
+                    .replace("{prompt}", &options.prompt)
+                    .replace("{alias_instruction}", &alias_instruction)
+            };
+            (system_prompt, user_prompt)
         } else {
-            options.prompt.to_string()
+            // --- Logic for Direct Questions ---
+            let system_prompt = options
+                .system_prompt_template
+                .clone()
+                .unwrap_or_else(|| "You are a helpful AI assistant.".to_string());
+
+            let user_prompt = if let Some(template) = &options.user_prompt_template {
+                template
+                    .replace("{context}", &context)
+                    .replace("{prompt}", &options.prompt)
+                    // The other placeholders don't apply here.
+                    .replace("{language}", language)
+                    .replace("{alias_instruction}", &alias_instruction)
+            } else {
+                // For a direct question, the prompt is just context + question.
+                format!(
+                    "# Context\n{context}\n\n# User question\n{}",
+                    options.prompt
+                )
+            };
+            (system_prompt, user_prompt)
         };
 
         debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider");
@@ -167,10 +223,11 @@ impl PromptClient {
         if !query.trim().to_uppercase().starts_with("SELECT")
             && !query.trim().to_uppercase().starts_with("WITH")
         {
-            return Ok(String::new());
+            // This is a direct answer, not a query.
+            return Ok(QueryOrAnswer::Answer(query));
         }
 
-        Ok(query)
+        Ok(QueryOrAnswer::Query(query))
     }
 
     fn format_schema_for_prompt(schema: &TableSchema) -> String {

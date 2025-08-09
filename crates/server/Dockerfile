@@ -101,21 +101,28 @@ RUN apk add --no-cache ca-certificates wget
 RUN addgroup -S app && \
     adduser -S -u 1000 -G app app
 
-# Copy the compiled binary from the builder stage.
-COPY --from=build /app/server /usr/local/bin/app
+# Set the working directory for the runtime stage.
+WORKDIR /app
 
-# Set correct ownership and permissions.
-RUN chown app:app /usr/local/bin/app
+# Copy the service account credentials file into the application's working directory.
+# This ensures that the relative path `./gcp_creds.json` resolves correctly inside the container.
+COPY gcp_creds.json /app/gcp_creds.json
+
+# Copy the compiled binary from the builder stage into the working directory.
+COPY --from=build /app/server /app/server
+
+# Set correct ownership for all application files.
+RUN chown -R app:app /app
 
 # Expose the service port.
-EXPOSE 8080
+EXPOSE 9090
 
 # Health check to ensure the service is responsive. `wget` is used as `curl` is not in alpine.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s \
-    CMD wget -q --spider http://localhost:8080/health || exit 1
+    CMD wget -q --spider http://localhost:9090/health || exit 1
 
 # Run as the non-root user.
 USER app
 
 # Set the entrypoint for the container.
-ENTRYPOINT ["/usr/local/bin/app"]
+ENTRYPOINT ["/app/server"]

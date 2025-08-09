@@ -88,7 +88,7 @@ fn test_get_config_defaults() {
 
     // Assert that default values are used for optional variables
     assert_eq!(config.ai_provider, "gemini");
-    assert_eq!(config.port, 8080);
+    assert_eq!(config.port, 9090);
     assert!(config.ai_api_key.is_none());
     assert!(config.ai_model.is_none());
     assert!(config.query_system_prompt_template.is_none());

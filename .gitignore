@@ -1,5 +1,6 @@
 /target
 .env
 *.serviceAccount.json
+gcp_creds.json
 output.json
 .test

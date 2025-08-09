@@ -7,8 +7,8 @@
 .gitignore
 
 # Ignore local environment files. These are handled by the deployment script.
-.env
-**/.env
+# .env
+# **/.env
 
 # Ignore IDE and editor configuration folders
 .vscode/

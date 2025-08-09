@@ -13,6 +13,7 @@ use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
     ExecutePromptOptions, PromptClientBuilder, PromptError,
 };
+use chrono::Utc;
 use httpmock::prelude::*;
 use serde_json::json;
 use std::env;
@@ -74,11 +75,13 @@ async fn test_execute_prompt_invalid_query() {
     };
     let result = client.execute_prompt_with_options(options).await;
 
+    // With the new logic, a non-query prompt results in the AI's direct textual answer.
+    // We can't know the exact response, but we can assert it's a non-empty string
+    // and not a query.
     assert!(result.is_ok());
-    assert_eq!(
-        result.unwrap(),
-        "The prompt did not result in a valid query."
-    );
+    let response = result.unwrap();
+    assert!(!response.is_empty());
+    assert!(!response.to_uppercase().contains("SELECT"));
 }
 
 /// Tests that the builder returns an error if the ai provider is missing.
@@ -365,4 +368,37 @@ async fn test_execute_prompt_ai_provider_error() {
     mock.assert();
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), PromptError::AiApi(_)));
+}
+
+/// Tests that a prompt asking a direct question (not for a query) gets a direct answer.
+#[tokio::test]
+async fn test_execute_prompt_direct_answer() {
+    setup_tracing();
+    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
+    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
+
+    let client = PromptClientBuilder::default()
+        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .storage_provider(Box::new(MockStorageProvider)) // No DB access needed
+        .build()
+        .unwrap();
+
+    let options = ExecutePromptOptions {
+        prompt: "what is today?".to_string(),
+        ..Default::default()
+    };
+
+    let result = client.execute_prompt_with_options(options).await;
+
+    if let Err(e) = &result {
+        eprintln!("Error in test_execute_prompt_direct_answer: {e}");
+    }
+    assert!(result.is_ok());
+    let output = result.unwrap();
+
+    // We can't know the exact output, but it should contain the current year.
+    // This confirms the AI used the injected `TODAY` context.
+    let current_year = Utc::now().format("%Y").to_string();
+    assert!(output.contains(&current_year));
+    assert!(!output.to_uppercase().contains("SELECT"));
 }

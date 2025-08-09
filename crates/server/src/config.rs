@@ -61,7 +61,7 @@ pub fn get_config() -> Result<Config, ConfigError> {
         Ok(val) => val
             .parse::<u16>()
             .map_err(|_| ConfigError::Invalid("PORT".to_string(), val))?,
-        Err(_) => 8080, // Default port
+        Err(_) => 9090, // Default port
     };
 
     // --- Load Prompt Templates from Environment ---
