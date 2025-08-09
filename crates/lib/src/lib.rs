@@ -12,8 +12,8 @@ pub use errors::PromptError;
 pub use types::{ExecutePromptOptions, PromptClient, PromptClientBuilder};
 
 use crate::prompts::{
-    DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT, DEFAULT_QUERY_SYSTEM_PROMPT,
-    DEFAULT_QUERY_USER_PROMPT,
+    get_alias_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT,
+    DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT,
 };
 use chrono::Utc;
 use gcp_bigquery_client::model::table_schema::TableSchema;
@@ -136,12 +136,7 @@ impl PromptClient {
         let mut context = format!("# TODAY\n{today_datetime}\n\n");
         let language = self.storage_provider.language();
 
-        let alias_instruction = match &options.answer_key {
-            Some(key) => format!(
-                "If the query uses an aggregate function or returns a single column, alias the result with `AS {key}`."
-            ),
-            None => "If the query uses an aggregate function or returns a single column, choose a descriptive, single-word, lowercase alias for the result based on the user's question (e.g., for 'how many users', use `count`; for 'who is the manager', use `manager`).".to_string(),
-        };
+        let alias_instruction = get_alias_instruction(options.answer_key.as_deref());
 
         // If a table name is provided, we assume a query is needed.
         // Otherwise, it's a direct question to the AI.

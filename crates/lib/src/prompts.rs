@@ -53,3 +53,16 @@ pub const DEFAULT_FORMAT_USER_PROMPT: &str = r#"# PROMPT:
 # INPUT:
 {content}
 "#;
+
+/// Generates the instruction for aliasing a result column in a query.
+///
+/// This function returns a specific instruction if an `answer_key` (alias) is provided,
+/// otherwise it returns a general instruction for the AI to choose a descriptive alias.
+pub fn get_alias_instruction(answer_key: Option<&str>) -> String {
+    match answer_key {
+        Some(key) => format!(
+            "If the query uses an aggregate function or returns a single column, alias the result with `AS {key}`."
+        ),
+        None => "If the query uses an aggregate function or returns a single column, choose a descriptive, single-word, lowercase alias for the result based on the user's question (e.g., for 'how many users', use `count`; for 'who is the manager', use `manager`).".to_string(),
+    }
+}
