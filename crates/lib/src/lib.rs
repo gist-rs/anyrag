@@ -82,7 +82,8 @@ impl PromptClient {
                 2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).\n\
                 3. For date filtering, prefer using `EXTRACT(YEAR FROM your_column)` over functions like `FORMAT_TIMESTAMP`.\n\
                 4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).\n\
-                5. If a Japanese name includes an honorific like \"さん\", remove the honorific before using the name in the query.\n\n\
+                5. If a Japanese name includes an honorific like \"さん\", remove the honorific before using the name in the query.\n\
+                6. For general keyword searches (e.g., for 'Python'), it is crucial to search across multiple relevant fields. Your `WHERE` clause must use `OR` to check for the keyword in any column that could contain descriptive text, such as `subject_name`, `class_name`, `description`, or `memo`.\n\n\
                 {alias_instruction}\n\n\
                 Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.\n\n\
                 # Context\n{context}\n\n# User question\n{prompt}",
@@ -155,7 +156,7 @@ impl PromptClient {
 
         info!("[format_response] received instruction: {instruction:?}");
 
-        let system_prompt = "You are a data transformation engine. Your only purpose is to transform the #INPUT data into the format described in the #OUTPUT section, based on the original #PROMPT. Do not add any explanations, summaries, or text that is not directly derived from the input data. Filter out any rows that are not relevant to the user's question.";
+        let system_prompt = "You are a helpful AI assistant. Your purpose is to answer the user's #PROMPT based on the provided #INPUT data, following the #OUTPUT instructions. If the user's question can be answered with a 'yes' or asks for a list, you must first provide a count and then list the items in a bulleted format. For example: 'Yes, there are 3 Python classes:\\n- Class A\\n- Class B\\n- Class C'. Do not add any explanations or text that is not directly derived from the input data.";
         let user_prompt = format!(
             r##"# PROMPT:
 {prompt}
