@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
-use tokio;
 
 // --- Mock AI Provider for Testing ---
 #[derive(Clone, Debug)]
@@ -133,6 +132,7 @@ fn apply_server_defaults(
 async fn test_full_prompt_override_logic() {
     println!("--- Testing Full Prompt Override Logic ---");
 
+    #[allow(clippy::complexity)]
     async fn run_test_stage(
         stage_name: &str,
         env_templates: (
@@ -148,7 +148,7 @@ async fn test_full_prompt_override_logic() {
         prompt_index: usize, // 0 for system, 1 for user
         call_index: usize,   // 0 for query, 1 for format
     ) {
-        println!("\n--- Stage: {} ---", stage_name);
+        println!("\n--- Stage: {stage_name} ---");
 
         // --- Test API > ENV ---
         let api_responses = vec!["SELECT 1".to_string(), "Ok".to_string()];
@@ -162,8 +162,10 @@ async fn test_full_prompt_override_logic() {
             .execute_prompt_with_options(final_api_options)
             .await;
 
-        let api_history_read = history_api.read().unwrap();
-        let last_call_api = api_history_read.get(call_index).unwrap().clone();
+        let last_call_api = {
+            let guard = history_api.read().unwrap();
+            guard.get(call_index).unwrap().clone()
+        };
 
         let prompt_to_check_api = if prompt_index == 0 {
             &last_call_api.0
@@ -185,8 +187,10 @@ async fn test_full_prompt_override_logic() {
             .execute_prompt_with_options(final_env_options)
             .await;
 
-        let env_history_read = history_env.read().unwrap();
-        let last_call_env = env_history_read.get(call_index).unwrap().clone();
+        let last_call_env = {
+            let guard = history_env.read().unwrap();
+            guard.get(call_index).unwrap().clone()
+        };
 
         let prompt_to_check_env = if prompt_index == 0 {
             &last_call_env.0
