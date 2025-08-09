@@ -51,6 +51,10 @@ pub struct ExecutePromptOptions {
     /// A template for the system prompt for the final formatting step.
     #[serde(default)]
     pub format_system_prompt_template: Option<String>,
+    /// A template for the user prompt for the final formatting step.
+    /// Available placeholders: `{prompt}`, `{instruction}`, `{content}`
+    #[serde(default)]
+    pub format_user_prompt_template: Option<String>,
 }
 
 /// A builder for creating `PromptClient` instances.

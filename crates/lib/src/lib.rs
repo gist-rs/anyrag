@@ -215,8 +215,14 @@ impl PromptClient {
             .unwrap_or_else(|| {
                 "You are a helpful AI assistant. Your purpose is to answer the user's #PROMPT based on the provided #INPUT data, following the #OUTPUT instructions. If the user's question can be answered with a 'yes' or asks for a list, you must first provide a count and then list the items in a bulleted format. For example: 'Yes, there are 3 Python classes:\\n- Class A\\n- Class B\\n- Class C'. Do not add any explanations or text that is not directly derived from the input data.".to_string()
             });
-        let user_prompt = format!(
-            r##"# PROMPT:
+        let user_prompt = if let Some(template) = &options.format_user_prompt_template {
+            template
+                .replace("{prompt}", &options.prompt)
+                .replace("{instruction}", instruction)
+                .replace("{content}", content)
+        } else {
+            format!(
+                r##"# PROMPT:
 {}
 
 # OUTPUT:
@@ -225,8 +231,9 @@ impl PromptClient {
 # INPUT:
 {}
 "##,
-            options.prompt, instruction, content
-        );
+                options.prompt, instruction, content
+            )
+        };
 
         debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider for formatting");
 

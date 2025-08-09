@@ -24,9 +24,7 @@ impl std::fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-/// Configuration for the BigQuery Tools server.
-///
-/// This configuration is loaded from environment variables.
+/// Configuration for the server, loaded from environment variables.
 #[derive(Debug)]
 pub struct Config {
     pub ai_provider: String,
@@ -35,8 +33,11 @@ pub struct Config {
     pub ai_model: Option<String>,
     pub project_id: String,
     pub port: u16,
-    pub system_prompt_template: Option<String>,
-    pub user_prompt_template: Option<String>,
+    // --- Prompt Templates ---
+    pub query_system_prompt_template: Option<String>,
+    pub query_user_prompt_template: Option<String>,
+    pub format_system_prompt_template: Option<String>,
+    pub format_user_prompt_template: Option<String>,
 }
 
 /// Loads configuration from environment variables.
@@ -63,8 +64,11 @@ pub fn get_config() -> Result<Config, ConfigError> {
         Err(_) => 8080, // Default port
     };
 
-    let system_prompt_template = env::var("SYSTEM_PROMPT_TEMPLATE").ok();
-    let user_prompt_template = env::var("USER_PROMPT_TEMPLATE").ok();
+    // --- Load Prompt Templates from Environment ---
+    let query_system_prompt_template = env::var("QUERY_SYSTEM_PROMPT_TEMPLATE").ok();
+    let query_user_prompt_template = env::var("QUERY_USER_PROMPT_TEMPLATE").ok();
+    let format_system_prompt_template = env::var("FORMAT_SYSTEM_PROMPT_TEMPLATE").ok();
+    let format_user_prompt_template = env::var("FORMAT_USER_PROMPT_TEMPLATE").ok();
 
     Ok(Config {
         ai_provider,
@@ -73,7 +77,9 @@ pub fn get_config() -> Result<Config, ConfigError> {
         ai_model,
         project_id,
         port,
-        system_prompt_template,
-        user_prompt_template,
+        query_system_prompt_template,
+        query_user_prompt_template,
+        format_system_prompt_template,
+        format_user_prompt_template,
     })
 }

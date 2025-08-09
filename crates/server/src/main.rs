@@ -26,8 +26,10 @@ use tracing_subscriber::FmtSubscriber;
 #[derive(Clone)]
 struct AppState {
     prompt_client: Arc<PromptClient>,
-    system_prompt_template: Option<String>,
-    user_prompt_template: Option<String>,
+    query_system_prompt_template: Option<String>,
+    query_user_prompt_template: Option<String>,
+    format_system_prompt_template: Option<String>,
+    format_user_prompt_template: Option<String>,
 }
 
 /// The response body for the `/prompt` endpoint.
@@ -59,14 +61,18 @@ async fn prompt_handler(
     let mut options: ExecutePromptOptions =
         serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
 
-    // If the request doesn't specify a system prompt, use the server's default.
+    // If the request doesn't specify a template, use the server's default from the environment.
     if options.system_prompt_template.is_none() {
-        options.system_prompt_template = app_state.system_prompt_template.clone();
+        options.system_prompt_template = app_state.query_system_prompt_template.clone();
     }
-
-    // If the request doesn't specify a user prompt, use the server's default.
     if options.user_prompt_template.is_none() {
-        options.user_prompt_template = app_state.user_prompt_template.clone();
+        options.user_prompt_template = app_state.query_user_prompt_template.clone();
+    }
+    if options.format_system_prompt_template.is_none() {
+        options.format_system_prompt_template = app_state.format_system_prompt_template.clone();
+    }
+    if options.format_user_prompt_template.is_none() {
+        options.format_user_prompt_template = app_state.format_user_prompt_template.clone();
     }
 
     let result = app_state
@@ -125,8 +131,10 @@ async fn main() -> anyhow::Result<()> {
     // Create the application state
     let app_state = AppState {
         prompt_client: Arc::new(prompt_client),
-        system_prompt_template: config.system_prompt_template,
-        user_prompt_template: config.user_prompt_template,
+        query_system_prompt_template: config.query_system_prompt_template,
+        query_user_prompt_template: config.query_user_prompt_template,
+        format_system_prompt_template: config.format_system_prompt_template,
+        format_user_prompt_template: config.format_user_prompt_template,
     };
 
     // Build our application with routes

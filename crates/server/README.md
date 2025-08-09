@@ -1,13 +1,13 @@
 # `anyrag-server`
 
-This crate provides a lightweight `axum` web server that exposes the `anyrag` library's functionality via a REST API. It allows you to translate natural language prompts into BigQuery SQL queries and execute them through HTTP requests.
+This crate provides a lightweight `axum` web server that exposes the `anyrag` library's functionality via a REST API. It allows you to translate natural language prompts into executable queries and execute them through HTTP requests.
 
 ## Features
 
 *   **RESTful API:** Provides an easy-to-use API for integrations.
 *   **Containerized Deployment:** Includes a multi-stage `Dockerfile` for building a minimal, secure server image.
 *   **Asynchronous:** Built on top of Tokio for non-blocking, efficient request handling.
-*   **Configurable:** Uses environment variables for easy configuration.
+*   **Highly Configurable:** Uses environment variables for easy configuration of prompts and providers.
 
 ## Prerequisites
 
@@ -43,15 +43,17 @@ The server is configured using environment variables. For local development, you
 ### Prompt Customization (Optional)
 You can set the following environment variables to define server-wide default prompts. This is useful for customizing the AI's behavior without changing the code. These can still be overridden by individual API requests.
 
--   `SYSTEM_PROMPT_TEMPLATE`: Sets the default system prompt for query generation. Use this to change the AI's core persona or rules.
--   `USER_PROMPT_TEMPLATE`: Sets the default user prompt template for query generation. You can use placeholders like `{language}`, `{context}`, `{prompt}`, and `{alias_instruction}`.
+-   `QUERY_SYSTEM_PROMPT_TEMPLATE`: Controls the AI's core instructions for **query generation**. Use this to change its persona, add strict rules, or adapt to a new query language.
+-   `QUERY_USER_PROMPT_TEMPLATE`: Controls how the user's question and table context are presented to the AI for **query generation**. Available placeholders: `{language}`, `{context}`, `{prompt}`, `{alias_instruction}`.
+-   **`FORMAT_SYSTEM_PROMPT_TEMPLATE`**: Controls the AI's persona for the final response formatting step.
+-   **`FORMAT_USER_PROMPT_TEMPLATE`**: Controls how the data and original prompt are presented to the AI for formatting. Available placeholders: `{prompt}`, `{instruction}`, `{content}`.
 
 ## Local Development (Without Docker)
 
 For running the server directly on your machine for development.
 
 1.  **Authenticate Locally:** Run `gcloud auth application-default login`.
-2.  **Create `.env` File:** In the `anyrag/crates/server` directory, copy `.env.example` to `.env` and fill in your `AI_API_KEY`, `AI_API_URL`, and `BIGQUERY_PROJECT_ID`.
+2.  **Create `.env` File:** In the `anyrag/crates/server` directory, copy `.env.example` to `.env` and fill in your secrets and any desired prompt customizations.
 3.  **Run the Server:**
     ```sh
     cargo run
@@ -71,23 +73,13 @@ docker build -t anyrag-server -f crates/server/Dockerfile .
 
 ### Step 2: Create the `.env` File
 
-In the `anyrag/crates/server/` directory, copy the `.env.example` file to `.env` and add your secrets. This file is for variables that you don't want to type directly into the command line.
-
-```sh
-cp crates/server/.env.example crates/server/.env
-```
-
-Now, edit `crates/server/.env` and fill in these values:
-*   `AI_API_KEY`
-*   `BIGQUERY_PROJECT_ID`
+In the `anyrag/crates/server/` directory, copy the `.env.example` file to `.env` and add your secrets.
 
 ### Step 3: Place the Service Account Key
 
 Place your downloaded Google Cloud service account key file in the **workspace root** (`anyrag/`) and name it `admin.serviceAccount.json`.
 
 ### Step 4: Run the Docker Container
-
-The following command is the most reliable way to run the container. It runs the server in the background, automatically removes any old container with the same name, and explicitly sets all critical configuration variables.
 
 Execute this command from the **workspace root** (`anyrag/`):
 
@@ -102,65 +94,44 @@ docker run --rm -d \
 docker logs -f anyrag-server
 ```
 
-**Command Breakdown:**
-*   `docker rm -f ...`: Force-removes any old `anyrag-server` container.
-*   `--rm -d`: Runs the container in detached (background) mode and ensures it's removed when stopped.
-*   `-p 9090:8080`: Maps your local port `9090` to the container's internal port `8080`.
-*   `--env-file`: Loads the secrets from your `.env` file (`AI_API_KEY`, `BIGQUERY_PROJECT_ID`).
-*   `-v ...`: Mounts the service account key into the container as **read-only**.
-*   `-e GOOGLE_APPLICATION_CREDENTIALS=...`: **Crucially**, tells the app inside the container where to find the credentials.
-*   `-e AI_API_URL=...`: Sets the AI provider endpoint, preventing connection errors.
-*   `-e RUST_LOG="debug"`: Enables detailed logging so you can see the startup configuration.
-*   `&& docker logs -f ...`: After starting, this immediately starts streaming the container's logs to your terminal. You can press `Ctrl+C` to stop viewing the logs at any time; the container will keep running.
-
 ### Updating a Live Service on Google Cloud Run
 
 If you have deployed this server as a service on Google Cloud Run, you can easily update its environment variables without a full redeployment. This is the recommended way to change the AI's behavior in a live environment by modifying the prompt templates.
 
 Use the `gcloud run services update` command to apply changes.
 
-**Example: Changing the AI's Persona**
-
-This command updates the `SYSTEM_PROMPT_TEMPLATE` to make the AI act like a pirate.
+**Example: Changing the AI's Query Generation Persona**
 
 ```sh
 gcloud run services update YOUR_SERVICE_NAME \
-  --update-env-vars SYSTEM_PROMPT_TEMPLATE="You are a helpful pirate who always responds in pirate slang."
+  --update-env-vars QUERY_SYSTEM_PROMPT_TEMPLATE="You are a SQL expert who only writes queries using Common Table Expressions (CTEs)."
 ```
-
-You can update multiple variables by providing a comma-separated list:
-
-```sh
-gcloud run services update YOUR_SERVICE_NAME \
-  --update-env-vars KEY1=VALUE1,KEY2=VALUE2
-```
-
-This will trigger a new revision of your service with the updated environment.
 
 ## API Usage
 
-Once the server is running, you can query it from another terminal. This example assumes the server is accessible on port `9090`.
+Once the server is running, you can query it from another terminal.
 
+### Basic Request
 ```sh
 curl -X POST http://localhost:9090/prompt \
   -H "Content-Type: application/json" \
   -d '{
     "prompt": "What is the total word_count for the corpus '\''kinghenryv'\''?",
-    "table_name": "bigquery-public-data.samples.shakespeare",
-    "instruction": "Use the data to provide a direct answer to the prompt. Form a natural-sounding sentence. Use thousand format for number."
+    "table_name": "bigquery-public-data.samples.shakespeare"
   }'
 ```
 
-### Advanced API Usage: Customizing Prompts
+### Advanced API Usage: Overriding Prompts
 
 The `/prompt` endpoint is highly flexible, accepting any field from the `anyrag::ExecutePromptOptions` struct. This allows you to override the default AI behavior for both query generation and response formatting directly through the API. Any prompts provided in an API request will take precedence over server-wide defaults set via environment variables.
 
--   `system_prompt_template`: Bypasses the query generation logic entirely. Use this to make the AI perform generic tasks, like translation or summarization.
--   `format_system_prompt_template`: Overrides the default prompt for the final response formatting step, allowing you to control the style and tone of the output.
+-   `system_prompt_template`: Overrides the `QUERY_SYSTEM_PROMPT_TEMPLATE`. Use this to make the AI perform generic tasks, like translation.
+-   `user_prompt_template`: Overrides the `QUERY_USER_PROMPT_TEMPLATE`.
+-   `format_system_prompt_template`: Overrides the `FORMAT_SYSTEM_PROMPT_TEMPLATE`, allowing you to control the style and tone of the final output.
 
-#### Example: Custom Formatting
+#### Example: Custom Formatting via API
 
-This example uses `format_system_prompt_template` to make the AI act as a cheerful assistant that adds a winking face to its response.
+This example uses `format_system_prompt_template` in the request body to make the AI act as a cheerful assistant that adds a winking face to its response.
 
 ```sh
 curl -X POST http://localhost:9090/prompt \
