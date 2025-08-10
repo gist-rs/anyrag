@@ -172,7 +172,7 @@ Performs a semantic or conceptual search using vector embeddings. This is best f
 curl -X POST http://localhost:9090/search/vector \
   -H "Content-Type: application/json" \
   -d '{
-    "query": "building web applications with python",
+    "query": "building web applications with Rust",
     "limit": 5
   }'
 ```

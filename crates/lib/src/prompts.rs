@@ -25,7 +25,7 @@ pub const DEFAULT_QUERY_USER_PROMPT: &str = "Follow these rules to create produc
     3. For date filtering, prefer using `EXTRACT(YEAR FROM your_column)` over functions like `FORMAT_TIMESTAMP`.\n\
     4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).\n\
     5. If a Japanese name includes an honorific like \"さん\", remove the honorific before using the name in the query.\n\
-    6. For keyword searches (e.g., 'Python'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.\n\n\
+    6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.\n\n\
     {alias_instruction}\n\n\
     Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.\n\n\
     # Context\n{context}\n\n# User question\n{prompt}";
@@ -36,7 +36,7 @@ pub const DEFAULT_QUERY_USER_PROMPT: &str = "Follow these rules to create produc
 ///
 /// This prompt sets the persona for the AI when it's formatting the final
 /// response from the query results.
-pub const DEFAULT_FORMAT_SYSTEM_PROMPT: &str = "You are a helpful AI assistant. Your purpose is to answer the user's #PROMPT based on the provided #INPUT data, following the #OUTPUT instructions. If the user's question can be answered with a 'yes' or asks for a list, you must first provide a count and then list the items in a bulleted format. For example: 'Yes, there are 3 Python classes:\\n- Class A\\n- Class B\\n- Class C'. Do not add any explanations or text that is not directly derived from the input data.";
+pub const DEFAULT_FORMAT_SYSTEM_PROMPT: &str = "You are a helpful AI assistant. Your purpose is to answer the user's #PROMPT based on the provided #INPUT data, following the #OUTPUT instructions. If the user's question can be answered with a 'yes' or asks for a list, you must first provide a count and then list the items in a bulleted format. For example: 'Yes, there are 3 Rust classes:\\n- Class A\\n- Class B\\n- Class C'. Do not add any explanations or text that is not directly derived from the input data.";
 
 /// The default user prompt for the response formatting stage.
 ///
