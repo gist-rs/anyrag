@@ -104,11 +104,10 @@ pub async fn search_articles_by_embedding(
 ) -> Result<Vec<SearchResult>, EmbeddingError> {
     let conn = db.connect().map_err(EmbeddingError::Database)?;
 
-    // Turso's vector functions expect the vector as a string literal within the query.
     let vector_str = format!(
-        "vector32('[{}]')",
+        "vector('[{}]')",
         query_vector
-            .into_iter()
+            .iter()
             .map(|f| f.to_string())
             .collect::<Vec<_>>()
             .join(", ")
