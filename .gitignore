@@ -4,3 +4,5 @@
 gcp_creds.json
 output.json
 .test
+*.db
+*.db-wal
