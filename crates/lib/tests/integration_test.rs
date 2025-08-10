@@ -8,10 +8,9 @@
 // This declaration makes the `common` module available to the tests in this file.
 mod common;
 
-use crate::common::{setup_tracing, MockStorageProvider};
+use crate::common::{create_real_ai_provider, setup_tracing, MockStorageProvider};
 use anyrag::{
-    providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
-    ExecutePromptOptions, PromptClientBuilder, PromptError,
+    providers::ai::local::LocalAiProvider, ExecutePromptOptions, PromptClientBuilder, PromptError,
 };
 use chrono::Utc;
 use httpmock::prelude::*;
@@ -24,12 +23,10 @@ use tracing::debug;
 #[tokio::test]
 async fn test_execute_prompt_success() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -57,12 +54,10 @@ async fn test_execute_prompt_success() {
 #[tokio::test]
 async fn test_execute_prompt_invalid_query() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -106,11 +101,8 @@ async fn test_builder_missing_ai_provider() {
 #[tokio::test]
 async fn test_builder_missing_storage_provider() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
-
     let builder_result = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .build();
 
     assert!(matches!(
@@ -123,12 +115,10 @@ async fn test_builder_missing_storage_provider() {
 #[tokio::test]
 async fn test_execute_prompt_with_formatting() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -160,12 +150,10 @@ async fn test_execute_prompt_with_formatting() {
 #[tokio::test]
 async fn test_execute_with_custom_query_prompt() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -196,12 +184,10 @@ async fn test_execute_with_custom_query_prompt() {
 #[tokio::test]
 async fn test_execute_with_custom_format_prompt() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -217,7 +203,7 @@ async fn test_execute_with_custom_format_prompt() {
             "Answer with a natural sentence and the number with thousand format.".to_string(),
         ),
         format_system_prompt_template: Some(
-            "You are a friendly assistant who always ends every single response with a winky face ;)".to_string(),
+            "You are a friendly assistant. It is absolutely crucial that you end every single response with a winky face ;). No matter what, your response MUST end with it.".to_string(),
         ),
         ..Default::default()
     };
@@ -304,12 +290,10 @@ async fn test_get_query_from_prompt_local_provider() {
 #[tokio::test]
 async fn test_execute_prompt_storage_error() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
     let project_id = env::var("BIGQUERY_PROJECT_ID").expect("BIGQUERY_PROJECT_ID not set");
 
     let client = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .bigquery_storage(project_id)
         .await
         .unwrap()
@@ -374,11 +358,8 @@ async fn test_execute_prompt_ai_provider_error() {
 #[tokio::test]
 async fn test_execute_prompt_direct_answer() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
-
     let client = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .storage_provider(Box::new(MockStorageProvider)) // No DB access needed
         .build()
         .unwrap();

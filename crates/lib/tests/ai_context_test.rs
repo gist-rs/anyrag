@@ -6,13 +6,9 @@
 // This declaration makes the `common` module available to the tests in this file.
 mod common;
 
-use crate::common::setup_tracing;
-use anyrag::{
-    providers::{ai::gemini::GeminiProvider, db::sqlite::SqliteProvider},
-    ExecutePromptOptions, PromptClientBuilder,
-};
+use crate::common::{create_real_ai_provider, setup_tracing};
+use anyrag::{providers::db::sqlite::SqliteProvider, ExecutePromptOptions, PromptClientBuilder};
 use chrono::Utc;
-use std::env;
 use tracing::debug;
 
 /// Tests the full E2E flow with a real AI for a prompt using the "TODAY" context.
@@ -20,8 +16,6 @@ use tracing::debug;
 #[tokio::test]
 async fn test_e2e_ai_query_with_today_context() {
     setup_tracing();
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL not set");
-    let api_key = env::var("AI_API_KEY").expect("AI_API_KEY not set");
 
     // 1. Create and fully initialize the database provider first.
 
@@ -46,7 +40,7 @@ async fn test_e2e_ai_query_with_today_context() {
 
     // 2. Now, build the client using the pre-initialized provider.
     let client = PromptClientBuilder::default()
-        .ai_provider(Box::new(GeminiProvider::new(api_url, api_key).unwrap()))
+        .ai_provider(create_real_ai_provider())
         .storage_provider(Box::new(sqlite_provider))
         .build()
         .unwrap();

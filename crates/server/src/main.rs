@@ -5,6 +5,9 @@ use self::{
     config::{get_config, Config},
     errors::AppError,
 };
+use anyrag::embedding::{embed_and_update_article, search_articles_by_embedding, SearchResult};
+use anyrag::ingest;
+use anyrag::providers::ai::embedding::generate_embedding;
 use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
     ExecutePromptOptions, PromptClient, PromptClientBuilder,
@@ -15,7 +18,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
@@ -31,6 +34,8 @@ use turso::{Builder, Database};
 pub struct AppState {
     pub prompt_client: Arc<PromptClient>,
     pub db: Arc<Database>,
+    pub embeddings_api_url: Option<String>,
+    pub embeddings_model: Option<String>,
     pub query_system_prompt_template: Option<String>,
     pub query_user_prompt_template: Option<String>,
     pub format_system_prompt_template: Option<String>,
@@ -45,14 +50,15 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
         "gemini" => {
             let api_key = config
                 .ai_api_key
+                .clone()
                 .ok_or_else(|| anyhow::anyhow!("AI_API_KEY is required for the gemini provider"))?;
-            Box::new(GeminiProvider::new(config.ai_api_url, api_key)?)
+            Box::new(GeminiProvider::new(config.ai_api_url.clone(), api_key)?)
                 as Box<dyn anyrag::providers::ai::AiProvider>
         }
         "local" => Box::new(LocalAiProvider::new(
-            config.ai_api_url,
-            config.ai_api_key,
-            config.ai_model,
+            config.ai_api_url.clone(),
+            config.ai_api_key.clone(),
+            config.ai_model.clone(),
         )?) as Box<dyn anyrag::providers::ai::AiProvider>,
         _ => {
             return Err(anyhow::anyhow!(
@@ -73,6 +79,8 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     Ok(AppState {
         prompt_client: Arc::new(prompt_client),
         db: Arc::new(db),
+        embeddings_api_url: config.embeddings_api_url,
+        embeddings_model: config.embeddings_model,
         query_system_prompt_template: config.query_system_prompt_template,
         query_user_prompt_template: config.query_user_prompt_template,
         format_system_prompt_template: config.format_system_prompt_template,
@@ -87,6 +95,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/health", get(health_check))
         .route("/prompt", post(prompt_handler))
         .route("/ingest", post(ingest_handler))
+        .route("/embed", post(embed_handler))
+        .route("/search", post(search_handler))
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
 }
@@ -164,7 +174,7 @@ async fn ingest_handler(
 ) -> Result<Json<IngestResponse>, AppError> {
     info!("Received ingest request for URL: {}", payload.url);
 
-    let ingested_count = anyrag::ingest::ingest_from_url(&app_state.db, &payload.url).await?;
+    let ingested_count = ingest::ingest_from_url(&app_state.db, &payload.url).await?;
 
     let response = IngestResponse {
         message: "Ingestion successful".to_string(),
@@ -172,6 +182,63 @@ async fn ingest_handler(
     };
 
     Ok(Json(response))
+}
+
+/// The request body for the `/embed` endpoint.
+#[derive(Deserialize)]
+struct EmbedRequest {
+    article_id: i64,
+}
+
+/// The request body for the `/search` endpoint.
+#[derive(Deserialize)]
+struct SearchRequest {
+    query: String,
+}
+
+/// The handler for the `/embed` endpoint.
+async fn embed_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<EmbedRequest>,
+) -> Result<Json<Value>, AppError> {
+    let api_url = app_state
+        .embeddings_api_url
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
+    let model = app_state
+        .embeddings_model
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
+    embed_and_update_article(&app_state.db, api_url, model, payload.article_id).await?;
+
+    Ok(Json(json!({ "success": true })))
+}
+
+/// The handler for the `/search` endpoint.
+async fn search_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<SearchRequest>,
+) -> Result<Json<Vec<SearchResult>>, AppError> {
+    info!("Received search request for query: {}", payload.query);
+
+    let api_url = app_state
+        .embeddings_api_url
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
+    let model = app_state
+        .embeddings_model
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
+    // 1. Generate an embedding for the search query.
+    let query_vector = generate_embedding(api_url, model, &payload.query).await?;
+
+    // 2. Search for similar articles in the database.
+    // For now, let's use a hardcoded limit.
+    let results = search_articles_by_embedding(&app_state.db, query_vector, 5).await?;
+
+    Ok(Json(results))
 }
 
 /// The main entry point for running the server.

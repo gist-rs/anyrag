@@ -1,3 +1,4 @@
+use anyrag::embedding::EmbeddingError;
 use anyrag::ingest::IngestError;
 use anyrag::PromptError;
 use axum::{
@@ -17,6 +18,8 @@ pub enum AppError {
     Prompt(PromptError),
     /// Errors from the ingestion process.
     Ingest(IngestError),
+    /// Errors from the embedding and search process.
+    Embedding(EmbeddingError),
     /// Generic internal server errors.
     Internal(anyhow::Error),
 }
@@ -25,6 +28,13 @@ pub enum AppError {
 impl From<IngestError> for AppError {
     fn from(err: IngestError) -> Self {
         AppError::Ingest(err)
+    }
+}
+
+/// Conversion from `EmbeddingError` to `AppError`.
+impl From<EmbeddingError> for AppError {
+    fn from(err: EmbeddingError) -> Self {
+        AppError::Embedding(err)
     }
 }
 
@@ -52,6 +62,17 @@ impl IntoResponse for AppError {
                     format!("Failed to ingest data: {err}"),
                 )
             }
+            AppError::Embedding(err) => {
+                error!("EmbeddingError: {:?}", err);
+                let status_code = match err {
+                    EmbeddingError::NotFound(_) => StatusCode::NOT_FOUND,
+                    EmbeddingError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
+                    EmbeddingError::Embedding(_) => StatusCode::BAD_GATEWAY,
+                    EmbeddingError::VectorSerialization => StatusCode::INTERNAL_SERVER_ERROR,
+                };
+                (status_code, format!("Embedding or search failed: {err}"))
+            }
+
             AppError::Prompt(err) => {
                 // Log the original error for debugging purposes
                 error!("PromptError: {:?}", err);

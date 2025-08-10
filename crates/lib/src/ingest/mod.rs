@@ -106,6 +106,7 @@ async fn create_table_if_not_exists(conn: &Connection) -> Result<(), turso::Erro
             title TEXT NOT NULL,
             link TEXT NOT NULL,
             description TEXT,
+            embedding BLOB,
             content TEXT,
             pub_date TEXT,
             source_url TEXT,

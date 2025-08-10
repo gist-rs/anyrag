@@ -1,9 +1,11 @@
+pub mod embedding;
 pub mod gemini;
 pub mod local;
 
 use crate::errors::PromptError;
 use async_trait::async_trait;
 use dyn_clone::DynClone;
+pub use embedding::generate_embedding;
 use std::fmt::Debug;
 
 /// A trait for interacting with an AI provider.

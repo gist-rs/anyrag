@@ -40,6 +40,11 @@ pub struct Config {
     pub query_user_prompt_template: Option<String>,
     pub format_system_prompt_template: Option<String>,
     pub format_user_prompt_template: Option<String>,
+
+    #[allow(unused)]
+    pub embeddings_api_url: Option<String>,
+    #[allow(unused)]
+    pub embeddings_model: Option<String>,
 }
 
 /// Loads configuration from environment variables.
@@ -55,6 +60,9 @@ pub fn get_config() -> Result<Config, ConfigError> {
     let ai_api_key = env::var("AI_API_KEY").ok();
 
     let ai_model = env::var("AI_MODEL").ok();
+
+    let embeddings_api_url = env::var("EMBEDDINGS_API_URL").ok();
+    let embeddings_model = env::var("EMBEDDINGS_MODEL").ok();
 
     let project_id = env::var("BIGQUERY_PROJECT_ID")
         .map_err(|_| ConfigError::Missing("BIGQUERY_PROJECT_ID".to_string()))?;
@@ -79,6 +87,8 @@ pub fn get_config() -> Result<Config, ConfigError> {
         ai_api_url,
         ai_api_key,
         ai_model,
+        embeddings_api_url,
+        embeddings_model,
         project_id,
         db_url,
         port,
