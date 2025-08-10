@@ -3,39 +3,49 @@
 //! This module provides the core logic for all types of search:
 //! - Vector (semantic) search for finding conceptually similar articles.
 //! - Keyword (lexical) search for finding exact term matches.
-//! - Hybrid search for combining the strengths of both using Reciprocal Rank Fusion.
+//! - Hybrid search for combining the strengths of both using either an LLM for
+//!   re-ranking (default) or Reciprocal Rank Fusion (optional).
 
-use crate::providers::ai::AiProvider;
-use serde::Serialize;
+use crate::{errors::PromptError, providers::ai::AiProvider};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
-use tracing::info;
-use turso::{params, Database, Value as TursoValue};
+use tracing::{debug, info};
+use turso::{params, Database, Value};
+
+/// Defines the re-ranking strategy for hybrid search.
+#[derive(Default, Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    /// Uses a Large Language Model to intelligently re-rank candidates. (Default)
+    #[default]
+    LlmReRank,
+    /// Uses the fast Reciprocal Rank Fusion algorithm.
+    Rrf,
+}
 
 /// Custom error types for the search process.
 #[derive(Error, Debug)]
 pub enum SearchError {
     #[error("Database error: {0}")]
     Database(#[from] turso::Error),
+    #[error("LLM Re-ranking failed: {0}")]
+    LlmReRank(#[from] PromptError),
+    #[error("Failed to parse LLM re-ranking response: {0}")]
+    LlmResponseParsing(#[from] serde_json::Error),
 }
 
-/// Represents a single search result from a vector similarity search.
-#[derive(Debug, Serialize, Clone)]
+/// Represents a single search result.
+#[derive(Debug, Serialize, Clone, PartialEq)]
 pub struct SearchResult {
     pub title: String,
     pub link: String,
     pub description: String,
-    /// A generic score. For vector search, lower is better (distance). For keyword/hybrid, higher is better.
+    /// A generic score. For vector search, lower is better (distance). For RRF/LLM, higher is better.
     pub score: f64,
 }
 
 /// Performs a vector-based (semantic) search for articles.
-///
-/// # Arguments
-///
-/// * `db`: A shared reference to the Turso database instance.
-/// * `query_vector`: The vector to compare against.
-/// * `limit`: The maximum number of results to return.
 pub async fn search_by_vector(
     db: &Database,
     query_vector: Vec<f32>,
@@ -52,11 +62,6 @@ pub async fn search_by_vector(
             .join(", ")
     );
 
-    // The vector_distance_cos function returns a value between 0.0 (identical) and 2.0.
-    // A value of 1.0 means the vectors are orthogonal (no similarity).
-    // We add a WHERE clause to filter out results that are not semantically similar,
-    // using a threshold. A value of 0.6 is a reasonable starting point, filtering
-    // out anything that is more dissimilar than similar.
     let distance_threshold = 0.6;
     let sql = format!(
         "SELECT title, link, description, vector_distance_cos(embedding, {vector_str}) AS distance
@@ -71,20 +76,20 @@ pub async fn search_by_vector(
     let mut search_results = Vec::new();
 
     while let Some(row) = results.next().await? {
-        let title: String = match row.get_value(0)? {
-            TursoValue::Text(s) => s,
+        let title = match row.get_value(0)? {
+            Value::Text(s) => s,
             _ => String::new(),
         };
-        let link: String = match row.get_value(1)? {
-            TursoValue::Text(s) => s,
+        let link = match row.get_value(1)? {
+            Value::Text(s) => s,
             _ => String::new(),
         };
-        let description: String = match row.get_value(2)? {
-            TursoValue::Text(s) => s,
+        let description = match row.get_value(2)? {
+            Value::Text(s) => s,
             _ => String::new(),
         };
-        let score: f64 = match row.get_value(3)? {
-            TursoValue::Real(f) => f,
+        let score = match row.get_value(3)? {
+            Value::Real(f) => f,
             _ => 0.0,
         };
         search_results.push(SearchResult {
@@ -98,26 +103,21 @@ pub async fn search_by_vector(
     Ok(search_results)
 }
 
-/// Performs a keyword-based search using SQL LIKE.
-///
-/// # Arguments
-///
-/// * `db`: A shared reference to the Turso database instance.
-/// * `query`: The text to search for.
-/// * `limit`: The maximum number of results to return.
+/// Performs a case-insensitive keyword-based search using SQL LIKE.
 pub async fn search_by_keyword(
     db: &Database,
     query: &str,
     limit: u32,
 ) -> Result<Vec<SearchResult>, SearchError> {
     let conn = db.connect().map_err(SearchError::Database)?;
-    let pattern = format!("%{query}%");
+    // Convert the query to lowercase for a case-insensitive search.
+    let pattern = format!("%{}%", query.to_lowercase());
 
     let sql = format!(
         "
         SELECT title, link, description, 0.0 as score
         FROM articles
-        WHERE title LIKE ?1 OR description LIKE ?1
+        WHERE LOWER(title) LIKE ?1 OR LOWER(description) LIKE ?1
         LIMIT {limit};
     "
     );
@@ -128,19 +128,19 @@ pub async fn search_by_keyword(
 
     while let Some(row) = results.next().await? {
         let title = match row.get_value(0)? {
-            TursoValue::Text(s) => s,
+            Value::Text(s) => s,
             _ => String::new(),
         };
         let link = match row.get_value(1)? {
-            TursoValue::Text(s) => s,
+            Value::Text(s) => s,
             _ => String::new(),
         };
         let description = match row.get_value(2)? {
-            TursoValue::Text(s) => s,
+            Value::Text(s) => s,
             _ => String::new(),
         };
         let score = match row.get_value(3)? {
-            TursoValue::Real(f) => f,
+            Value::Real(f) => f,
             _ => 0.0,
         };
         search_results.push(SearchResult {
@@ -154,60 +154,137 @@ pub async fn search_by_keyword(
     Ok(search_results)
 }
 
-/// Performs a hybrid search by combining vector and keyword search results
-/// using Reciprocal Rank Fusion (RRF).
-///
-/// # Arguments
-///
-/// * `db`: A shared reference to the Turso database instance.
-/// * `_ai_provider`: Unused in this RRF implementation, but kept for signature compatibility.
-/// * `query_vector`: The vector for the semantic search part.
-/// * `query_text`: The original user query text for keyword search.
-/// * `limit`: The maximum number of final results to return.
+/// Performs a hybrid search by fetching candidates and then using a specified
+/// `SearchMode` to re-rank them.
 pub async fn hybrid_search(
     db: &Database,
-    _ai_provider: &dyn AiProvider,
+    ai_provider: &dyn AiProvider,
     query_vector: Vec<f32>,
     query_text: &str,
     limit: u32,
+    mode: SearchMode,
 ) -> Result<Vec<SearchResult>, SearchError> {
-    info!("Starting hybrid search for: '{}'", query_text);
+    info!(
+        "Starting hybrid search for: '{}' with mode: {:?}",
+        query_text, mode
+    );
 
     // --- Stage 1: Fetch Candidates Concurrently ---
     let (vector_results, keyword_results) = tokio::join!(
-        search_by_vector(db, query_vector, limit * 2), // Fetch more to allow for diverse ranking
+        search_by_vector(db, query_vector.clone(), limit * 2),
         search_by_keyword(db, query_text, limit * 2)
     );
 
     let vector_results = vector_results?;
-    info!("Vector search results: {:?}", vector_results);
+    info!("Vector search found {} candidates.", vector_results.len());
     let keyword_results = keyword_results?;
-    info!("Keyword search results: {:?}", keyword_results);
+    info!("Keyword search found {} candidates.", keyword_results.len());
 
-    // --- Stage 2: Combine and Re-rank using Reciprocal Rank Fusion (RRF) ---
+    // --- Stage 2: Re-rank using the specified mode ---
+    let mut ranked_results = match mode {
+        SearchMode::LlmReRank => {
+            let mut all_candidates: HashMap<String, SearchResult> = HashMap::new();
+            for result in vector_results
+                .into_iter()
+                .chain(keyword_results.into_iter())
+            {
+                all_candidates.entry(result.link.clone()).or_insert(result);
+            }
+            let candidates: Vec<SearchResult> = all_candidates.into_values().collect();
+
+            if candidates.is_empty() {
+                return Ok(vec![]);
+            }
+            llm_rerank(ai_provider, query_text, candidates).await?
+        }
+        SearchMode::Rrf => reciprocal_rank_fusion(vector_results, keyword_results),
+    };
+
+    ranked_results.truncate(limit as usize);
+    Ok(ranked_results)
+}
+
+/// Re-ranks search results using an LLM.
+async fn llm_rerank(
+    ai_provider: &dyn AiProvider,
+    query_text: &str,
+    candidates: Vec<SearchResult>,
+) -> Result<Vec<SearchResult>, SearchError> {
+    info!("Re-ranking {} candidates using LLM.", candidates.len());
+
+    let system_prompt = "You are an expert search result re-ranker. Your task is to re-order a list of provided articles based on their relevance to a user's query. Analyze the user's query and the article content (title and description). Return a JSON array containing only the `link` strings of the articles in the new, correctly ordered sequence, from most relevant to least relevant. Do not add any explanation or other text outside of the JSON array.";
+
+    let articles_context = candidates
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            format!(
+                "Article {i}:\n- Title: {}\n- Link: {}\n- Description: {}",
+                r.title, r.link, r.description
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let user_prompt = format!(
+        "# User Query:\n{query_text}\n\n# Articles to Re-rank:\n{articles_context}\n\n# Your Output (JSON array of links only):\n"
+    );
+
+    debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompt to LLM for re-ranking");
+
+    let llm_response = ai_provider.generate(system_prompt, &user_prompt).await?;
+
+    debug!("<-- LLM re-rank response: {}", llm_response);
+
+    let re = regex::Regex::new(r"\[[\s\S]*\]").unwrap();
+    let json_match = re.find(&llm_response).map(|m| m.as_str());
+
+    let ordered_links: Vec<String> = match json_match {
+        Some(json_str) => serde_json::from_str(json_str)?,
+        None => {
+            info!("LLM response did not contain a valid JSON array. Returning empty results.");
+            return Ok(vec![]);
+        }
+    };
+
+    let candidates_map: HashMap<String, SearchResult> = candidates
+        .into_iter()
+        .map(|c| (c.link.clone(), c))
+        .collect();
+
+    let final_results: Vec<SearchResult> = ordered_links
+        .into_iter()
+        .filter_map(|link| candidates_map.get(&link).cloned())
+        .collect();
+
+    Ok(final_results)
+}
+
+/// Re-ranks search results using Reciprocal Rank Fusion.
+fn reciprocal_rank_fusion(
+    vector_results: Vec<SearchResult>,
+    keyword_results: Vec<SearchResult>,
+) -> Vec<SearchResult> {
+    info!("Re-ranking using Reciprocal Rank Fusion.");
+
     let mut rrf_scores: HashMap<String, f64> = HashMap::new();
-    let k = 60.0; // RRF ranking constant
-    let keyword_boost = 1.2; // Give a slight boost to exact keyword matches
+    let k = 60.0;
+    let keyword_boost = 1.2;
 
-    // Process vector results
     for (i, result) in vector_results.iter().enumerate() {
         let rank = (i + 1) as f64;
         *rrf_scores.entry(result.link.clone()).or_insert(0.0) += 1.0 / (k + rank);
     }
 
-    // Process keyword results with the boost
     for (i, result) in keyword_results.iter().enumerate() {
         let rank = (i + 1) as f64;
         let score = (1.0 / (k + rank)) * keyword_boost;
         *rrf_scores.entry(result.link.clone()).or_insert(0.0) += score;
     }
 
-    info!("RRF scores: {:?}", rrf_scores);
-
-    // --- Stage 3: Sort and Finalize Results ---
     let mut combined_results: Vec<SearchResult> = vector_results
         .into_iter()
-        .chain(keyword_results.into_iter())
+        .chain(keyword_results)
         .map(|res| (res.link.clone(), res))
         .collect::<HashMap<_, _>>()
         .into_values()
@@ -221,12 +298,11 @@ pub async fn hybrid_search(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    info!("Sorted combined results: {:?}", combined_results);
+    info!("RRF sorted results: {:?}", combined_results);
 
     for result in &mut combined_results {
         result.score = *rrf_scores.get(&result.link).unwrap_or(&0.0);
     }
 
-    combined_results.truncate(limit as usize);
-    Ok(combined_results)
+    combined_results
 }

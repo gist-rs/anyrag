@@ -8,7 +8,7 @@ use self::{
 use anyrag::{
     ingest::{embed_article, ingest_from_url},
     providers::ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
-    search::{hybrid_search, search_by_keyword, search_by_vector, SearchResult},
+    search::{hybrid_search, search_by_keyword, search_by_vector, SearchMode, SearchResult},
     ExecutePromptOptions, PromptClient, PromptClientBuilder,
 };
 use axum::{
@@ -27,9 +27,6 @@ use tracing_subscriber::FmtSubscriber;
 use turso::{Builder, Database, Value as TursoValue};
 
 /// The shared application state.
-///
-/// This struct holds the `PromptClient` and default prompt templates
-/// which are shared across all handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub prompt_client: Arc<PromptClient>,
@@ -43,30 +40,27 @@ pub struct AppState {
 }
 
 /// Builds the shared application state from the configuration.
-///
-/// This involves setting up the AI and storage providers.
 pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
-    let ai_provider = match config.ai_provider.as_str() {
-        "gemini" => {
-            let api_key = config
-                .ai_api_key
-                .clone()
-                .ok_or_else(|| anyhow::anyhow!("AI_API_KEY is required for the gemini provider"))?;
-            Box::new(GeminiProvider::new(config.ai_api_url.clone(), api_key)?)
-                as Box<dyn anyrag::providers::ai::AiProvider>
-        }
-        "local" => Box::new(LocalAiProvider::new(
-            config.ai_api_url.clone(),
-            config.ai_api_key.clone(),
-            config.ai_model.clone(),
-        )?) as Box<dyn anyrag::providers::ai::AiProvider>,
-        _ => {
-            return Err(anyhow::anyhow!(
-                "Unsupported AI provider: {}",
-                config.ai_provider
-            ))
-        }
-    };
+    let ai_provider: Box<dyn anyrag::providers::ai::AiProvider> =
+        match config.ai_provider.as_str() {
+            "gemini" => {
+                let api_key = config.ai_api_key.clone().ok_or_else(|| {
+                    anyhow::anyhow!("AI_API_KEY is required for the gemini provider")
+                })?;
+                Box::new(GeminiProvider::new(config.ai_api_url.clone(), api_key)?)
+            }
+            "local" => Box::new(LocalAiProvider::new(
+                config.ai_api_url.clone(),
+                config.ai_api_key.clone(),
+                config.ai_model.clone(),
+            )?),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Unsupported AI provider: {}",
+                    config.ai_provider
+                ))
+            }
+        };
 
     let db = Builder::new_local(&config.db_url).build().await?;
 
@@ -142,6 +136,8 @@ struct EmbedNewResponse {
 struct SearchRequest {
     query: String,
     limit: Option<u32>,
+    #[serde(default)] // This makes the field optional, defaulting to SearchMode::default()
+    mode: SearchMode,
 }
 
 // --- Route Handlers ---
@@ -320,8 +316,8 @@ async fn hybrid_search_handler(
 ) -> Result<Json<Vec<SearchResult>>, AppError> {
     let limit = payload.limit.unwrap_or(10);
     info!(
-        "Received hybrid search request for query: '{}', limit: {}",
-        payload.query, limit
+        "Received hybrid search request for query: '{}', limit: {}, mode: {:?}",
+        payload.query, limit, payload.mode
     );
 
     let api_url = app_state
@@ -340,6 +336,7 @@ async fn hybrid_search_handler(
         query_vector,
         &payload.query,
         limit,
+        payload.mode,
     )
     .await?;
 
