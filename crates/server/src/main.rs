@@ -14,13 +14,14 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, info};
 use tracing_subscriber::FmtSubscriber;
+use turso::{Builder, Database};
 
 /// The shared application state.
 ///
@@ -29,6 +30,7 @@ use tracing_subscriber::FmtSubscriber;
 #[derive(Clone)]
 pub struct AppState {
     pub prompt_client: Arc<PromptClient>,
+    pub db: Arc<Database>,
     pub query_system_prompt_template: Option<String>,
     pub query_user_prompt_template: Option<String>,
     pub format_system_prompt_template: Option<String>,
@@ -60,6 +62,8 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
         }
     };
 
+    let db = Builder::new_local(&config.db_url).build().await?;
+
     let prompt_client = PromptClientBuilder::new()
         .ai_provider(ai_provider)
         .bigquery_storage(config.project_id)
@@ -68,6 +72,7 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
 
     Ok(AppState {
         prompt_client: Arc::new(prompt_client),
+        db: Arc::new(db),
         query_system_prompt_template: config.query_system_prompt_template,
         query_user_prompt_template: config.query_user_prompt_template,
         format_system_prompt_template: config.format_system_prompt_template,
@@ -81,6 +86,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/", get(root))
         .route("/health", get(health_check))
         .route("/prompt", post(prompt_handler))
+        .route("/ingest", post(ingest_handler))
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
 }
@@ -134,6 +140,38 @@ async fn prompt_handler(
         .await?;
 
     Ok(Json(PromptResponse { result }))
+}
+
+/// The request body for the `/ingest` endpoint.
+#[derive(Deserialize)]
+struct IngestRequest {
+    url: String,
+}
+
+/// The response body for the `/ingest` endpoint.
+#[derive(Serialize)]
+struct IngestResponse {
+    message: String,
+    ingested_articles: usize,
+}
+
+/// The handler for the `/ingest` endpoint.
+///
+/// This function fetches an RSS feed and saves the articles to the database.
+async fn ingest_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<IngestRequest>,
+) -> Result<Json<IngestResponse>, AppError> {
+    info!("Received ingest request for URL: {}", payload.url);
+
+    let ingested_count = anyrag::ingest::ingest_from_url(&app_state.db, &payload.url).await?;
+
+    let response = IngestResponse {
+        message: "Ingestion successful".to_string(),
+        ingested_articles: ingested_count,
+    };
+
+    Ok(Json(response))
 }
 
 /// The main entry point for running the server.

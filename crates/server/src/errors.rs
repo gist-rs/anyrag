@@ -1,3 +1,4 @@
+use anyrag::ingest::IngestError;
 use anyrag::PromptError;
 use axum::{
     http::StatusCode,
@@ -14,8 +15,17 @@ use tracing::error;
 pub enum AppError {
     /// Errors originating from the `anyrag`.
     Prompt(PromptError),
+    /// Errors from the ingestion process.
+    Ingest(IngestError),
     /// Generic internal server errors.
     Internal(anyhow::Error),
+}
+
+/// Conversion from `IngestError` to `AppError`.
+impl From<IngestError> for AppError {
+    fn from(err: IngestError) -> Self {
+        AppError::Ingest(err)
+    }
 }
 
 /// Conversion from `PromptError` to `AppError`.
@@ -35,6 +45,13 @@ impl From<anyhow::Error> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status_code, error_message) = match self {
+            AppError::Ingest(err) => {
+                error!("IngestError: {:?}", err);
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("Failed to ingest data: {err}"),
+                )
+            }
             AppError::Prompt(err) => {
                 // Log the original error for debugging purposes
                 error!("PromptError: {:?}", err);

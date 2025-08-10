@@ -18,8 +18,10 @@ tracing = { workspace = true }
 serde_json = { workspace = true }
 async-trait.workspace = true
 dyn-clone = { workspace = true }
-chrono = "0.4"
-turso = "0.1.3"
+chrono = { workspace = true }
+turso = { workspace = true }
+rss = { workspace = true }
+
 
 [dev-dependencies]
 dotenvy = "0.15.7"

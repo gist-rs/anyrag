@@ -4,6 +4,7 @@
 //! (e.g., SQL) using a configurable AI provider and execute them against a storage provider.
 
 pub mod errors;
+pub mod ingest;
 pub mod prompts;
 pub mod providers;
 pub mod types;

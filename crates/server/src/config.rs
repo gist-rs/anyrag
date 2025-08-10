@@ -32,6 +32,8 @@ pub struct Config {
     pub ai_api_key: Option<String>,
     pub ai_model: Option<String>,
     pub project_id: String,
+    #[allow(unused)]
+    pub db_url: String,
     pub port: u16,
     // --- Prompt Templates ---
     pub query_system_prompt_template: Option<String>,
@@ -57,6 +59,8 @@ pub fn get_config() -> Result<Config, ConfigError> {
     let project_id = env::var("BIGQUERY_PROJECT_ID")
         .map_err(|_| ConfigError::Missing("BIGQUERY_PROJECT_ID".to_string()))?;
 
+    let db_url = env::var("DB_URL").unwrap_or_else(|_| "anyrag.db".to_string());
+
     let port = match env::var("PORT") {
         Ok(val) => val
             .parse::<u16>()
@@ -76,6 +80,7 @@ pub fn get_config() -> Result<Config, ConfigError> {
         ai_api_key,
         ai_model,
         project_id,
+        db_url,
         port,
         query_system_prompt_template,
         query_user_prompt_template,
