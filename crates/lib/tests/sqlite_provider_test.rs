@@ -14,6 +14,7 @@ mod common;
 use crate::common::setup_tracing;
 use anyrag::providers::db::storage::Storage;
 use anyrag::{providers::db::sqlite::SqliteProvider, PromptError};
+use chrono::Utc;
 use serde_json::json;
 
 /// This test is adapted from the official Turso repository to verify basic DB operations.
@@ -94,4 +95,58 @@ async fn test_sqlite_in_memory_is_isolated() {
         }
         _ => panic!("Expected StorageOperationFailed, but got {error:?}"),
     }
+}
+
+/// Verifies that cloning a provider shares the database, and that datetime queries work.
+#[tokio::test]
+async fn test_sqlite_provider_shared_db_and_datetime_query() {
+    setup_tracing();
+
+    // 1. Setup: Create a new in-memory SQLite provider.
+    // Cloning this provider will share the same underlying in-memory database.
+    let provider1 = SqliteProvider::new(":memory:")
+        .await
+        .expect("Failed to create SqliteProvider");
+
+    // 2. Arrange: Create a table and insert data with dates.
+    let today = Utc::now().format("%Y-%m-%d").to_string();
+    let yesterday = (Utc::now() - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+    let tomorrow = (Utc::now() + chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let setup_sql = format!(
+        "
+        CREATE TABLE events (name TEXT, event_date TEXT);
+        INSERT INTO events (name, event_date) VALUES ('Past Event', '{yesterday}');
+        INSERT INTO events (name, event_date) VALUES ('Today Event 1', '{today}');
+        INSERT INTO events (name, event_date) VALUES ('Today Event 2', '{today}');
+        INSERT INTO events (name, event_date) VALUES ('Future Event', '{tomorrow}');
+    "
+    );
+
+    provider1
+        .initialize_with_data(&setup_sql)
+        .await
+        .expect("Failed to initialize database with test data");
+
+    // 3. Act: Clone the provider and execute a query for today's events.
+    // This demonstrates that the cloned provider shares the same database state.
+    let provider2 = provider1.clone();
+    let query = format!("SELECT name FROM events WHERE event_date = '{today}' ORDER BY name;");
+    let result_json = provider2
+        .execute_query(&query)
+        .await
+        .expect("Failed to execute query on cloned provider");
+
+    // 4. Assert: Check if the returned JSON contains only today's events.
+    let expected_json = json!([
+        {"name": "Today Event 1"},
+        {"name": "Today Event 2"}
+    ])
+    .to_string();
+
+    assert_eq!(result_json, expected_json);
 }

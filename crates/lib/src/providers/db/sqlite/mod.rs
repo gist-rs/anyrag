@@ -11,16 +11,17 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tracing::debug;
-use turso::{Connection, Value as TursoValue};
+use turso::{Database, Value as TursoValue};
 
 /// A provider for interacting with a local SQLite database using Turso.
 ///
-/// This provider holds a single, persistent connection wrapped in an `Arc`
-/// to ensure that all clones of the provider share the same database state.
+/// This provider holds a `Database` instance, which manages a connection pool.
+/// When cloned, it shares the same underlying database, allowing for concurrent and
+/// shared access to the same database file or in-memory instance.
 #[derive(Clone)]
 pub struct SqliteProvider {
-    // The connection is wrapped in an Arc and Mutex to allow shared, mutable access across clones.
-    pub conn: Arc<Connection>,
+    /// The Turso database instance. It's cloneable and thread-safe.
+    db: Database,
     schema_cache: Arc<RwLock<HashMap<String, Arc<TableSchema>>>>,
 }
 
@@ -29,28 +30,34 @@ impl SqliteProvider {
     ///
     /// # Arguments
     ///
-    /// * `db_path`: The path to the SQLite database file. Use ":memory:" for an in-memory database,
-    ///   or "file:?mode=memory&cache=shared" for a shared in-memory database.
+    /// * `db_path`: The path to the SQLite database file. Use ":memory:" for a unique,
+    ///   isolated in-memory database. To share an in-memory database across multiple
+    ///   `SqliteProvider` instances (e.g., in tests), create one provider and
+    ///   then `.clone()` it.
     pub async fn new(db_path: &str) -> Result<Self, PromptError> {
+        // The turso builder creates a new database instance.
+        // If `db_path` is ":memory:", it's a new, isolated in-memory DB.
+        // If it's a file path, it points to that file.
         let db = turso::Builder::new_local(db_path)
             .build()
             .await
             .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
-        let conn = db
-            .connect()
-            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
         Ok(Self {
-            // Immediately wrap the new connection in an Arc.
-            conn: Arc::new(conn),
+            db,
             schema_cache: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
     /// A helper for tests to pre-populate data by executing multiple SQL statements.
     pub async fn initialize_with_data(&self, init_sql: &str) -> Result<(), PromptError> {
+        // Get a new connection for this operation.
+        let conn = self
+            .db
+            .connect()
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+
         for statement in init_sql.split(';').filter(|s| !s.trim().is_empty()) {
-            self.conn
-                .execute(statement, ())
+            conn.execute(statement, ())
                 .await
                 .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
         }
@@ -91,8 +98,13 @@ impl Storage for SqliteProvider {
     async fn execute_query(&self, query: &str) -> Result<String, PromptError> {
         debug!(query = %query, "--> Executing SQLite query");
 
-        let mut stmt = self
-            .conn
+        // Get a new connection for this query.
+        let conn = self
+            .db
+            .connect()
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+
+        let mut stmt = conn
             .prepare(query)
             .await
             .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
@@ -134,10 +146,15 @@ impl Storage for SqliteProvider {
             return Ok(schema.clone());
         }
 
+        // Get a new connection for this query.
+        let conn = self
+            .db
+            .connect()
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+
         let query = format!("PRAGMA table_info('{table_name}');");
 
-        let mut rows = self
-            .conn
+        let mut rows = conn
             .query(&query, ())
             .await
             .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
