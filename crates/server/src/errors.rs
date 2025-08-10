@@ -1,6 +1,8 @@
-use anyrag::ingest::IngestError;
-use anyrag::search::EmbeddingError;
-use anyrag::PromptError;
+use anyrag::{
+    ingest::{EmbeddingError, IngestError},
+    search::SearchError,
+    PromptError,
+};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -19,8 +21,10 @@ pub enum AppError {
     Prompt(PromptError),
     /// Errors from the ingestion process.
     Ingest(IngestError),
-    /// Errors from the embedding and search process.
+    /// Errors from the embedding process.
     Embedding(EmbeddingError),
+    /// Errors from the search process.
+    Search(SearchError),
     /// Errors from database operations.
     Database(TursoError),
     /// Generic internal server errors.
@@ -38,6 +42,13 @@ impl From<IngestError> for AppError {
 impl From<EmbeddingError> for AppError {
     fn from(err: EmbeddingError) -> Self {
         AppError::Embedding(err)
+    }
+}
+
+/// Conversion from `SearchError` to `AppError`.
+impl From<SearchError> for AppError {
+    fn from(err: SearchError) -> Self {
+        AppError::Search(err)
     }
 }
 
@@ -78,9 +89,15 @@ impl IntoResponse for AppError {
                     EmbeddingError::NotFound(_) => StatusCode::NOT_FOUND,
                     EmbeddingError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
                     EmbeddingError::Embedding(_) => StatusCode::BAD_GATEWAY,
-                    EmbeddingError::VectorSerialization => StatusCode::INTERNAL_SERVER_ERROR,
                 };
-                (status_code, format!("Embedding or search failed: {err}"))
+                (status_code, format!("Embedding failed: {err}"))
+            }
+            AppError::Search(err) => {
+                error!("SearchError: {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Search operation failed: {err}"),
+                )
             }
             AppError::Database(err) => {
                 error!("Database error: {:?}", err);

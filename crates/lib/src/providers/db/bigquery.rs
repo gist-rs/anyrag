@@ -64,16 +64,16 @@ impl Storage for BigQueryProvider {
         // which has the necessary billing and permissions. The query string itself
         // (e.g., "SELECT * FROM `bigquery-public-data.samples.shakespeare`")
         // tells BigQuery which project to read the data from.
+        // By explicitly setting `use_legacy_sql` to false, we ensure Standard SQL
+        // is used, which is generally required for modern queries and syntax. This can
+        // also prevent the client from making incorrect assumptions about default datasets.
+        let mut req = QueryRequest::new(query.to_string());
+        req.use_legacy_sql = false;
+
         let response = self
             .client
             .job()
-            .query(
-                &self.project_id,
-                QueryRequest {
-                    query: query.to_string(),
-                    ..Default::default()
-                },
-            )
+            .query(&self.project_id, req)
             .await
             .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
 

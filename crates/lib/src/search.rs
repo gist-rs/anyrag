@@ -4,10 +4,7 @@
 //! - Vector (semantic) search for finding conceptually similar articles.
 //! - Keyword (lexical) search for finding exact term matches.
 //! - Hybrid search for combining the strengths of both using Reciprocal Rank Fusion.
-//!
-//! It also contains the logic for generating and storing vector embeddings.
 
-use crate::providers::ai::embedding::generate_embedding;
 use crate::providers::ai::AiProvider;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -15,17 +12,11 @@ use thiserror::Error;
 use tracing::info;
 use turso::{params, Database, Value as TursoValue};
 
-/// Custom error types for the embedding and search processes.
+/// Custom error types for the search process.
 #[derive(Error, Debug)]
-pub enum EmbeddingError {
+pub enum SearchError {
     #[error("Database error: {0}")]
     Database(#[from] turso::Error),
-    #[error("Embedding generation failed: {0}")]
-    Embedding(#[from] crate::errors::PromptError),
-    #[error("Article with ID {0} not found.")]
-    NotFound(i64),
-    #[error("Failed to serialize vector for query.")]
-    VectorSerialization,
 }
 
 /// Represents a single search result from a vector similarity search.
@@ -36,64 +27,6 @@ pub struct SearchResult {
     pub description: String,
     /// A generic score. For vector search, lower is better (distance). For keyword/hybrid, higher is better.
     pub score: f64,
-}
-
-/// Fetches an article, generates an embedding for it, and saves it to the database.
-///
-/// # Arguments
-///
-/// * `db`: A shared reference to the Turso database instance.
-/// * `embeddings_api_url`: The URL of the embeddings API endpoint.
-/// * `embeddings_model`: The name of the model to use for generating embeddings.
-/// * `article_id`: The ID of the article to process.
-pub async fn embed_article(
-    db: &Database,
-    embeddings_api_url: &str,
-    embeddings_model: &str,
-    article_id: i64,
-) -> Result<(), EmbeddingError> {
-    let conn = db.connect().map_err(EmbeddingError::Database)?;
-
-    // 1. Fetch the article's text content.
-    let mut stmt = conn
-        .prepare("SELECT title, description FROM articles WHERE id = ?")
-        .await?;
-    let mut rows = stmt.query(params![article_id]).await?;
-
-    let (title, description) = if let Some(row) = rows.next().await? {
-        let title: String = match row.get_value(0)? {
-            TursoValue::Text(s) => s,
-            _ => String::new(),
-        };
-        let description: String = match row.get_value(1)? {
-            TursoValue::Text(s) => s,
-            _ => String::new(),
-        };
-        (title, description)
-    } else {
-        return Err(EmbeddingError::NotFound(article_id));
-    };
-
-    // Use both title and description for a richer embedding context.
-    let text_to_embed = format!("{title}. {description}");
-    info!("Generating embedding for article ID: {article_id} with text: \"{text_to_embed}\"");
-
-    // 2. Generate the embedding.
-    let vector = generate_embedding(embeddings_api_url, embeddings_model, &text_to_embed).await?;
-
-    // 3. Convert Vec<f32> to &[u8] for BLOB storage.
-    let vector_bytes: &[u8] =
-        unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
-
-    // 4. Update the database record.
-    conn.execute(
-        "UPDATE articles SET embedding = ? WHERE id = ?",
-        params![vector_bytes, article_id],
-    )
-    .await?;
-
-    info!("Successfully embedded and updated article ID: {article_id}");
-    Ok(())
 }
 
 /// Performs a vector-based (semantic) search for articles.
@@ -107,8 +40,8 @@ pub async fn search_by_vector(
     db: &Database,
     query_vector: Vec<f32>,
     limit: u32,
-) -> Result<Vec<SearchResult>, EmbeddingError> {
-    let conn = db.connect().map_err(EmbeddingError::Database)?;
+) -> Result<Vec<SearchResult>, SearchError> {
+    let conn = db.connect().map_err(SearchError::Database)?;
 
     let vector_str = format!(
         "vector('[{}]')",
@@ -170,8 +103,8 @@ pub async fn search_by_keyword(
     db: &Database,
     query: &str,
     limit: u32,
-) -> Result<Vec<SearchResult>, EmbeddingError> {
-    let conn = db.connect().map_err(EmbeddingError::Database)?;
+) -> Result<Vec<SearchResult>, SearchError> {
+    let conn = db.connect().map_err(SearchError::Database)?;
     let pattern = format!("%{query}%");
 
     let sql = format!(
@@ -231,7 +164,7 @@ pub async fn hybrid_search(
     query_vector: Vec<f32>,
     query_text: &str,
     limit: u32,
-) -> Result<Vec<SearchResult>, EmbeddingError> {
+) -> Result<Vec<SearchResult>, SearchError> {
     info!("Starting hybrid search for: '{}'", query_text);
 
     // --- Stage 1: Fetch Candidates Concurrently ---
