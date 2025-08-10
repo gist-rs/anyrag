@@ -107,11 +107,21 @@ gcloud run services update YOUR_SERVICE_NAME \
   --update-env-vars QUERY_SYSTEM_PROMPT_TEMPLATE="You are a SQL expert who only writes queries using Common Table Expressions (CTEs)."
 ```
 
-## API Usage
+## API Endpoints
 
-Once the server is running, you can query it from another terminal.
+The server exposes several endpoints for interacting with the `anyrag` library. All `POST` endpoints expect a JSON body and return a JSON response.
 
-### Basic Request
+### Prompt API
+
+This endpoint is for the core Natural Language to Query functionality.
+
+#### `POST /prompt`
+
+Translates a natural language prompt into a query, executes it against the storage provider (e.g., BigQuery), and formats the result. It is highly configurable.
+
+**Request Body:** An `ExecutePromptOptions` JSON object.
+
+**Example: Basic Query**
 ```sh
 curl -X POST http://localhost:9090/prompt \
   -H "Content-Type: application/json" \
@@ -121,25 +131,64 @@ curl -X POST http://localhost:9090/prompt \
   }'
 ```
 
-### Advanced API Usage: Overriding Prompts
+### Search API
 
-The `/prompt` endpoint is highly flexible, accepting any field from the `anyrag::ExecutePromptOptions` struct. This allows you to override the default AI behavior for both query generation and response formatting directly through the API. Any prompts provided in an API request will take precedence over server-wide defaults set via environment variables.
+These endpoints are for searching articles ingested into the local SQLite database. They provide different search strategies to suit various needs.
 
--   `system_prompt_template`: Overrides the `QUERY_SYSTEM_PROMPT_TEMPLATE`. Use this to make the AI perform generic tasks, like translation.
--   `user_prompt_template`: Overrides the `QUERY_USER_PROMPT_TEMPLATE`.
--   `format_system_prompt_template`: Overrides the `FORMAT_SYSTEM_PROMPT_TEMPLATE`, allowing you to control the style and tone of the final output.
+**Common Request Body:**
+```json
+{
+  "query": "your search query",
+  "limit": 10
+}
+```
+- `query`: The text you want to search for.
+- `limit`: (Optional) The maximum number of results to return. Defaults to 10.
 
-#### Example: Custom Formatting via API
+---
 
-This example uses `format_system_prompt_template` in the request body to make the AI act as a cheerful assistant that adds a winking face to its response.
+#### `POST /search/keyword`
 
+Performs a fast, traditional keyword search using a Full-Text Search (FTS) index. This is best for finding exact words or phrases.
+
+**Example:**
 ```sh
-curl -X POST http://localhost:9090/prompt \
+curl -X POST http://localhost:9090/search/keyword \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "What is the total word_count for the corpus '\''kinghenryv'\''?",
-    "table_name": "bigquery-public-data.samples.shakespeare",
-    "instruction": "Answer with only the number.",
-    "format_system_prompt_template": "You are a cheerful AI assistant. You always add a winking face ;) at the end of your response."
+    "query": "PostgreSQL performance",
+    "limit": 5
+  }'
+```
+
+---
+
+#### `POST /search/vector`
+
+Performs a semantic or conceptual search using vector embeddings. This is best for finding articles that are thematically similar to the query, even if they don't contain the exact keywords.
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/search/vector \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "building web applications with python",
+    "limit": 5
+  }'
+```
+
+---
+
+#### `POST /search/hybrid`
+
+Combines the strengths of both keyword and vector search using a Reciprocal Rank Fusion (RRF) algorithm. It provides the most balanced and often the most relevant results. **This is the recommended endpoint for general-purpose search.**
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/search/hybrid \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Qwen3",
+    "limit": 5
   }'
 ```

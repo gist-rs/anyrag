@@ -1,5 +1,5 @@
-use anyrag::embedding::EmbeddingError;
 use anyrag::ingest::IngestError;
+use anyrag::search::EmbeddingError;
 use anyrag::PromptError;
 use axum::{
     http::StatusCode,

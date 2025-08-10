@@ -59,6 +59,11 @@ impl Storage for BigQueryProvider {
     /// Executes a query on BigQuery and returns the result as a JSON string.
     async fn execute_query(&self, query: &str) -> Result<String, PromptError> {
         debug!(query = %query, "--> Executing BigQuery query");
+
+        // The query job is always run in the provider's configured project,
+        // which has the necessary billing and permissions. The query string itself
+        // (e.g., "SELECT * FROM `bigquery-public-data.samples.shakespeare`")
+        // tells BigQuery which project to read the data from.
         let response = self
             .client
             .job()

@@ -1,12 +1,10 @@
-//! # End-to-End Search Workflow Test
+//! # End-to-End Search Workflow Tests
 //!
-//! This file contains a comprehensive integration test that simulates the full
-//! user workflow: ingesting articles from a live RSS feed, generating embeddings
-//! for them using the configured provider, and then performing a vector
-//! similarity search to find relevant content.
+//! This file contains comprehensive integration tests that simulate the full
+//! user workflow: ingesting articles, embedding them, and then using the
+//! various search endpoints to find them.
 
 use anyhow::Result;
-
 use httpmock::prelude::*;
 use reqwest::Client;
 use serde_json::json;
@@ -14,7 +12,6 @@ use std::path::PathBuf;
 use tempfile::NamedTempFile;
 use tokio::net::TcpListener;
 use tokio::time::{sleep, Duration};
-use turso::Value as TursoValue;
 
 // Include the binary's main source file to access its components.
 #[path = "../src/main.rs"]
@@ -63,25 +60,15 @@ async fn spawn_app_for_e2e_test(db_path: PathBuf) -> Result<String> {
     Ok(address)
 }
 
-/// This is a full end-to-end test that performs the following steps:
-/// 1. Starts the server with a temporary, empty database.
-/// 2. Can ingests articles from a live RSS feed (https://news.smol.ai/rss.xml).
-/// 3. Finds all newly ingested articles that don't have an embedding.
-/// 4. Calls the `/embed` endpoint for each new article, which uses the configured
-///    (real) embedding API to generate and save the vector.
-/// 5. Calls the `/search` endpoint with a query, which also hits the embedding API.
-/// 6. Asserts that the search returns relevant results.
-///
 #[tokio::test]
-async fn test_e2e_full_ingest_embed_search_flow() -> Result<()> {
+async fn test_e2e_all_search_endpoints() -> Result<()> {
     // --- 1. Arrange ---
     let temp_db_file = NamedTempFile::new()?;
     let db_path = temp_db_file.path().to_path_buf();
     let app_address = spawn_app_for_e2e_test(db_path.clone()).await?;
     let client = Client::new();
 
-    // Set up a mock server for the RSS feed. This makes the test fast, reliable,
-    // and independent of external network conditions.
+    // Set up a mock server for a predictable RSS feed.
     let server = MockServer::start();
     let mock_rss_content = r#"
         <?xml version="1.0" encoding="UTF-8"?>
@@ -89,24 +76,24 @@ async fn test_e2e_full_ingest_embed_search_flow() -> Result<()> {
         <channel>
             <title>Mock Feed</title>
             <link>http://mock.com</link>
-            <description>A mock feed for testing.</description>
+            <description>A mock feed for testing search endpoints.</description>
             <item>
-                <title>Organic Gardening Tips</title>
-                <link>http://mock.com/gardening</link>
-                <description>How to grow vegetables without any pesticides.</description>
+                <title>A Deep Dive into PostgreSQL Performance</title>
+                <link>http://mock.com/postgres</link>
+                <description>Optimizing queries and indexes in your database.</description>
                 <pubDate>Mon, 01 Jan 2024 12:00:00 GMT</pubDate>
             </item>
             <item>
                 <title>The Rise of Qwen3</title>
                 <link>http://mock.com/qwen3</link>
                 <description>Exploring the new features of the Qwen3 large language model.</description>
-                <pubDate>Wed, 03 Jan 2024 12:00:00 GMT</pubDate>
+                <pubDate>Tue, 02 Jan 2024 12:00:00 GMT</pubDate>
             </item>
             <item>
-                <title>Baking Sourdough Bread</title>
-                <link>http://mock.com/baking</link>
-                <description>A step-by-step guide for beginners to make delicious bread.</description>
-                <pubDate>Tue, 02 Jan 2024 12:00:00 GMT</pubDate>
+                <title>Building Web Apps with Python</title>
+                <link>http://mock.com/python-web</link>
+                <description>A tutorial on creating interactive sites using FastHTML.</description>
+                <pubDate>Wed, 03 Jan 2024 12:00:00 GMT</pubDate>
             </item>
         </channel>
         </rss>
@@ -119,115 +106,60 @@ async fn test_e2e_full_ingest_embed_search_flow() -> Result<()> {
     });
     let rss_feed_url = server.url("/rss");
 
-    // --- 2. Act: Ingest ---
-    println!("Step 1/3: Ingesting articles from {rss_feed_url}...");
-    let ingest_res = client
+    // --- 2. Ingest & Embed ---
+    println!("\n--- Step 1: Ingesting and Embedding Articles ---");
+    client
         .post(format!("{app_address}/ingest"))
         .json(&json!({ "url": rss_feed_url }))
         .send()
-        .await?;
-    assert!(
-        ingest_res.status().is_success(),
-        "Failed to ingest RSS feed."
-    );
-    let ingest_body: serde_json::Value = ingest_res.json().await?;
-    let ingested_count: usize = ingest_body["ingested_articles"].as_u64().unwrap_or(0) as usize;
-    println!("-> Ingestion successful. Found {ingested_count} new articles.");
-    assert_eq!(
-        ingested_count, 3,
-        "Expected to ingest exactly 3 articles from the mock feed."
-    );
-
-    // --- DEBUG: Log newest articles to confirm order ---
-    println!("-> Verifying newest articles in DB before embedding...");
-    let db = turso::Builder::new_local(db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let conn = db.connect()?;
-    let mut stmt = conn
-        .prepare("SELECT id, title, pub_date FROM articles ORDER BY pub_date DESC LIMIT 3")
-        .await?;
-    let mut rows = stmt.query(()).await?;
-    while let Some(row) = rows.next().await? {
-        let id = match row.get_value(0)? {
-            TursoValue::Integer(i) => i,
-            _ => panic!("Expected integer for ID"),
-        };
-        let title = match row.get_value(1)? {
-            TursoValue::Text(s) => s,
-            _ => panic!("Expected text for title"),
-        };
-        let pub_date = match row.get_value(2)? {
-            TursoValue::Text(s) => s,
-            _ => panic!("Expected text for pub_date"),
-        };
-        println!("   - ID: {id}, Title: '{title}', PubDate: {pub_date}");
-    }
-
-    // --- 3. Act: Embed ---
-    println!("Step 2/3: Embedding the 3 newest articles...");
-    let embed_res = client
+        .await?
+        .error_for_status()?;
+    client
         .post(format!("{app_address}/embed/new"))
         .json(&json!({ "limit": 3 }))
         .send()
-        .await?;
-    assert!(
-        embed_res.status().is_success(),
-        "Failed to call the /embed/new endpoint."
-    );
-    let embed_body: serde_json::Value = embed_res.json().await?;
-    println!(
-        "-> Embedding successful. Processed {} articles.",
-        embed_body["embedded_articles"]
-    );
+        .await?
+        .error_for_status()?;
+    println!("-> Ingest & Embed Complete.");
 
-    // --- 4. Act: Search ---
-    let search_query = "Qwen3";
-    println!("Step 3/3: Performing vector search for query: '{search_query}'...");
-    let search_res = client
-        .post(format!("{app_address}/search"))
-        .json(&json!({ "query": search_query }))
+    // --- 3. Test Keyword Search ---
+    println!("\n--- Step 2: Testing Keyword Search ---");
+    let keyword_res = client
+        .post(format!("{app_address}/search/keyword"))
+        .json(&json!({ "query": "PostgreSQL" }))
         .send()
         .await?;
+    let keyword_results: Vec<serde_json::Value> = keyword_res.json().await?;
+    assert!(!keyword_results.is_empty());
+    let top_keyword_title = keyword_results[0]["title"].as_str().unwrap();
+    println!("-> Keyword search for 'PostgreSQL' found: '{top_keyword_title}'");
+    assert!(top_keyword_title.contains("PostgreSQL"));
 
-    // --- 5. Assert ---
-    assert!(
-        search_res.status().is_success(),
-        "Search request failed. Response: {:?}",
-        search_res.text().await?
-    );
+    // --- 4. Test Vector Search ---
+    println!("\n--- Step 3: Testing Vector Search ---");
+    let vector_res = client
+        .post(format!("{app_address}/search/vector"))
+        .json(&json!({ "query": "creating websites with python" }))
+        .send()
+        .await?;
+    let vector_results: Vec<serde_json::Value> = vector_res.json().await?;
+    assert!(!vector_results.is_empty());
+    let top_vector_title = vector_results[0]["title"].as_str().unwrap();
+    println!("-> Vector search for 'creating websites with python' found: '{top_vector_title}'");
+    assert!(top_vector_title.contains("Web Apps with Python"));
 
-    let search_results: Vec<serde_json::Value> = search_res.json().await?;
-    println!("-> Search returned {} results.", search_results.len());
-
-    // --- DEBUG: Log all search results for inspection ---
-    println!(
-        "-> Full search results:\n{}",
-        serde_json::to_string_pretty(&search_results)?
-    );
-
-    assert!(
-        !search_results.is_empty(),
-        "Search for '{search_query}' returned no results."
-    );
-
-    println!(
-        "-> Checking for relevance in {} results...",
-        search_results.len()
-    );
-    let is_relevant = search_results.iter().any(|result| {
-        let title = result["title"].as_str().unwrap_or_default().to_lowercase();
-        let description = result["description"]
-            .as_str()
-            .unwrap_or_default()
-            .to_lowercase();
-        title.contains("qwen") || description.contains("qwen")
-    });
-
-    assert!(
-        is_relevant,
-        "None of the top search results for '{search_query}' contained the keyword 'qwen' in their title or description."
-    );
+    // --- 5. Test Hybrid Search ---
+    println!("\n--- Step 4: Testing Hybrid Search ---");
+    let hybrid_res = client
+        .post(format!("{app_address}/search/hybrid"))
+        .json(&json!({ "query": "Qwen3" }))
+        .send()
+        .await?;
+    let hybrid_results: Vec<serde_json::Value> = hybrid_res.json().await?;
+    assert!(!hybrid_results.is_empty());
+    let top_hybrid_title = hybrid_results[0]["title"].as_str().unwrap();
+    println!("-> Hybrid search for 'Qwen3 language model' found: '{top_hybrid_title}'");
+    assert!(top_hybrid_title.contains("Qwen3"));
 
     Ok(())
 }

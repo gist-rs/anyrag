@@ -5,7 +5,7 @@
 
 use thiserror::Error;
 use tracing::{info, warn};
-use turso::{params, Connection};
+use turso::{params, Connection, Database};
 
 /// Custom error types for the ingestion process.
 #[derive(Error, Debug)]
@@ -32,14 +32,12 @@ pub enum IngestError {
 ///
 /// # Arguments
 ///
-/// * `db_url`: The path to the SQLite database file (e.g., "anyrag.db").
+/// * `db`: A shared reference to the Turso database instance.
 /// * `feed_url`: The URL of the RSS feed to ingest.
 ///
 /// # Returns
 ///
 /// The number of *new* articles that were successfully inserted into the database.
-use turso::Database;
-
 pub async fn ingest_from_url(db: &Database, feed_url: &str) -> Result<usize, IngestError> {
     let conn = db
         .connect()

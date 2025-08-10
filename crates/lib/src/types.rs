@@ -11,7 +11,7 @@ use std::fmt::{self, Debug};
 /// using a configurable AI provider and then executing that query against a
 /// configurable storage provider.
 pub struct PromptClient {
-    pub(crate) ai_provider: Box<dyn AiProvider>,
+    pub ai_provider: Box<dyn AiProvider>,
     pub(crate) storage_provider: Box<dyn Storage>,
 }
 

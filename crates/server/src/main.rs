@@ -5,9 +5,11 @@ use self::{
     config::{get_config, Config},
     errors::AppError,
 };
-use anyrag::embedding::{embed_and_update_article, search_articles_by_embedding, SearchResult};
 use anyrag::ingest;
 use anyrag::providers::ai::embedding::generate_embedding;
+use anyrag::search::{
+    embed_article, hybrid_search, search_by_keyword, search_by_vector, SearchResult,
+};
 use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
     ExecutePromptOptions, PromptClient, PromptClientBuilder,
@@ -98,31 +100,63 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/ingest", post(ingest_handler))
         .route("/embed", post(embed_handler))
         .route("/embed/new", post(embed_new_handler))
-        .route("/search", post(search_handler))
+        .route("/search/vector", post(vector_search_handler))
+        .route("/search/keyword", post(keyword_search_handler))
+        .route("/search/hybrid", post(hybrid_search_handler))
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
 }
 
-/// The response body for the `/prompt` endpoint.
+// --- API Payloads ---
+
 #[derive(Serialize)]
 struct PromptResponse {
     result: String,
 }
 
-/// The root handler.
+#[derive(Deserialize)]
+struct IngestRequest {
+    url: String,
+}
+
+#[derive(Serialize)]
+struct IngestResponse {
+    message: String,
+    ingested_articles: usize,
+}
+
+#[derive(Deserialize)]
+struct EmbedRequest {
+    article_id: i64,
+}
+
+#[derive(Deserialize, Debug)]
+struct EmbedNewRequest {
+    limit: Option<usize>,
+}
+
+#[derive(Serialize, Debug)]
+struct EmbedNewResponse {
+    message: String,
+    embedded_articles: usize,
+}
+
+#[derive(Deserialize)]
+struct SearchRequest {
+    query: String,
+    limit: Option<u32>,
+}
+
+// --- Route Handlers ---
+
 async fn root() -> &'static str {
     "anyrag server is running."
 }
 
-/// The health check handler.
 async fn health_check() -> &'static str {
     "OK"
 }
 
-/// The handler for the `/prompt` endpoint.
-///
-/// This function takes a flexible JSON payload, combines it with server-side
-/// default prompts (if any), and then executes it.
 async fn prompt_handler(
     State(app_state): State<AppState>,
     Json(payload): Json<Value>,
@@ -132,7 +166,6 @@ async fn prompt_handler(
     let mut options: ExecutePromptOptions =
         serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
 
-    // If the request doesn't specify a template, use the server's default from the environment.
     if options.system_prompt_template.is_none() {
         options.system_prompt_template = app_state.query_system_prompt_template.clone();
     }
@@ -154,51 +187,19 @@ async fn prompt_handler(
     Ok(Json(PromptResponse { result }))
 }
 
-/// The request body for the `/ingest` endpoint.
-#[derive(Deserialize)]
-struct IngestRequest {
-    url: String,
-}
-
-/// The response body for the `/ingest` endpoint.
-#[derive(Serialize)]
-struct IngestResponse {
-    message: String,
-    ingested_articles: usize,
-}
-
-/// The handler for the `/ingest` endpoint.
-///
-/// This function fetches an RSS feed and saves the articles to the database.
 async fn ingest_handler(
     State(app_state): State<AppState>,
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>, AppError> {
     info!("Received ingest request for URL: {}", payload.url);
-
     let ingested_count = ingest::ingest_from_url(&app_state.db, &payload.url).await?;
-
     let response = IngestResponse {
         message: "Ingestion successful".to_string(),
         ingested_articles: ingested_count,
     };
-
     Ok(Json(response))
 }
 
-/// The request body for the `/embed` endpoint.
-#[derive(Deserialize)]
-struct EmbedRequest {
-    article_id: i64,
-}
-
-/// The request body for the `/search` endpoint.
-#[derive(Deserialize)]
-struct SearchRequest {
-    query: String,
-}
-
-/// The handler for the `/embed` endpoint.
 async fn embed_handler(
     State(app_state): State<AppState>,
     Json(payload): Json<EmbedRequest>,
@@ -212,29 +213,11 @@ async fn embed_handler(
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
 
-    embed_and_update_article(&app_state.db, api_url, model, payload.article_id).await?;
+    embed_article(&app_state.db, api_url, model, payload.article_id).await?;
 
     Ok(Json(json!({ "success": true })))
 }
 
-/// The request body for the `/embed/new` endpoint.
-#[derive(Deserialize, Debug)]
-struct EmbedNewRequest {
-    /// The maximum number of new articles to embed. Defaults to 10 if not provided.
-    limit: Option<usize>,
-}
-
-/// The response body for the `/embed/new` endpoint.
-#[derive(Serialize, Debug)]
-struct EmbedNewResponse {
-    message: String,
-    embedded_articles: usize,
-}
-
-/// The handler for the `/embed/new` endpoint.
-///
-/// This function finds the newest articles without embeddings, generates the
-/// embeddings for them concurrently, and saves them to the database.
 async fn embed_new_handler(
     State(app_state): State<AppState>,
     Json(payload): Json<EmbedNewRequest>,
@@ -253,10 +236,7 @@ async fn embed_new_handler(
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?
         .clone();
 
-    // 1. Find articles that need embedding.
     let conn = app_state.db.connect()?;
-    // Some SQL drivers do not support parameterizing the LIMIT clause.
-    // We format it directly into the string, which is safe here as `limit` is a `usize`.
     let sql = format!(
         "SELECT id FROM articles WHERE embedding IS NULL ORDER BY pub_date DESC LIMIT {limit}"
     );
@@ -279,14 +259,13 @@ async fn embed_new_handler(
         }));
     }
 
-    // 2. Concurrently embed them.
     stream::iter(articles_to_embed)
         .for_each_concurrent(10, |article_id| {
             let db = app_state.db.clone();
             let api_url = api_url.clone();
             let model = model.clone();
             async move {
-                match embed_and_update_article(&db, &api_url, &model, article_id).await {
+                match embed_article(&db, &api_url, &model, article_id).await {
                     Ok(_) => info!("Successfully embedded article ID: {article_id}"),
                     Err(e) => error!("Failed to embed article ID: {article_id}. Error: {e}"),
                 }
@@ -300,12 +279,15 @@ async fn embed_new_handler(
     }))
 }
 
-/// The handler for the `/search` endpoint.
-async fn search_handler(
+async fn vector_search_handler(
     State(app_state): State<AppState>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<Vec<SearchResult>>, AppError> {
-    info!("Received search request for query: {}", payload.query);
+    let limit = payload.limit.unwrap_or(10);
+    info!(
+        "Received vector search request for query: '{}', limit: {}",
+        payload.query, limit
+    );
 
     let api_url = app_state
         .embeddings_api_url
@@ -316,17 +298,59 @@ async fn search_handler(
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
 
-    // 1. Generate an embedding for the search query.
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
-
-    // 2. Search for similar articles in the database.
-    // For now, let's use a hardcoded limit.
-    let results = search_articles_by_embedding(&app_state.db, query_vector, 5).await?;
+    let results = search_by_vector(&app_state.db, query_vector, limit).await?;
 
     Ok(Json(results))
 }
 
-/// The main entry point for running the server.
+async fn keyword_search_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<SearchRequest>,
+) -> Result<Json<Vec<SearchResult>>, AppError> {
+    let limit = payload.limit.unwrap_or(10);
+    info!(
+        "Received keyword search request for query: '{}', limit: {}",
+        payload.query, limit
+    );
+    let results = search_by_keyword(&app_state.db, &payload.query, limit).await?;
+    Ok(Json(results))
+}
+
+async fn hybrid_search_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<SearchRequest>,
+) -> Result<Json<Vec<SearchResult>>, AppError> {
+    let limit = payload.limit.unwrap_or(10);
+    info!(
+        "Received hybrid search request for query: '{}', limit: {}",
+        payload.query, limit
+    );
+
+    let api_url = app_state
+        .embeddings_api_url
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
+    let model = app_state
+        .embeddings_model
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
+    let query_vector = generate_embedding(api_url, model, &payload.query).await?;
+    let results = hybrid_search(
+        &app_state.db,
+        &*app_state.prompt_client.ai_provider,
+        query_vector,
+        &payload.query,
+        limit,
+    )
+    .await?;
+
+    Ok(Json(results))
+}
+
+// --- Main Application ---
+
 pub async fn run(listener: tokio::net::TcpListener, config: Config) -> anyhow::Result<()> {
     debug!(?config, "Server configuration loaded");
 
@@ -357,6 +381,8 @@ async fn main() -> anyhow::Result<()> {
     run(listener, config).await
 }
 
+// --- E2E Tests ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,7 +398,6 @@ mod tests {
             .compact()
             .try_init();
 
-        // The test loads its own config but binds to a random port to avoid conflicts.
         let config = get_config().expect("Failed to read configuration for test");
 
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -387,7 +412,6 @@ mod tests {
             }
         });
 
-        // Give the server a moment to start
         sleep(Duration::from_millis(100)).await;
 
         address

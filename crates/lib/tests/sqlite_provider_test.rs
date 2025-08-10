@@ -12,8 +12,9 @@
 mod common;
 
 use crate::common::setup_tracing;
+use anyrag::providers::db::sqlite::SqliteProvider;
 use anyrag::providers::db::storage::Storage;
-use anyrag::{providers::db::sqlite::SqliteProvider, PromptError};
+use anyrag::PromptError;
 use chrono::Utc;
 use serde_json::json;
 
