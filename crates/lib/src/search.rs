@@ -52,10 +52,16 @@ pub async fn search_by_vector(
             .join(", ")
     );
 
+    // The vector_distance_cos function returns a value between 0.0 (identical) and 2.0.
+    // A value of 1.0 means the vectors are orthogonal (no similarity).
+    // We add a WHERE clause to filter out results that are not semantically similar,
+    // using a threshold. A value of 0.6 is a reasonable starting point, filtering
+    // out anything that is more dissimilar than similar.
+    let distance_threshold = 0.6;
     let sql = format!(
         "SELECT title, link, description, vector_distance_cos(embedding, {vector_str}) AS distance
          FROM articles
-         WHERE embedding IS NOT NULL
+         WHERE embedding IS NOT NULL AND distance < {distance_threshold}
          ORDER BY distance ASC
          LIMIT {limit};"
     );

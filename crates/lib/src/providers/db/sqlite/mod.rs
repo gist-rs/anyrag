@@ -21,7 +21,7 @@ use turso::{Database, Value as TursoValue};
 #[derive(Clone)]
 pub struct SqliteProvider {
     /// The Turso database instance. It's cloneable and thread-safe.
-    db: Database,
+    pub db: Database,
     schema_cache: Arc<RwLock<HashMap<String, Arc<TableSchema>>>>,
 }
 
