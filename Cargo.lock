@@ -84,6 +84,7 @@ dependencies = [
  "gcp-bigquery-client",
  "httpmock",
  "openssl",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

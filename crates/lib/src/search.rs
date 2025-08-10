@@ -181,6 +181,7 @@ pub async fn hybrid_search(
     // --- Stage 2: Combine and Re-rank using Reciprocal Rank Fusion (RRF) ---
     let mut rrf_scores: HashMap<String, f64> = HashMap::new();
     let k = 60.0; // RRF ranking constant
+    let keyword_boost = 1.2; // Give a slight boost to exact keyword matches
 
     // Process vector results
     for (i, result) in vector_results.iter().enumerate() {
@@ -188,10 +189,11 @@ pub async fn hybrid_search(
         *rrf_scores.entry(result.link.clone()).or_insert(0.0) += 1.0 / (k + rank);
     }
 
-    // Process keyword results
+    // Process keyword results with the boost
     for (i, result) in keyword_results.iter().enumerate() {
         let rank = (i + 1) as f64;
-        *rrf_scores.entry(result.link.clone()).or_insert(0.0) += 1.0 / (k + rank);
+        let score = (1.0 / (k + rank)) * keyword_boost;
+        *rrf_scores.entry(result.link.clone()).or_insert(0.0) += score;
     }
 
     info!("RRF scores: {:?}", rrf_scores);
