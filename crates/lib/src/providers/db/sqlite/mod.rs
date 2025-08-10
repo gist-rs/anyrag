@@ -152,7 +152,7 @@ impl Storage for SqliteProvider {
             .connect()
             .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
 
-        let query = format!("PRAGMA table_info('{table_name}');");
+        let query = format!("PRAGMA table_info({table_name});");
 
         let mut rows = conn
             .query(&query, ())
