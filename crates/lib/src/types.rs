@@ -92,6 +92,13 @@ impl PromptClientBuilder {
         Ok(self)
     }
 
+    /// A helper to build and set a `SqliteProvider` as the storage provider.
+    pub async fn sqlite_storage(mut self, db_path: &str) -> Result<Self, PromptError> {
+        let provider = crate::providers::db::sqlite::SqliteProvider::new(db_path).await?;
+        self.storage_provider = Some(Box::new(provider));
+        Ok(self)
+    }
+
     /// Builds the `PromptClient`.
     ///
     /// This method consumes the builder and returns a `Result` containing

@@ -1,0 +1,197 @@
+use crate::{errors::PromptError, providers::db::storage::Storage};
+use async_trait::async_trait;
+use gcp_bigquery_client::model::{
+    field_type::FieldType, table_field_schema::TableFieldSchema, table_schema::TableSchema,
+};
+use serde_json::Value;
+use std::{
+    collections::HashMap,
+    fmt::{self, Debug},
+    sync::Arc,
+};
+use tokio::sync::RwLock;
+use tracing::debug;
+use turso::{Connection, Value as TursoValue};
+
+/// A provider for interacting with a local SQLite database using Turso.
+///
+/// This provider holds a single, persistent connection wrapped in an `Arc`
+/// to ensure that all clones of the provider share the same database state.
+#[derive(Clone)]
+pub struct SqliteProvider {
+    // The connection is wrapped in an Arc and Mutex to allow shared, mutable access across clones.
+    pub conn: Arc<Connection>,
+    schema_cache: Arc<RwLock<HashMap<String, Arc<TableSchema>>>>,
+}
+
+impl SqliteProvider {
+    /// Creates a new `SqliteProvider` from a file path or in-memory.
+    ///
+    /// # Arguments
+    ///
+    /// * `db_path`: The path to the SQLite database file. Use ":memory:" for an in-memory database,
+    ///   or "file:?mode=memory&cache=shared" for a shared in-memory database.
+    pub async fn new(db_path: &str) -> Result<Self, PromptError> {
+        let db = turso::Builder::new_local(db_path)
+            .build()
+            .await
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+        let conn = db
+            .connect()
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+        Ok(Self {
+            // Immediately wrap the new connection in an Arc.
+            conn: Arc::new(conn),
+            schema_cache: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
+    /// A helper for tests to pre-populate data by executing multiple SQL statements.
+    pub async fn initialize_with_data(&self, init_sql: &str) -> Result<(), PromptError> {
+        for statement in init_sql.split(';').filter(|s| !s.trim().is_empty()) {
+            self.conn
+                .execute(statement, ())
+                .await
+                .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+        }
+        Ok(())
+    }
+}
+
+impl Debug for SqliteProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SqliteProvider").finish_non_exhaustive()
+    }
+}
+
+/// Converts a Turso value to a serde_json::Value.
+fn turso_value_to_json(v: TursoValue) -> Value {
+    match v {
+        TursoValue::Null => Value::Null,
+        TursoValue::Integer(i) => Value::Number(i.into()),
+        TursoValue::Real(f) => serde_json::Number::from_f64(f)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
+        TursoValue::Text(s) => Value::String(s),
+        TursoValue::Blob(_) => Value::String("<blob>".to_string()),
+    }
+}
+
+#[async_trait]
+impl Storage for SqliteProvider {
+    fn name(&self) -> &str {
+        "SQLite"
+    }
+
+    fn language(&self) -> &str {
+        "SQL"
+    }
+
+    /// Executes a query on SQLite and returns the result as a JSON string.
+    async fn execute_query(&self, query: &str) -> Result<String, PromptError> {
+        debug!(query = %query, "--> Executing SQLite query");
+
+        let mut stmt = self
+            .conn
+            .prepare(query)
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+
+        let column_names: Vec<String> = stmt
+            .columns()
+            .iter()
+            .map(|c| c.name().to_string())
+            .collect();
+
+        let mut rows = stmt
+            .query(())
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+
+        let mut json_results: Vec<Value> = Vec::new();
+
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
+        {
+            let mut row_map = serde_json::Map::new();
+            for (i, name) in column_names.iter().enumerate() {
+                let value = row
+                    .get_value(i)
+                    .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+                row_map.insert(name.clone(), turso_value_to_json(value));
+            }
+            json_results.push(Value::Object(row_map));
+        }
+
+        Ok(serde_json::to_string(&json_results)?)
+    }
+
+    /// Retrieves the schema for a given SQLite table.
+    async fn get_table_schema(&self, table_name: &str) -> Result<Arc<TableSchema>, PromptError> {
+        if let Some(schema) = self.schema_cache.read().await.get(table_name) {
+            return Ok(schema.clone());
+        }
+
+        let query = format!("PRAGMA table_info('{table_name}');");
+
+        let mut rows = self
+            .conn
+            .query(&query, ())
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+
+        let mut fields = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
+        {
+            let name = match row.get_value(1) {
+                Ok(TursoValue::Text(s)) => s,
+                _ => continue,
+            };
+            let type_str = match row.get_value(2) {
+                Ok(TursoValue::Text(s)) => s,
+                _ => continue,
+            };
+
+            let bq_type = match type_str.to_uppercase().as_str() {
+                "INTEGER" => FieldType::Integer,
+                "TEXT" => FieldType::String,
+                "REAL" => FieldType::Float,
+                "BLOB" => FieldType::Bytes,
+                "DATETIME" | "TIMESTAMP" => FieldType::Timestamp,
+                _ => FieldType::String,
+            };
+
+            fields.push(TableFieldSchema {
+                name,
+                r#type: bq_type,
+                mode: Some("NULLABLE".to_string()),
+                fields: None,
+                description: None,
+                categories: None,
+                policy_tags: None,
+            });
+        }
+
+        if fields.is_empty() {
+            return Err(PromptError::StorageOperationFailed(format!(
+                "Table '{table_name}' not found or has no columns."
+            )));
+        }
+
+        let schema = TableSchema {
+            fields: Some(fields),
+        };
+        let schema_arc = Arc::new(schema);
+        self.schema_cache
+            .write()
+            .await
+            .insert(table_name.to_string(), schema_arc.clone());
+
+        Ok(schema_arc)
+    }
+}
