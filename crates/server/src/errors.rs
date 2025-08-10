@@ -8,6 +8,7 @@ use axum::{
 };
 use serde_json::json;
 use tracing::error;
+use turso::Error as TursoError;
 
 /// A custom error type for the server application.
 ///
@@ -20,6 +21,8 @@ pub enum AppError {
     Ingest(IngestError),
     /// Errors from the embedding and search process.
     Embedding(EmbeddingError),
+    /// Errors from database operations.
+    Database(TursoError),
     /// Generic internal server errors.
     Internal(anyhow::Error),
 }
@@ -52,6 +55,13 @@ impl From<anyhow::Error> for AppError {
     }
 }
 
+/// Conversion from `turso::Error` to `AppError`.
+impl From<TursoError> for AppError {
+    fn from(err: TursoError) -> Self {
+        AppError::Database(err)
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status_code, error_message) = match self {
@@ -71,6 +81,13 @@ impl IntoResponse for AppError {
                     EmbeddingError::VectorSerialization => StatusCode::INTERNAL_SERVER_ERROR,
                 };
                 (status_code, format!("Embedding or search failed: {err}"))
+            }
+            AppError::Database(err) => {
+                error!("Database error: {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Database operation failed: {err}"),
+                )
             }
 
             AppError::Prompt(err) => {

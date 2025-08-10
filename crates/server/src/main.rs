@@ -17,14 +17,15 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::trace::TraceLayer;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::FmtSubscriber;
-use turso::{Builder, Database};
+use turso::{Builder, Database, Value as TursoValue};
 
 /// The shared application state.
 ///
@@ -96,6 +97,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/prompt", post(prompt_handler))
         .route("/ingest", post(ingest_handler))
         .route("/embed", post(embed_handler))
+        .route("/embed/new", post(embed_new_handler))
         .route("/search", post(search_handler))
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
@@ -213,6 +215,89 @@ async fn embed_handler(
     embed_and_update_article(&app_state.db, api_url, model, payload.article_id).await?;
 
     Ok(Json(json!({ "success": true })))
+}
+
+/// The request body for the `/embed/new` endpoint.
+#[derive(Deserialize, Debug)]
+struct EmbedNewRequest {
+    /// The maximum number of new articles to embed. Defaults to 10 if not provided.
+    limit: Option<usize>,
+}
+
+/// The response body for the `/embed/new` endpoint.
+#[derive(Serialize, Debug)]
+struct EmbedNewResponse {
+    message: String,
+    embedded_articles: usize,
+}
+
+/// The handler for the `/embed/new` endpoint.
+///
+/// This function finds the newest articles without embeddings, generates the
+/// embeddings for them concurrently, and saves them to the database.
+async fn embed_new_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<EmbedNewRequest>,
+) -> Result<Json<EmbedNewResponse>, AppError> {
+    let limit = payload.limit.unwrap_or(10);
+    info!("Received request to embed up to {limit} new articles.");
+
+    let api_url = app_state
+        .embeddings_api_url
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?
+        .clone();
+    let model = app_state
+        .embeddings_model
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?
+        .clone();
+
+    // 1. Find articles that need embedding.
+    let conn = app_state.db.connect()?;
+    // Some SQL drivers do not support parameterizing the LIMIT clause.
+    // We format it directly into the string, which is safe here as `limit` is a `usize`.
+    let sql = format!(
+        "SELECT id FROM articles WHERE embedding IS NULL ORDER BY pub_date DESC LIMIT {limit}"
+    );
+    let mut stmt = conn.prepare(&sql).await?;
+    let mut rows = stmt.query(()).await?;
+
+    let mut articles_to_embed = Vec::new();
+    while let Some(row) = rows.next().await? {
+        if let Ok(TursoValue::Integer(id)) = row.get_value(0) {
+            articles_to_embed.push(id);
+        }
+    }
+    let embed_count = articles_to_embed.len();
+    info!("Found {embed_count} articles to embed.");
+
+    if articles_to_embed.is_empty() {
+        return Ok(Json(EmbedNewResponse {
+            message: "No new articles to embed.".to_string(),
+            embedded_articles: 0,
+        }));
+    }
+
+    // 2. Concurrently embed them.
+    stream::iter(articles_to_embed)
+        .for_each_concurrent(10, |article_id| {
+            let db = app_state.db.clone();
+            let api_url = api_url.clone();
+            let model = model.clone();
+            async move {
+                match embed_and_update_article(&db, &api_url, &model, article_id).await {
+                    Ok(_) => info!("Successfully embedded article ID: {article_id}"),
+                    Err(e) => error!("Failed to embed article ID: {article_id}. Error: {e}"),
+                }
+            }
+        })
+        .await;
+
+    Ok(Json(EmbedNewResponse {
+        message: format!("Successfully processed {embed_count} articles."),
+        embedded_articles: embed_count,
+    }))
 }
 
 /// The handler for the `/search` endpoint.

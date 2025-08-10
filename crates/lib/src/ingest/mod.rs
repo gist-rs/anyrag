@@ -61,11 +61,20 @@ pub async fn ingest_from_url(db: &Database, feed_url: &str) -> Result<usize, Ing
 
     for item in channel.items() {
         if let (Some(title), Some(link)) = (item.title(), item.link()) {
+            // Parse the pubDate (RFC 2822) and format it to a sortable ISO 8601 format.
+            // This ensures that `ORDER BY pub_date` works chronologically, not alphabetically.
+            let formatted_date = match item.pub_date() {
+                Some(date_str) => chrono::DateTime::parse_from_rfc2822(date_str)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|_| date_str.to_string()), // Fallback to original on parse error
+                None => String::new(),
+            };
+
             let params = params!(
                 title,
                 link,
                 item.description().unwrap_or_default(),
-                item.pub_date().unwrap_or_default(),
+                formatted_date,
                 channel.link()
             );
 

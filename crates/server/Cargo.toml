@@ -27,6 +27,7 @@ tower-http = { workspace = true }
 serde = { workspace = true }
 serde_json.workspace = true
 turso = { workspace = true }
+futures = "0.3"
 
 # Other
 dotenvy = "0.15.7"
