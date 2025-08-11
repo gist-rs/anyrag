@@ -5,7 +5,7 @@
 //! - Reciprocal Rank Fusion.
 
 use crate::{
-    prompts::{DEFAULT_RERANK_SYSTEM_PROMPT, DEFAULT_RERANK_USER_PROMPT},
+    prompts::core::{DEFAULT_RERANK_SYSTEM_PROMPT, DEFAULT_RERANK_USER_PROMPT},
     providers::ai::AiProvider,
     types::SearchResult,
     PromptError,

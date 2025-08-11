@@ -1,6 +1,9 @@
 use crate::{
     errors::PromptError,
-    prompts::{DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT},
+    prompts::{
+        core::{DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT},
+        rss::{RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT},
+    },
     providers::{ai::AiProvider, db::bigquery::BigQueryProvider, db::storage::Storage},
     rerank::Rerankable,
 };
@@ -39,11 +42,6 @@ pub enum ContentType {
 impl ContentType {
     /// Returns the appropriate system and user prompt templates for the content type.
     pub fn get_prompt_templates(&self) -> (&'static str, &'static str) {
-        // TODO: Move these specific prompts to prompts.rs
-        const RSS_QUERY_SYSTEM_PROMPT: &str = "You are an AI assistant that specializes in analyzing and summarizing content from RSS feeds. Answer the user's question based on the provided article snippets.";
-        const RSS_QUERY_USER_PROMPT: &str =
-            "# User Question\n{prompt}\n\n# Article Content\n{context}";
-
         match self {
             ContentType::Rss => (RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT),
             // Default to standard SQL prompts for other types for now.

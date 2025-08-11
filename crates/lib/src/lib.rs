@@ -16,7 +16,7 @@ pub use rerank::{RerankError, Rerankable};
 pub use search::{SearchError, SearchMode};
 pub use types::{ExecutePromptOptions, PromptClient, PromptClientBuilder, SearchResult};
 
-use crate::prompts::{
+use crate::prompts::core::{
     get_alias_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT,
     DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT,
 };

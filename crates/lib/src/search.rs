@@ -7,16 +7,17 @@
 //!   re-ranking (default) or Reciprocal Rank Fusion (optional).
 
 use crate::{
-    providers::{ai::AiProvider, db::storage::VectorSearch},
+    providers::{
+        ai::AiProvider,
+        db::storage::{KeywordSearch, VectorSearch},
+    },
     rerank::{llm_rerank, reciprocal_rank_fusion, RerankError},
     types::SearchResult,
 };
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::convert::AsRef;
 use thiserror::Error;
 use tracing::info;
-use turso::{params, Database, Value};
 
 /// Defines the re-ranking strategy for hybrid search.
 #[derive(Default, Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -38,59 +39,6 @@ pub enum SearchError {
     ReRank(#[from] RerankError),
 }
 
-/// Performs a case-insensitive keyword-based search using SQL LIKE.
-pub async fn search_by_keyword<D: AsRef<Database>>(
-    db: D,
-    query: &str,
-    limit: u32,
-) -> Result<Vec<SearchResult>, SearchError> {
-    let conn = db.as_ref().connect().map_err(SearchError::Database)?;
-    // Convert the query to lowercase for a case-insensitive search.
-    let pattern = format!("%{}%", query.to_lowercase());
-
-    // The score is hardcoded to 0.0 because keyword search doesn't have a native
-    // relevance score in this implementation. The re-ranking step will assign a meaningful score.
-    let sql = format!(
-        "
-        SELECT title, link, description, 0.0 as score
-        FROM articles
-        WHERE LOWER(title) LIKE ?1 OR LOWER(description) LIKE ?1
-        LIMIT {limit};
-    "
-    );
-
-    info!("Executing LIKE keyword search query for: {}", query);
-    let mut results = conn.query(&sql, params![pattern]).await?;
-    let mut search_results = Vec::new();
-
-    while let Some(row) = results.next().await? {
-        let title = match row.get_value(0)? {
-            Value::Text(s) => s,
-            _ => String::new(),
-        };
-        let link = match row.get_value(1)? {
-            Value::Text(s) => s,
-            _ => String::new(),
-        };
-        let description = match row.get_value(2)? {
-            Value::Text(s) => s,
-            _ => String::new(),
-        };
-        let score = match row.get_value(3)? {
-            Value::Real(f) => f,
-            _ => 0.0,
-        };
-        search_results.push(SearchResult {
-            title,
-            link,
-            description,
-            score,
-        });
-    }
-
-    Ok(search_results)
-}
-
 /// Performs a hybrid search by fetching candidates and then using a specified
 /// `SearchMode` to re-rank them.
 pub async fn hybrid_search<P>(
@@ -102,7 +50,7 @@ pub async fn hybrid_search<P>(
     mode: SearchMode,
 ) -> Result<Vec<SearchResult>, SearchError>
 where
-    P: VectorSearch + AsRef<Database> + ?Sized,
+    P: VectorSearch + KeywordSearch + ?Sized,
 {
     info!(
         "Starting hybrid search for: '{}' with mode: {:?}",
@@ -115,7 +63,7 @@ where
     // the most relevant results.
     let (vector_results, keyword_results) = tokio::join!(
         provider.vector_search(query_vector.clone(), limit * 2),
-        search_by_keyword(provider, query_text, limit * 2)
+        provider.keyword_search(query_text, limit * 2)
     );
 
     let vector_results = vector_results?;

@@ -40,3 +40,16 @@ pub trait VectorSearch: Send + Sync + DynClone + Debug {
 }
 
 dyn_clone::clone_trait_object!(VectorSearch);
+
+/// A trait for providers that support keyword search.
+#[async_trait]
+pub trait KeywordSearch: Send + Sync + DynClone + Debug {
+    /// Performs a keyword search.
+    async fn keyword_search(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<SearchResult>, SearchError>;
+}
+
+dyn_clone::clone_trait_object!(KeywordSearch);

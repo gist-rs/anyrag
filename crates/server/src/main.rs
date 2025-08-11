@@ -9,9 +9,12 @@ use anyrag::{
     ingest::{embed_article, ingest_from_url},
     providers::{
         ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
-        db::{sqlite::SqliteProvider, storage::VectorSearch},
+        db::{
+            sqlite::SqliteProvider,
+            storage::{KeywordSearch, VectorSearch},
+        },
     },
-    search::{hybrid_search, search_by_keyword, SearchMode},
+    search::{hybrid_search, SearchMode},
     ExecutePromptOptions, PromptClient, PromptClientBuilder, SearchResult,
 };
 use axum::{
@@ -320,8 +323,10 @@ async fn keyword_search_handler(
         "Received keyword search request for query: '{}', limit: {}",
         payload.query, limit
     );
-    let results =
-        search_by_keyword(app_state.sqlite_provider.as_ref(), &payload.query, limit).await?;
+    let results = app_state
+        .sqlite_provider
+        .keyword_search(&payload.query, limit)
+        .await?;
     Ok(Json(results))
 }
 

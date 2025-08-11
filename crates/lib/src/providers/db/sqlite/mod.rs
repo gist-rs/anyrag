@@ -1,6 +1,6 @@
 use crate::{
     errors::PromptError,
-    providers::db::storage::{Storage, VectorSearch},
+    providers::db::storage::{KeywordSearch, Storage, VectorSearch},
     search::SearchError,
     types::SearchResult,
 };
@@ -16,7 +16,9 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tracing::{debug, info};
-use turso::{Database, Value as TursoValue};
+use turso::{params, Database, Value as TursoValue};
+
+mod sql;
 
 /// A provider for interacting with a local SQLite database using Turso.
 ///
@@ -258,6 +260,52 @@ impl VectorSearch for SqliteProvider {
         );
 
         let mut results = conn.query(&sql, ()).await?;
+        let mut search_results = Vec::new();
+
+        while let Some(row) = results.next().await? {
+            let title = match row.get_value(0)? {
+                TursoValue::Text(s) => s,
+                _ => String::new(),
+            };
+            let link = match row.get_value(1)? {
+                TursoValue::Text(s) => s,
+                _ => String::new(),
+            };
+            let description = match row.get_value(2)? {
+                TursoValue::Text(s) => s,
+                _ => String::new(),
+            };
+            let score = match row.get_value(3)? {
+                TursoValue::Real(f) => f,
+                _ => 0.0,
+            };
+            search_results.push(SearchResult {
+                title,
+                link,
+                description,
+                score,
+            });
+        }
+
+        Ok(search_results)
+    }
+}
+
+#[async_trait]
+impl KeywordSearch for SqliteProvider {
+    async fn keyword_search(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        info!("Executing LIKE keyword search query for: {}", query);
+        let conn = self.db.connect()?;
+        // Convert the query to lowercase for a case-insensitive search.
+        let pattern = format!("%{}%", query.to_lowercase());
+
+        let sql = sql::keyword_search_articles(limit);
+
+        let mut results = conn.query(&sql, params![pattern]).await?;
         let mut search_results = Vec::new();
 
         while let Some(row) = results.next().await? {
