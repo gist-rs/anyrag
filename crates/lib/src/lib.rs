@@ -7,6 +7,7 @@ pub mod errors;
 pub mod ingest;
 pub mod prompts;
 pub mod providers;
+pub mod rerank;
 pub mod search;
 pub mod types;
 
