@@ -1,5 +1,6 @@
 use crate::{
     errors::PromptError,
+    prompts::{DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT},
     providers::{ai::AiProvider, db::bigquery::BigQueryProvider, db::storage::Storage},
     rerank::Rerankable,
 };
@@ -25,6 +26,34 @@ impl Debug for PromptClient {
     }
 }
 
+/// Represents different content types to guide prompt generation.
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentType {
+    Rss,
+    Sql,
+    Json,
+    Text,
+}
+
+impl ContentType {
+    /// Returns the appropriate system and user prompt templates for the content type.
+    pub fn get_prompt_templates(&self) -> (&'static str, &'static str) {
+        // TODO: Move these specific prompts to prompts.rs
+        const RSS_QUERY_SYSTEM_PROMPT: &str = "You are an AI assistant that specializes in analyzing and summarizing content from RSS feeds. Answer the user's question based on the provided article snippets.";
+        const RSS_QUERY_USER_PROMPT: &str =
+            "# User Question\n{prompt}\n\n# Article Content\n{context}";
+
+        match self {
+            ContentType::Rss => (RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT),
+            // Default to standard SQL prompts for other types for now.
+            ContentType::Sql | ContentType::Json | ContentType::Text => {
+                (DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT)
+            }
+        }
+    }
+}
+
 /// Options for executing a prompt.
 ///
 /// This struct encapsulates all the parameters for prompt execution,
@@ -36,6 +65,13 @@ pub struct ExecutePromptOptions {
     /// The name of the table to be queried (e.g., "project.dataset.table").
     #[serde(default)]
     pub table_name: Option<String>,
+    /// An optional hint about the content type to guide prompt selection.
+    #[serde(default)]
+    pub content_type: Option<ContentType>,
+    /// The content to be used in the prompt, when `content_type` is provided.
+    #[serde(default)]
+    pub context: Option<String>,
+
     /// An instruction for the AI on how to format the final response.
     #[serde(default)]
     pub instruction: Option<String>,

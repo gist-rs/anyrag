@@ -5,8 +5,8 @@
 
 use anyhow::Result;
 use anyrag::{
-    providers::db::sqlite::SqliteProvider,
-    search::{search_by_vector, SearchError},
+    providers::{db::sqlite::SqliteProvider, db::storage::VectorSearch},
+    search::SearchError,
 };
 use turso::params;
 
@@ -84,8 +84,8 @@ async fn test_vector_search_logic_is_correct() -> Result<(), SearchError> {
 
     // --- Act ---
     // Search for the article using the *exact* Qwen3 vector.
-    println!("Executing search_by_vector with the perfect Qwen3 vector...");
-    let search_results = search_by_vector(&provider.db, qwen3_vector, 5).await?;
+    println!("Executing vector_search with the perfect Qwen3 vector...");
+    let search_results = provider.vector_search(qwen3_vector, 5).await?;
 
     // --- Assert ---
     println!("Search results received: {search_results:?}");

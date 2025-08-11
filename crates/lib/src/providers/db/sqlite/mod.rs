@@ -1,4 +1,9 @@
-use crate::{errors::PromptError, providers::db::storage::Storage};
+use crate::{
+    errors::PromptError,
+    providers::db::storage::{Storage, VectorSearch},
+    search::SearchError,
+    types::SearchResult,
+};
 use async_trait::async_trait;
 use gcp_bigquery_client::model::{
     field_type::FieldType, table_field_schema::TableFieldSchema, table_schema::TableSchema,
@@ -10,7 +15,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, info};
 use turso::{Database, Value as TursoValue};
 
 /// A provider for interacting with a local SQLite database using Turso.
@@ -68,6 +73,12 @@ impl SqliteProvider {
 impl Debug for SqliteProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SqliteProvider").finish_non_exhaustive()
+    }
+}
+
+impl AsRef<Database> for SqliteProvider {
+    fn as_ref(&self) -> &Database {
+        &self.db
     }
 }
 
@@ -210,5 +221,70 @@ impl Storage for SqliteProvider {
             .insert(table_name.to_string(), schema_arc.clone());
 
         Ok(schema_arc)
+    }
+}
+
+#[async_trait]
+impl VectorSearch for SqliteProvider {
+    /// Performs a vector similarity search using SQLite with the vss-lite extension.
+    async fn vector_search(
+        &self,
+        query_vector: Vec<f32>,
+        limit: u32,
+    ) -> Result<Vec<SearchResult>, SearchError> {
+        info!("Executing SQLite vector search query.");
+        let conn = self.db.connect()?;
+
+        // The vector is formatted into a string that the `vector` function in SQLite can parse.
+        let vector_str = format!(
+            "vector('[{}]')",
+            query_vector
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        // This distance threshold is specific to the cosine distance from Turso's vector extension.
+        // A value of 0.6 means we are looking for vectors that are reasonably close (cosine similarity > 0.4).
+        // This helps filter out completely irrelevant results before ranking.
+        let distance_threshold = 0.6;
+        let sql = format!(
+            "SELECT title, link, description, vector_distance_cos(embedding, {vector_str}) AS distance
+             FROM articles
+             WHERE embedding IS NOT NULL AND distance < {distance_threshold}
+             ORDER BY distance ASC
+             LIMIT {limit};"
+        );
+
+        let mut results = conn.query(&sql, ()).await?;
+        let mut search_results = Vec::new();
+
+        while let Some(row) = results.next().await? {
+            let title = match row.get_value(0)? {
+                TursoValue::Text(s) => s,
+                _ => String::new(),
+            };
+            let link = match row.get_value(1)? {
+                TursoValue::Text(s) => s,
+                _ => String::new(),
+            };
+            let description = match row.get_value(2)? {
+                TursoValue::Text(s) => s,
+                _ => String::new(),
+            };
+            let score = match row.get_value(3)? {
+                TursoValue::Real(f) => f,
+                _ => 0.0,
+            };
+            search_results.push(SearchResult {
+                title,
+                link,
+                description,
+                score,
+            });
+        }
+
+        Ok(search_results)
     }
 }

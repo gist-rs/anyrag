@@ -1,4 +1,4 @@
-use crate::errors::PromptError;
+use crate::{errors::PromptError, search::SearchError, types::SearchResult};
 use async_trait::async_trait;
 use dyn_clone::DynClone;
 use gcp_bigquery_client::model::table_schema::TableSchema;
@@ -27,3 +27,16 @@ pub trait Storage: Send + Sync + DynClone + Debug {
 }
 
 dyn_clone::clone_trait_object!(Storage);
+
+/// A trait for providers that support vector similarity search.
+#[async_trait]
+pub trait VectorSearch: Send + Sync + DynClone + Debug {
+    /// Performs a vector similarity search.
+    async fn vector_search(
+        &self,
+        query_vector: Vec<f32>,
+        limit: u32,
+    ) -> Result<Vec<SearchResult>, SearchError>;
+}
+
+dyn_clone::clone_trait_object!(VectorSearch);

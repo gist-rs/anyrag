@@ -7,8 +7,11 @@ use self::{
 };
 use anyrag::{
     ingest::{embed_article, ingest_from_url},
-    providers::ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
-    search::{hybrid_search, search_by_keyword, search_by_vector, SearchMode},
+    providers::{
+        ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
+        db::{sqlite::SqliteProvider, storage::VectorSearch},
+    },
+    search::{hybrid_search, search_by_keyword, SearchMode},
     ExecutePromptOptions, PromptClient, PromptClientBuilder, SearchResult,
 };
 use axum::{
@@ -24,13 +27,13 @@ use std::sync::Arc;
 use tower_http::trace::TraceLayer;
 use tracing::{debug, error, info};
 use tracing_subscriber::FmtSubscriber;
-use turso::{Builder, Database, Value as TursoValue};
+use turso::Value as TursoValue;
 
 /// The shared application state.
 #[derive(Clone)]
 pub struct AppState {
     pub prompt_client: Arc<PromptClient>,
-    pub db: Arc<Database>,
+    pub sqlite_provider: Arc<SqliteProvider>,
     pub embeddings_api_url: Option<String>,
     pub embeddings_model: Option<String>,
     pub query_system_prompt_template: Option<String>,
@@ -62,8 +65,10 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
             }
         };
 
-    let db = Builder::new_local(&config.db_url).build().await?;
+    // The provider for local ingestion, embedding, and searching.
+    let sqlite_provider = SqliteProvider::new(&config.db_url).await?;
 
+    // The main prompt client for NL-to-SQL is configured for BigQuery.
     let prompt_client = PromptClientBuilder::new()
         .ai_provider(ai_provider)
         .bigquery_storage(config.project_id)
@@ -72,7 +77,7 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
 
     Ok(AppState {
         prompt_client: Arc::new(prompt_client),
-        db: Arc::new(db),
+        sqlite_provider: Arc::new(sqlite_provider),
         embeddings_api_url: config.embeddings_api_url,
         embeddings_model: config.embeddings_model,
         query_system_prompt_template: config.query_system_prompt_template,
@@ -185,7 +190,7 @@ async fn ingest_handler(
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<IngestResponse>, AppError> {
     info!("Received ingest request for URL: {}", payload.url);
-    let ingested_count = ingest_from_url(&app_state.db, &payload.url).await?;
+    let ingested_count = ingest_from_url(&app_state.sqlite_provider.db, &payload.url).await?;
     let response = IngestResponse {
         message: "Ingestion successful".to_string(),
         ingested_articles: ingested_count,
@@ -206,7 +211,13 @@ async fn embed_handler(
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
 
-    embed_article(&app_state.db, api_url, model, payload.article_id).await?;
+    embed_article(
+        &app_state.sqlite_provider.db,
+        api_url,
+        model,
+        payload.article_id,
+    )
+    .await?;
 
     Ok(Json(json!({ "success": true })))
 }
@@ -229,7 +240,7 @@ async fn embed_new_handler(
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?
         .clone();
 
-    let conn = app_state.db.connect()?;
+    let conn = app_state.sqlite_provider.db.connect()?;
     let sql = format!(
         "SELECT id FROM articles WHERE embedding IS NULL ORDER BY pub_date DESC LIMIT {limit}"
     );
@@ -254,7 +265,7 @@ async fn embed_new_handler(
 
     stream::iter(articles_to_embed)
         .for_each_concurrent(10, |article_id| {
-            let db = app_state.db.clone();
+            let db = app_state.sqlite_provider.db.clone();
             let api_url = api_url.clone();
             let model = model.clone();
             async move {
@@ -292,7 +303,10 @@ async fn vector_search_handler(
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
 
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
-    let results = search_by_vector(&app_state.db, query_vector, limit).await?;
+    let results = app_state
+        .sqlite_provider
+        .vector_search(query_vector, limit)
+        .await?;
 
     Ok(Json(results))
 }
@@ -306,7 +320,8 @@ async fn keyword_search_handler(
         "Received keyword search request for query: '{}', limit: {}",
         payload.query, limit
     );
-    let results = search_by_keyword(&app_state.db, &payload.query, limit).await?;
+    let results =
+        search_by_keyword(app_state.sqlite_provider.as_ref(), &payload.query, limit).await?;
     Ok(Json(results))
 }
 
@@ -331,7 +346,7 @@ async fn hybrid_search_handler(
 
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = hybrid_search(
-        &app_state.db,
+        app_state.sqlite_provider.as_ref(),
         &*app_state.prompt_client.ai_provider,
         query_vector,
         &payload.query,

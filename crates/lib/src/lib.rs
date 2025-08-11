@@ -143,10 +143,41 @@ impl PromptClient {
 
         let alias_instruction = get_alias_instruction(options.answer_key.as_deref());
 
-        // If a table name is provided, we assume a query is needed.
-        // Otherwise, it's a direct question to the AI.
-        let (system_prompt, user_prompt) = if options.table_name.is_some() {
+        // If a content_type is provided, we use specialized prompts.
+        // Otherwise, we fall back to the table-based or direct question logic.
+        let (system_prompt, user_prompt) = if let Some(content_type) = &options.content_type {
+            // --- Logic for ContentType-based prompts ---
+            info!("[get_query_from_prompt] Using ContentType-based prompt generation: {content_type:?}");
+            // For content-type prompts, the context is a combination of the base context (date)
+            // and the specific content provided in the options.
+            let mut final_context = context;
+            if let Some(content) = &options.context {
+                final_context.push_str(content);
+            }
+
+            let (system_template, user_template) = content_type.get_prompt_templates();
+
+            // Allow overriding the ContentType default with a specific template from options
+            let system_prompt = options
+                .system_prompt_template
+                .clone()
+                .unwrap_or_else(|| system_template.to_string())
+                .replace("{language}", language)
+                .replace("{db_name}", self.storage_provider.name());
+
+            let user_prompt = options
+                .user_prompt_template
+                .clone()
+                .unwrap_or_else(|| user_template.to_string())
+                .replace("{context}", &final_context)
+                .replace("{prompt}", &options.prompt)
+                .replace("{language}", language)
+                .replace("{alias_instruction}", &alias_instruction);
+
+            (system_prompt, user_prompt)
+        } else if options.table_name.is_some() {
             // --- Logic for Query Generation ---
+            info!("[get_query_from_prompt] Using table-based query generation.");
             if let Some(table) = &options.table_name {
                 let schema = self.storage_provider.get_table_schema(table).await?;
                 let schema_str = Self::format_schema_for_prompt(&schema);
@@ -175,6 +206,7 @@ impl PromptClient {
             (system_prompt, user_prompt)
         } else {
             // --- Logic for Direct Questions ---
+            info!("[get_query_from_prompt] Using direct question mode.");
             let system_prompt = options
                 .system_prompt_template
                 .clone()
