@@ -66,3 +66,23 @@ pub fn get_alias_instruction(answer_key: Option<&str>) -> String {
         None => "If the query uses an aggregate function or returns a single column, choose a descriptive, single-word, lowercase alias for the result based on the user's question (e.g., for 'how many users', use `count`; for 'who is the manager', use `manager`).".to_string(),
     }
 }
+
+// --- Rerank Prompts ---
+
+/// The system prompt for the LLM-based re-ranking stage.
+///
+/// This prompt instructs the AI to act as an expert re-ranker and defines the
+/// expected JSON output format.
+pub const DEFAULT_RERANK_SYSTEM_PROMPT: &str = "You are an expert search result re-ranker. Your task is to re-order a list of provided articles based on their relevance to a user's query. Analyze the user's query and the article content (title and description). Return a JSON array containing only the `link` strings of the articles in the new, correctly ordered sequence, from most relevant to least relevant. Do not add any explanation or other text outside of the JSON array.";
+
+/// The user prompt for the LLM-based re-ranking stage.
+///
+/// This template provides the user's query and the list of candidate articles
+/// to the AI for re-ranking.
+///
+/// Placeholders: `{query_text}`, `{articles_context}`
+pub const DEFAULT_RERANK_USER_PROMPT: &str = "# User Query:\n\
+    {query_text}\n\n\
+    # Articles to Re-rank:\n\
+    {articles_context}\n\n\
+    # Your Output (JSON array of links only):\n";

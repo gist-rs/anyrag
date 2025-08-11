@@ -8,8 +8,8 @@ use self::{
 use anyrag::{
     ingest::{embed_article, ingest_from_url},
     providers::ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
-    search::{hybrid_search, search_by_keyword, search_by_vector, SearchMode, SearchResult},
-    ExecutePromptOptions, PromptClient, PromptClientBuilder,
+    search::{hybrid_search, search_by_keyword, search_by_vector, SearchMode},
+    ExecutePromptOptions, PromptClient, PromptClientBuilder, SearchResult,
 };
 use axum::{
     extract::State,

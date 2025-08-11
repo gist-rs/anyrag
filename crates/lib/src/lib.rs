@@ -12,7 +12,9 @@ pub mod search;
 pub mod types;
 
 pub use errors::PromptError;
-pub use types::{ExecutePromptOptions, PromptClient, PromptClientBuilder};
+pub use rerank::{RerankError, Rerankable};
+pub use search::{SearchError, SearchMode};
+pub use types::{ExecutePromptOptions, PromptClient, PromptClientBuilder, SearchResult};
 
 use crate::prompts::{
     get_alias_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT,

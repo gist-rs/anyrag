@@ -9,9 +9,10 @@
 use crate::{
     errors::PromptError,
     providers::ai::AiProvider,
-    rerank::{llm_rerank, reciprocal_rank_fusion},
+    rerank::{llm_rerank, reciprocal_rank_fusion, RerankError},
+    types::SearchResult,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use thiserror::Error;
 use tracing::info;
@@ -33,20 +34,10 @@ pub enum SearchMode {
 pub enum SearchError {
     #[error("Database error: {0}")]
     Database(#[from] turso::Error),
-    #[error("LLM Re-ranking failed: {0}")]
-    LlmReRank(#[from] PromptError),
-    #[error("Failed to parse LLM re-ranking response: {0}")]
-    LlmResponseParsing(#[from] serde_json::Error),
-}
-
-/// Represents a single search result.
-#[derive(Debug, Serialize, Clone, PartialEq)]
-pub struct SearchResult {
-    pub title: String,
-    pub link: String,
-    pub description: String,
-    /// A generic score. For vector search, lower is better (distance). For RRF/LLM, higher is better.
-    pub score: f64,
+    #[error("Embedding generation failed: {0}")]
+    Embedding(#[from] PromptError),
+    #[error("Re-ranking failed: {0}")]
+    Rerank(#[from] RerankError),
 }
 
 /// Performs a vector-based (semantic) search for articles.
@@ -66,6 +57,9 @@ pub async fn search_by_vector(
             .join(", ")
     );
 
+    // This distance threshold is specific to the cosine distance from Turso's vector extension.
+    // A value of 0.6 means we are looking for vectors that are reasonably close (cosine similarity > 0.4).
+    // This helps filter out completely irrelevant results before ranking.
     let distance_threshold = 0.6;
     let sql = format!(
         "SELECT title, link, description, vector_distance_cos(embedding, {vector_str}) AS distance
@@ -117,6 +111,8 @@ pub async fn search_by_keyword(
     // Convert the query to lowercase for a case-insensitive search.
     let pattern = format!("%{}%", query.to_lowercase());
 
+    // The score is hardcoded to 0.0 because keyword search doesn't have a native
+    // relevance score in this implementation. The re-ranking step will assign a meaningful score.
     let sql = format!(
         "
         SELECT title, link, description, 0.0 as score
@@ -174,6 +170,9 @@ pub async fn hybrid_search(
     );
 
     // --- Stage 1: Fetch Candidates Concurrently ---
+    // We fetch more candidates than requested (limit * 2) to provide a richer
+    // set of documents to the re-ranking algorithm, improving its ability to find
+    // the most relevant results.
     let (vector_results, keyword_results) = tokio::join!(
         search_by_vector(db, query_vector.clone(), limit * 2),
         search_by_keyword(db, query_text, limit * 2)
@@ -187,6 +186,7 @@ pub async fn hybrid_search(
     // --- Stage 2: Re-rank using the specified mode ---
     let mut ranked_results = match mode {
         SearchMode::LlmReRank => {
+            // Combine and deduplicate candidates from both search methods.
             let mut all_candidates: HashMap<String, SearchResult> = HashMap::new();
             for result in vector_results
                 .into_iter()
@@ -199,6 +199,7 @@ pub async fn hybrid_search(
             if candidates.is_empty() {
                 return Ok(vec![]);
             }
+            // The `?` operator here will convert a RerankError into a SearchError::Rerank
             llm_rerank(ai_provider, query_text, candidates).await?
         }
         SearchMode::Rrf => reciprocal_rank_fusion(vector_results, keyword_results),

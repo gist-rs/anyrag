@@ -1,6 +1,7 @@
 use crate::{
     errors::PromptError,
     providers::{ai::AiProvider, db::bigquery::BigQueryProvider, db::storage::Storage},
+    rerank::Rerankable,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug};
@@ -114,5 +115,29 @@ impl PromptClientBuilder {
             ai_provider,
             storage_provider,
         })
+    }
+}
+
+/// A search result from any search provider (vector, keyword, etc.).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct SearchResult {
+    pub title: String,
+    pub link: String,
+    pub description: String,
+    /// A generic score. For vector search, lower is better (distance). For RRF/LLM, higher is better.
+    pub score: f64,
+}
+
+impl Rerankable for SearchResult {
+    fn get_title(&self) -> &str {
+        &self.title
+    }
+
+    fn get_link(&self) -> &str {
+        &self.link
+    }
+
+    fn get_description(&self) -> &str {
+        &self.description
     }
 }
