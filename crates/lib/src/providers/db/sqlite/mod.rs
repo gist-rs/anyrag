@@ -187,13 +187,26 @@ impl Storage for SqliteProvider {
                 _ => continue,
             };
 
-            let bq_type = match type_str.to_uppercase().as_str() {
+            let type_str_upper = type_str.to_uppercase();
+            let (base_type_str, format_hint) =
+                if let Some((base, rest)) = type_str_upper.split_once('(') {
+                    // This will parse "DATETIME ('m/d/Y H:M:S')" into:
+                    // base: "DATETIME"
+                    // format_hint: "Format: m/d/Y H:M:S"
+                    let format = rest.trim_end_matches(')').trim().trim_matches('\'');
+                    (base.trim(), Some(format!("Format: {format}")))
+                } else {
+                    (type_str_upper.as_str(), None)
+                };
+
+            let bq_type = match base_type_str {
                 "INTEGER" => FieldType::Integer,
                 "TEXT" => FieldType::String,
                 "REAL" => FieldType::Float,
                 "BLOB" => FieldType::Bytes,
                 "DATETIME" | "TIMESTAMP" => FieldType::Timestamp,
-                _ => FieldType::String,
+                "DATE" => FieldType::Date,
+                _ => FieldType::String, // Default fallback
             };
 
             fields.push(TableFieldSchema {
@@ -201,7 +214,7 @@ impl Storage for SqliteProvider {
                 r#type: bq_type,
                 mode: Some("NULLABLE".to_string()),
                 fields: None,
-                description: None,
+                description: format_hint,
                 categories: None,
                 policy_tags: None,
             });

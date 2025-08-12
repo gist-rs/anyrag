@@ -16,6 +16,7 @@ use turso::Error as TursoError;
 ///
 /// This enum encapsulates different kinds of errors that can occur within the server,
 /// allowing them to be converted into appropriate HTTP responses.
+#[derive(Debug)]
 pub enum AppError {
     /// Errors originating from the `anyrag`.
     Prompt(PromptError),

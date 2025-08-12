@@ -18,7 +18,7 @@ pub use types::{ExecutePromptOptions, PromptClient, PromptClientBuilder, SearchR
 
 use crate::prompts::core::{
     get_alias_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT,
-    DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT,
+    DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT, SQLITE_QUERY_USER_PROMPT,
 };
 use chrono::Utc;
 use gcp_bigquery_client::model::table_schema::TableSchema;
@@ -35,28 +35,19 @@ pub enum QueryOrAnswer {
 impl PromptClient {
     /// Executes a natural language prompt with detailed options.
     ///
-    /// This is the primary method for executing prompts. It supports two modes:
+    /// This is the primary method for executing prompts. It follows the full
+    /// "Text-to-Query" pipeline:
     ///
-    /// 1.  **Query Generation (Default):** If `system_prompt_template` is `None`, it generates a
-    ///     query from the prompt, executes it against the storage provider, and formats the response.
-    /// 2.  **Generic Prompting:** If a `system_prompt_template` is provided, it bypasses all query
-    ///     generation and execution logic. It directly sends the system and user prompts to the
-    ///     AI provider and returns the raw response. This is useful for tasks like translation
-    ///     or summarization.
+    /// 1.  It calls the AI provider to generate a query from the user's prompt and context.
+    ///     This step can be customized with `system_prompt_template` and `user_prompt_template`.
+    /// 2.  It executes the generated query against the configured storage provider.
+    /// 3.  It optionally calls the AI provider again to format the raw query results into a
+    ///     natural language response, guided by the `instruction`.
     pub async fn execute_prompt_with_options(
         &self,
         options: ExecutePromptOptions,
     ) -> Result<String, PromptError> {
-        // If a custom system prompt for the main task is provided, switch to generic mode.
-        if let Some(system_prompt) = options.system_prompt_template.clone() {
-            info!("[execute_prompt] Generic mode: custom system prompt provided.");
-            // In this mode, we just send the prompts to the AI and return the response directly.
-            let user_prompt = &options.prompt;
-            return self.ai_provider.generate(&system_prompt, user_prompt).await;
-        }
-
-        // --- Default Mode: Query Generation & Execution ---
-        info!("[execute_prompt] Query generation mode.");
+        info!("[execute_prompt] Starting query generation pipeline.");
         let query_or_answer = self.get_query_from_prompt_internal(&options).await?;
 
         match query_or_answer {
@@ -137,8 +128,14 @@ impl PromptClient {
             options.prompt
         );
 
-        let today_datetime = Utc::now().to_rfc2822();
-        let mut context = format!("# TODAY\n{today_datetime}\n\n");
+        let now = Utc::now();
+        let today_rfc2822 = now.to_rfc2822();
+        let today_ymd = now.format("%Y-%m-%d").to_string();
+        let today_mdy = now.format("%-m/%-d/%Y").to_string(); // e.g., 8/12/2025
+
+        let mut context = format!(
+            "# TODAY\n- RFC2822: {today_rfc2822}\n- YYYY-MM-DD: {today_ymd}\n- M/D/YYYY: {today_mdy}\n\n"
+        );
         let language = self.storage_provider.language();
 
         let alias_instruction = get_alias_instruction(options.answer_key.as_deref());
@@ -196,6 +193,13 @@ impl PromptClient {
                     .replace("{context}", &context)
                     .replace("{prompt}", &options.prompt)
                     .replace("{alias_instruction}", &alias_instruction)
+            } else if self.storage_provider.name() == "SQLite" {
+                // If the storage provider is SQLite, use the specialized user prompt.
+                SQLITE_QUERY_USER_PROMPT
+                    .replace("{language}", language)
+                    .replace("{context}", &context)
+                    .replace("{prompt}", &options.prompt)
+                    .replace("{alias_instruction}", &alias_instruction)
             } else {
                 DEFAULT_QUERY_USER_PROMPT
                     .replace("{language}", language)
@@ -236,27 +240,33 @@ impl PromptClient {
             .generate(&system_prompt, &user_prompt)
             .await?;
 
-        debug!("<-- Query from AI: {}", &raw_response);
+        info!("<-- Raw response from AI: {}", &raw_response);
 
-        // Regex to extract a query from markdown code blocks.
+        // --- CORRECTED LOGIC ---
+        // 1. First, try to extract a query from a markdown code block.
         let re = Regex::new(r"```(?:sql|query)?\n?([\s\S]*?)```")?;
-        let mut query = re
+        let query_candidate = re
             .captures(&raw_response)
             .and_then(|caps| caps.get(1))
-            .map(|m| m.as_str().trim().to_string())
-            .unwrap_or_else(|| raw_response.trim().to_string());
+            .map(|m| m.as_str().trim())
+            .unwrap_or_else(|| raw_response.trim());
 
+        // 2. Now, check if the cleaned and processed string looks like a query.
+        if !query_candidate.to_uppercase().starts_with("SELECT")
+            && !query_candidate.to_uppercase().starts_with("WITH")
+        {
+            // If not, it's a direct answer. The answer is the *original* raw response.
+            info!("[get_query_from_prompt] Response is a direct answer, not a query.");
+            return Ok(QueryOrAnswer::Answer(raw_response));
+        }
+
+        info!("[get_query_from_prompt] Successfully generated query.");
+
+        // 3. It is a query, so perform table name replacements on the cleaned candidate.
+        let mut query = query_candidate.to_string();
         if let Some(table) = &options.table_name {
             query = query.replace("`your_table_name`", &format!("`{table}`"));
             query = query.replace("your_table_name", table);
-        }
-
-        // Note: This is a simple validation that works for SQL-like languages.
-        if !query.trim().to_uppercase().starts_with("SELECT")
-            && !query.trim().to_uppercase().starts_with("WITH")
-        {
-            // This is a direct answer, not a query.
-            return Ok(QueryOrAnswer::Answer(query));
         }
 
         Ok(QueryOrAnswer::Query(query))
@@ -267,11 +277,15 @@ impl PromptClient {
             fields
                 .iter()
                 .map(|field| {
-                    format!(
+                    let mut field_str = format!(
                         "{field_name} {field_type:?}",
                         field_name = field.name,
                         field_type = field.r#type
-                    )
+                    );
+                    if let Some(desc) = &field.description {
+                        field_str.push_str(&format!(" ({desc})"));
+                    }
+                    field_str
                 })
                 .collect::<Vec<String>>()
                 .join(", ")

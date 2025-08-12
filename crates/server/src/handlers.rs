@@ -22,7 +22,7 @@ use turso::Value as TursoValue;
 
 #[derive(Serialize)]
 pub struct PromptResponse {
-    result: String,
+    pub result: String,
 }
 
 #[derive(Deserialize)]
@@ -79,77 +79,8 @@ pub async fn prompt_handler(
     let mut options: ExecutePromptOptions =
         serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
 
-    // Check for a Google Sheet URL in the prompt.
-    let sheet_url = options
-        .prompt
-        .split_whitespace()
-        .find(|word| word.contains("/spreadsheets/d/"));
-
-    if let Some(url) = sheet_url {
-        info!("Detected Google Sheet URL in prompt: {}", url);
-
-        // 1. Get the potential table name and export URL from the sheet URL.
-        let (export_url, table_name) = sheet_url_to_export_url_and_table_name(url)
-            .map_err(|e| anyhow::anyhow!("Sheet URL transformation failed: {e}"))?;
-
-        // 2. Check if the table already exists using a robust schema check.
-        match app_state
-            .sqlite_provider
-            .get_table_schema(&table_name)
-            .await
-        {
-            Ok(_) => {
-                info!("Table '{table_name}' already exists, skipping ingestion.");
-            }
-            // If it's a "not found" error, we proceed to ingest.
-            Err(anyrag::PromptError::StorageOperationFailed(e)) if e.contains("not found") => {
-                info!("Table '{table_name}' not found, proceeding with ingestion.");
-                ingest_from_google_sheet_url(
-                    &app_state.sqlite_provider.db,
-                    &export_url,
-                    &table_name,
-                )
-                .await
-                .map_err(|e| anyhow::anyhow!("Sheet ingestion failed: {e}"))?;
-            }
-            // For any other schema error, we should fail fast.
-            Err(e) => return Err(e.into()),
-        };
-
-        // 3. Update the prompt options to target the now-guaranteed-to-exist table.
-        options.table_name = Some(table_name);
-
-        // 4. For this request, create a special client that's configured to talk to SQLite
-        //    instead of the default BigQuery provider.
-        let sqlite_prompt_client = PromptClientBuilder::new()
-            .ai_provider(app_state.prompt_client.ai_provider.clone())
-            .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
-            .build()?;
-
-        // Apply server-wide default prompts if not provided in the request.
-        if options.system_prompt_template.is_none() {
-            options.system_prompt_template = app_state.query_system_prompt_template.clone();
-        }
-        if options.user_prompt_template.is_none() {
-            options.user_prompt_template = app_state.query_user_prompt_template.clone();
-        }
-        if options.format_system_prompt_template.is_none() {
-            options.format_system_prompt_template = app_state.format_system_prompt_template.clone();
-        }
-        if options.format_user_prompt_template.is_none() {
-            options.format_user_prompt_template = app_state.format_user_prompt_template.clone();
-        }
-
-        // Execute the prompt using the temporary SQLite client.
-        let result = sqlite_prompt_client
-            .execute_prompt_with_options(options)
-            .await?;
-
-        return Ok(Json(PromptResponse { result }));
-    }
-
-    // --- Default Flow (if no sheet URL is detected) ---
-
+    // Apply server-wide default prompts first. If these are not set, the library's
+    // own defaults will be used. This allows server admins to customize behavior.
     if options.system_prompt_template.is_none() {
         options.system_prompt_template = app_state.query_system_prompt_template.clone();
     }
@@ -163,10 +94,54 @@ pub async fn prompt_handler(
         options.format_user_prompt_template = app_state.format_user_prompt_template.clone();
     }
 
-    let result = app_state
-        .prompt_client
-        .execute_prompt_with_options(options)
-        .await?;
+    // Check for a Google Sheet URL in the prompt to trigger the special ingestion flow.
+    let sheet_url = options
+        .prompt
+        .split_whitespace()
+        .find(|word| word.contains("/spreadsheets/d/"));
+
+    let result = if let Some(url) = sheet_url {
+        // --- Google Sheet Flow ---
+        info!("Detected Google Sheet URL in prompt: {}", url);
+
+        let (export_url, table_name) = sheet_url_to_export_url_and_table_name(url)
+            .map_err(|e| anyhow::anyhow!("Sheet URL transformation failed: {e}"))?;
+
+        // Ingest the sheet data if the corresponding table doesn't already exist.
+        if app_state
+            .sqlite_provider
+            .get_table_schema(&table_name)
+            .await
+            .is_err()
+        {
+            info!("Table '{table_name}' does not exist. Starting ingestion.");
+            ingest_from_google_sheet_url(&app_state.sqlite_provider.db, &export_url, &table_name)
+                .await
+                .map_err(|e| anyhow::anyhow!("Sheet ingestion failed: {e}"))?;
+        } else {
+            info!("Table '{table_name}' already exists. Skipping ingestion.");
+        }
+
+        options.table_name = Some(table_name);
+
+        // Create a temporary client that uses the SQLite provider for this request.
+        let sqlite_prompt_client = PromptClientBuilder::new()
+            .ai_provider(app_state.prompt_client.ai_provider.clone())
+            .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
+            .build()?;
+
+        // Execute the prompt. The library will now automatically select the correct
+        // SQL dialect prompts because the storage provider is SQLite.
+        sqlite_prompt_client
+            .execute_prompt_with_options(options)
+            .await?
+    } else {
+        // --- Default Flow (BigQuery) ---
+        app_state
+            .prompt_client
+            .execute_prompt_with_options(options)
+            .await?
+    };
 
     Ok(Json(PromptResponse { result }))
 }

@@ -34,7 +34,7 @@ pub async fn run(listener: tokio::net::TcpListener, config: Config) -> anyhow::R
 /// This function is responsible for setting up the environment, loading configuration,
 /// initializing the logger, binding to a TCP port, and starting the server.
 #[tokio::main]
-#[cfg_attr(test, allow(dead_code))]
+#[allow(dead_code)]
 async fn main() -> anyhow::Result<()> {
     // Load environment variables from a .env file if it exists.
     dotenvy::dotenv().ok();
