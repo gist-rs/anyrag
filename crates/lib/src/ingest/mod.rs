@@ -5,6 +5,8 @@
 
 pub mod embedding;
 pub mod rss;
+pub mod sheets;
 
 pub use embedding::{embed_article, EmbeddingError};
 pub use rss::{ingest_from_url, IngestError};
+pub use sheets::{ingest_from_google_sheet_url, IngestSheetError};

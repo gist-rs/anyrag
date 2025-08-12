@@ -27,11 +27,11 @@ tower-http = { workspace = true }
 serde = { workspace = true }
 serde_json.workspace = true
 turso = { workspace = true }
-futures = "0.3"
+futures = { workspace = true }
 
 # Other
-dotenvy = "0.15.7"
-anyhow = "1.0.98"
+dotenvy = { workspace = true }
+anyhow = { workspace = true }
 
 [dev-dependencies]
 async-trait = { workspace = true }
@@ -41,7 +41,7 @@ gcp-bigquery-client = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 httpmock = "0.7.0"
 tempfile = "3.20.0"
-turso = "0.1.3"
+turso = { workspace = true }
 regex = { workspace = true }
 
 [[test]]

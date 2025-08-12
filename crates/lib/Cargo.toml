@@ -20,7 +20,9 @@ async-trait.workspace = true
 dyn-clone = { workspace = true }
 chrono = { workspace = true }
 turso = { workspace = true }
+csv = { workspace = true }
 rss = { workspace = true }
+dotenvy = "0.15.7"
 
 
 [dev-dependencies]
