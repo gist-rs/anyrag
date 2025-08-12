@@ -12,7 +12,6 @@ use anyrag::{
     providers::ai::local::LocalAiProvider,
 };
 use httpmock::prelude::*;
-use md5;
 use serde_json::{json, Value};
 use tempfile::NamedTempFile;
 use turso::{Builder, Value as TursoValue};
@@ -90,15 +89,15 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     let (q1, a1, e1) = (
         match row1.get_value(0)? {
             TursoValue::Text(s) => s,
-            v => panic!("Expected text for q1, got {:?}", v),
+            v => panic!("Expected text for q1, got {v:?}"),
         },
         match row1.get_value(1)? {
             TursoValue::Text(s) => s,
-            v => panic!("Expected text for a1, got {:?}", v),
+            v => panic!("Expected text for a1, got {v:?}"),
         },
         match row1.get_value(2)? {
             TursoValue::Integer(i) => i,
-            v => panic!("Expected integer for e1, got {:?}", v),
+            v => panic!("Expected integer for e1, got {v:?}"),
         },
     );
     assert_eq!(q1, "What is this?");
@@ -109,15 +108,15 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     let (q2, a2, e2) = (
         match row2.get_value(0)? {
             TursoValue::Text(s) => s,
-            v => panic!("Expected text for q2, got {:?}", v),
+            v => panic!("Expected text for q2, got {v:?}"),
         },
         match row2.get_value(1)? {
             TursoValue::Text(s) => s,
-            v => panic!("Expected text for a2, got {:?}", v),
+            v => panic!("Expected text for a2, got {v:?}"),
         },
         match row2.get_value(2)? {
             TursoValue::Integer(i) => i,
-            v => panic!("Expected integer for e2, got {:?}", v),
+            v => panic!("Expected integer for e2, got {v:?}"),
         },
     );
     assert_eq!(q2, "What is mentioned in the details section?");
