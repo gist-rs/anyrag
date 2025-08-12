@@ -16,6 +16,8 @@ use serde_json::json;
 use std::sync::{Arc, RwLock};
 use tokio::net::TcpListener;
 
+use crate::main::{router, state::AppState};
+
 // --- Mock AI Provider for Logic Testing ---
 // A mock implementation of the AiProvider trait is used to capture the prompts
 // sent by the application, allowing us to assert that the correct prompt
@@ -52,7 +54,7 @@ impl AiProvider for MockAiProvider {
 ///
 /// This helper function sets up a full application instance but replaces the
 /// standard AI provider with a mock one. It returns the server's address.
-async fn spawn_app_with_mock_ai(state: main::AppState) -> String {
+async fn spawn_app_with_mock_ai(state: AppState) -> String {
     // Bind to a random port and start the server.
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -61,7 +63,7 @@ async fn spawn_app_with_mock_ai(state: main::AppState) -> String {
     let address = format!("http://127.0.0.1:{port}");
 
     tokio::spawn(async move {
-        let app = main::create_router(state);
+        let app = router::create_router(state);
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -88,7 +90,7 @@ async fn test_prompt_selects_rss_template_for_rss_content_type() {
         .build()
         .unwrap();
 
-    let state = main::AppState {
+    let state = AppState {
         prompt_client: Arc::new(prompt_client),
         sqlite_provider: Arc::new(SqliteProvider::new(":memory:").await.unwrap()),
         embeddings_api_url: None,

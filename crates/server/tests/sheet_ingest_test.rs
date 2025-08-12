@@ -25,6 +25,8 @@ use tokio::time::{sleep, Duration};
 use tracing::info;
 use turso::Value as TursoValue;
 
+use crate::main::state::AppState;
+
 // Include the binary's main source file to access its components.
 #[path = "../src/main.rs"]
 mod main;
@@ -63,7 +65,7 @@ async fn spawn_app_for_sheet_test(
     tokio::task::JoinHandle<()>,
 )> {
     info!("[spawn_app] Creating AppState.");
-    let app_state = main::AppState {
+    let app_state = AppState {
         prompt_client,
         sqlite_provider,
         embeddings_api_url: None,
