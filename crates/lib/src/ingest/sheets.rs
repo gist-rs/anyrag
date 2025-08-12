@@ -6,7 +6,7 @@
 use regex::Regex;
 use thiserror::Error;
 use tracing::{info, warn};
-use turso::{Connection, Database};
+use turso::{Connection, Database, Value as TursoValue};
 
 /// Custom error types for the Google Sheet ingestion process.
 #[derive(Error, Debug)]
@@ -25,17 +25,14 @@ pub enum IngestSheetError {
     Connection(String),
 }
 
-/// Transforms a standard Google Sheet URL into a CSV export URL and extracts the sheet ID.
+/// Transforms a Google Sheet URL into a CSV export URL and a sanitized table name.
 ///
-/// If the provided URL points to a local test server (e.g., from `httpmock`),
-/// it preserves the host and port. Otherwise, it defaults to `docs.google.com`.
-///
-/// Example Prod URL: `https://docs.google.com/spreadsheets/d/1.../edit`
-/// -> Export URL: `https://docs.google.com/spreadsheets/d/1.../export?format=csv`
-///
-/// Example Test URL: `http://127.0.0.1:54321/spreadsheets/d/1.../edit`
-/// -> Export URL: `http://127.0.0.1:54321/spreadsheets/d/1.../export?format=csv`
-fn transform_google_sheet_url(url_str: &str) -> Result<(String, String), IngestSheetError> {
+/// This function is public to allow the server to determine the target table name
+/// before calling the ingestion logic. It handles both real Google Sheet URLs and
+/// local test URLs from `httpmock`.
+pub fn sheet_url_to_export_url_and_table_name(
+    url_str: &str,
+) -> Result<(String, String), IngestSheetError> {
     // Use the `url` crate's parser, which `reqwest` re-exports.
     let parsed_url = reqwest::Url::parse(url_str)
         .map_err(|e| IngestSheetError::InvalidUrl(format!("Failed to parse URL: {e}")))?;
@@ -68,50 +65,31 @@ fn transform_google_sheet_url(url_str: &str) -> Result<(String, String), IngestS
 
 /// Fetches a Google Sheet, parses it as CSV, and ingests it into a new SQLite table.
 ///
-/// This function is idempotent. If the table already exists, it will be skipped.
-/// It returns the generated table name and the number of rows inserted.
+/// This function no longer checks for the table's existence, assuming the caller has
+/// already performed this check. It is designed to be called only when ingestion is needed.
 ///
 /// # Arguments
 ///
 /// * `db`: A shared reference to the Turso database instance.
-/// * `sheet_url`: The public URL of the Google Sheet to ingest.
+/// * `export_url`: The direct CSV export URL for the Google Sheet.
+/// * `table_name`: The name of the table to create.
 ///
 /// # Returns
 ///
-/// A tuple containing the `(table_name, rows_ingested)`.
+/// The number of rows inserted.
 pub async fn ingest_from_google_sheet_url(
     db: &Database,
-    sheet_url: &str,
-) -> Result<(String, usize), IngestSheetError> {
-    let (export_url, table_name) = transform_google_sheet_url(sheet_url)?;
-    info!("Transformed Google Sheet URL to CSV export URL: {export_url}");
-    info!("Target table name will be: {table_name}");
-
+    export_url: &str,
+    table_name: &str,
+) -> Result<usize, IngestSheetError> {
     info!("[ingest_sheet] Attempting to get database connection...");
     let conn = db
         .connect()
         .map_err(|e| IngestSheetError::Connection(e.to_string()))?;
     info!("[ingest_sheet] Successfully got database connection.");
 
-    // Check if table already exists. If so, we assume the data is current and skip ingestion.
-    let mut check_stmt = conn
-        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
-        .await?;
-
-    info!("query:{:?}", turso::params![table_name.clone()]);
-    if check_stmt
-        .query(turso::params![table_name.clone()])
-        .await?
-        .next()
-        .await?
-        .is_some()
-    {
-        info!("Table '{table_name}' already exists, skipping ingestion.");
-        return Ok((table_name, 0));
-    }
-
     info!("Fetching Google Sheet from: {export_url}");
-    let response = reqwest::get(&export_url).await?;
+    let response = reqwest::get(export_url).await?;
     if !response.status().is_success() {
         return Err(IngestSheetError::Fetch(
             response.error_for_status().unwrap_err(),
@@ -136,7 +114,7 @@ pub async fn ingest_from_google_sheet_url(
         })
         .collect();
 
-    create_table_from_headers(&conn, &table_name, &sanitized_headers).await?;
+    create_table_from_headers(&conn, table_name, &sanitized_headers).await?;
 
     conn.execute("BEGIN TRANSACTION", ()).await?;
     let mut insert_count = 0;
@@ -153,9 +131,9 @@ pub async fn ingest_from_google_sheet_url(
 
     for result in reader.records() {
         let record = result?;
-        let params: Vec<turso::Value> = record
+        let params: Vec<TursoValue> = record
             .iter()
-            .map(|field| turso::Value::Text(field.to_string()))
+            .map(|field| TursoValue::Text(field.to_string()))
             .collect();
 
         match stmt.execute(params).await {
@@ -175,7 +153,7 @@ pub async fn ingest_from_google_sheet_url(
     conn.execute("COMMIT", ()).await?;
     info!("Transaction committed. Ingested {insert_count} new rows into '{table_name}'.");
 
-    Ok((table_name, insert_count))
+    Ok(insert_count)
 }
 
 /// Creates a new table based on CSV headers.

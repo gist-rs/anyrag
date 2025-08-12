@@ -6,12 +6,15 @@ use self::{
     errors::AppError,
 };
 use anyrag::{
-    ingest::{embed_article, ingest_from_google_sheet_url, ingest_from_url},
+    ingest::{
+        embed_article, ingest_from_google_sheet_url, ingest_from_url,
+        sheet_url_to_export_url_and_table_name,
+    },
     providers::{
         ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
         db::{
             sqlite::SqliteProvider,
-            storage::{KeywordSearch, VectorSearch},
+            storage::{KeywordSearch, Storage, VectorSearch},
         },
     },
     search::{hybrid_search, SearchMode},
@@ -168,7 +171,6 @@ async fn prompt_handler(
         serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
 
     // Check for a Google Sheet URL in the prompt.
-    // This is a simple but effective way to detect the URL without adding a regex dependency.
     let sheet_url = options
         .prompt
         .split_whitespace()
@@ -177,17 +179,39 @@ async fn prompt_handler(
     if let Some(url) = sheet_url {
         info!("Detected Google Sheet URL in prompt: {}", url);
 
-        // Ingest the sheet into a new table in the local SQLite database.
-        let (table_name, _rows_ingested) =
-            ingest_from_google_sheet_url(&app_state.sqlite_provider.db, url)
+        // 1. Get the potential table name and export URL from the sheet URL.
+        let (export_url, table_name) = sheet_url_to_export_url_and_table_name(url)
+            .map_err(|e| anyhow::anyhow!("Sheet URL transformation failed: {e}"))?;
+
+        // 2. Check if the table already exists using a robust schema check.
+        match app_state
+            .sqlite_provider
+            .get_table_schema(&table_name)
+            .await
+        {
+            Ok(_) => {
+                info!("Table '{table_name}' already exists, skipping ingestion.");
+            }
+            // If it's a "not found" error, we proceed to ingest.
+            Err(anyrag::PromptError::StorageOperationFailed(e)) if e.contains("not found") => {
+                info!("Table '{table_name}' not found, proceeding with ingestion.");
+                ingest_from_google_sheet_url(
+                    &app_state.sqlite_provider.db,
+                    &export_url,
+                    &table_name,
+                )
                 .await
                 .map_err(|e| anyhow::anyhow!("Sheet ingestion failed: {e}"))?;
+            }
+            // For any other schema error, we should fail fast.
+            Err(e) => return Err(e.into()),
+        };
 
-        // Update the prompt options to target the newly created table.
+        // 3. Update the prompt options to target the now-guaranteed-to-exist table.
         options.table_name = Some(table_name);
 
-        // For this request, we need a special client that's configured to talk to SQLite
-        // instead of the default BigQuery provider.
+        // 4. For this request, create a special client that's configured to talk to SQLite
+        //    instead of the default BigQuery provider.
         let sqlite_prompt_client = PromptClientBuilder::new()
             .ai_provider(app_state.prompt_client.ai_provider.clone())
             .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))

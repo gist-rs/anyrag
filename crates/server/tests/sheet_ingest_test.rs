@@ -185,7 +185,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
 
     info!("[test] Sending POST request to /prompt.");
     let response = http_client
-        .post(format!("{}/prompt", app_address))
+        .post(format!("{app_address}/prompt"))
         .json(&payload)
         .send()
         .await?
@@ -198,8 +198,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     let result_str = result_body["result"].as_str().unwrap();
     assert!(
         result_str.contains("3 records"),
-        "The final response did not contain the formatted text '3 records'. Got: {}",
-        result_str
+        "The final response did not contain the formatted text '3 records'. Got: {result_str}"
     );
     info!("[test] Server response is correct: '{}'", result_str);
 
@@ -207,7 +206,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     info!("[test] Asserting database state.");
     let conn = sqlite_provider.db.connect()?;
     let mut stmt = conn
-        .prepare(&format!("SELECT COUNT(*) FROM {}", expected_table_name))
+        .prepare(&format!("SELECT COUNT(*) FROM {expected_table_name}"))
         .await?;
     let mut rows = stmt.query(()).await?;
     let row = rows.next().await?.expect("COUNT(*) returned no rows");
