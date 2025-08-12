@@ -192,3 +192,39 @@ curl -X POST http://localhost:9090/search/hybrid \
     "limit": 5
   }'
 ```
+
+### Knowledge Base API
+
+This API provides tools for building and maintaining the internal knowledge base used for RAG.
+
+#### `POST /knowledge/ingest`
+
+Initiates the full ingestion pipeline for a given URL. This process involves:
+1.  Fetching the content from the URL.
+2.  Using an LLM to distill the content into structured Q&A pairs.
+3.  Storing the results in the local SQLite database.
+
+**Request Body:**
+```json
+{
+  "url": "https://your-url-to-process.com/some/article"
+}
+```
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/knowledge/ingest \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://www.true.th/betterliv/support/true-app-mega-campaign"
+  }'
+```
+
+#### `GET /knowledge/export`
+
+Exports the entire `faq_kb` table from the SQLite database into a `finetuning_dataset.jsonl` file. This file is formatted for use in fine-tuning language models, completing the virtuous cycle.
+
+**Example:**
+```sh
+curl -X GET http://localhost:9090/knowledge/export -o finetuning_dataset.jsonl
+```

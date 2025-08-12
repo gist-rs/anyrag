@@ -23,6 +23,8 @@ turso = { workspace = true }
 csv = { workspace = true }
 rss = { workspace = true }
 dotenvy = "0.15.7"
+futures = "0.3"
+md5 = "0.8"
 
 
 [dev-dependencies]

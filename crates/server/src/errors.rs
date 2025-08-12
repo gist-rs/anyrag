@@ -1,5 +1,5 @@
 use anyrag::{
-    ingest::{EmbeddingError, IngestError},
+    ingest::{EmbeddingError, IngestError, KnowledgeError},
     search::SearchError,
     PromptError,
 };
@@ -24,6 +24,8 @@ pub enum AppError {
     Ingest(IngestError),
     /// Errors from the embedding process.
     Embedding(EmbeddingError),
+    /// Errors from the knowledge base pipeline.
+    Knowledge(KnowledgeError),
     /// Errors from the search process.
     Search(SearchError),
     /// Errors from database operations.
@@ -43,6 +45,13 @@ impl From<IngestError> for AppError {
 impl From<EmbeddingError> for AppError {
     fn from(err: EmbeddingError) -> Self {
         AppError::Embedding(err)
+    }
+}
+
+/// Conversion from `KnowledgeError` to `AppError`.
+impl From<KnowledgeError> for AppError {
+    fn from(err: KnowledgeError) -> Self {
+        AppError::Knowledge(err)
     }
 }
 
@@ -83,6 +92,28 @@ impl IntoResponse for AppError {
                     StatusCode::UNPROCESSABLE_ENTITY,
                     format!("Failed to ingest data: {err}"),
                 )
+            }
+            AppError::Knowledge(err) => {
+                error!("KnowledgeError: {:?}", err);
+                let (status, msg) = match &err {
+                    KnowledgeError::JinaReaderFailed { status, body } => (
+                        StatusCode::BAD_GATEWAY,
+                        format!("Upstream fetch failed (status: {status}): {body}"),
+                    ),
+                    KnowledgeError::Llm(e) => {
+                        (StatusCode::BAD_GATEWAY, format!("AI provider error: {e}"))
+                    }
+                    KnowledgeError::Parse(e) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to parse LLM response: {e}"),
+                    ),
+                    // ContentUnchanged is handled within the library and should not bubble up.
+                    _ => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Knowledge base operation failed: {err}"),
+                    ),
+                };
+                (status, msg)
             }
             AppError::Embedding(err) => {
                 error!("EmbeddingError: {:?}", err);

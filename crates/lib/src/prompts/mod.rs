@@ -4,4 +4,5 @@
 //! It is divided into sub-modules based on the context or purpose of the prompts.
 
 pub mod core;
+pub mod knowledge;
 pub mod rss;

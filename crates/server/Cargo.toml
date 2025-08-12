@@ -43,6 +43,7 @@ httpmock = "0.7.0"
 tempfile = "3.20.0"
 turso = { workspace = true }
 regex = { workspace = true }
+md5 = "0.7.0"
 
 [[test]]
 name = "config_test"

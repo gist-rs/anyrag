@@ -1,8 +1,8 @@
 use super::{errors::AppError, state::AppState};
 use anyrag::{
     ingest::{
-        embed_article, ingest_from_google_sheet_url, ingest_from_url,
-        sheet_url_to_export_url_and_table_name,
+        embed_article, export_for_finetuning, ingest_from_google_sheet_url, ingest_from_url,
+        run_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
     },
     providers::{
         ai::generate_embedding,
@@ -34,6 +34,12 @@ pub struct IngestRequest {
 pub struct IngestResponse {
     message: String,
     ingested_articles: usize,
+}
+
+#[derive(Serialize)]
+pub struct KnowledgeIngestResponse {
+    message: String,
+    ingested_faqs: usize,
 }
 
 #[derive(Deserialize)]
@@ -319,4 +325,35 @@ pub async fn hybrid_search_handler(
     .await?;
 
     Ok(Json(results))
+}
+
+pub async fn knowledge_ingest_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<IngestRequest>,
+) -> Result<Json<KnowledgeIngestResponse>, AppError> {
+    info!("Received knowledge ingest request for URL: {}", payload.url);
+
+    let ingested_count = run_ingestion_pipeline(
+        &app_state.sqlite_provider.db,
+        &*app_state.prompt_client.ai_provider,
+        &payload.url,
+    )
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
+
+    let response = KnowledgeIngestResponse {
+        message: "Knowledge ingestion pipeline completed successfully.".to_string(),
+        ingested_faqs: ingested_count,
+    };
+    Ok(Json(response))
+}
+
+pub async fn knowledge_export_handler(
+    State(app_state): State<AppState>,
+) -> Result<String, AppError> {
+    info!("Received request to export knowledge base for fine-tuning.");
+    let jsonl_data = export_for_finetuning(&app_state.sqlite_provider.db)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge export failed: {e}")))?;
+    Ok(jsonl_data)
 }

@@ -17,6 +17,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/search/vector", post(vector_search_handler))
         .route("/search/keyword", post(keyword_search_handler))
         .route("/search/hybrid", post(hybrid_search_handler))
+        .route("/knowledge/ingest", post(knowledge_ingest_handler))
+        .route("/knowledge/export", get(knowledge_export_handler))
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
 }
