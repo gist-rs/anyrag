@@ -86,7 +86,7 @@ impl AiProvider for LocalAiProvider {
             messages,
             model: self.model.as_deref(),
             temperature: 0.0,
-            max_tokens: 1500,
+            max_tokens: 8192,
             stream: false,
         };
 

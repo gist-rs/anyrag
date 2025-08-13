@@ -8,7 +8,7 @@ pub mod knowledge;
 pub mod rss;
 pub mod sheets;
 
-pub use embedding::{embed_article, EmbeddingError};
+pub use embedding::{embed_article, embed_faq, EmbeddingError};
 pub use knowledge::{export_for_finetuning, run_ingestion_pipeline, KnowledgeError};
 pub use rss::{ingest_from_url, IngestError};
 pub use sheets::{

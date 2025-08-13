@@ -2,6 +2,7 @@ use crate::{
     errors::PromptError,
     prompts::{
         core::{DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT},
+        knowledge::{KNOWLEDGE_RAG_SYSTEM_PROMPT, KNOWLEDGE_RAG_USER_PROMPT},
         rss::{RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT},
     },
     providers::{ai::AiProvider, db::bigquery::BigQueryProvider, db::storage::Storage},
@@ -37,6 +38,7 @@ pub enum ContentType {
     Sql,
     Json,
     Text,
+    Knowledge,
 }
 
 impl ContentType {
@@ -44,6 +46,7 @@ impl ContentType {
     pub fn get_prompt_templates(&self) -> (&'static str, &'static str) {
         match self {
             ContentType::Rss => (RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT),
+            ContentType::Knowledge => (KNOWLEDGE_RAG_SYSTEM_PROMPT, KNOWLEDGE_RAG_USER_PROMPT),
             // Default to standard SQL prompts for other types for now.
             ContentType::Sql | ContentType::Json | ContentType::Text => {
                 (DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT)

@@ -118,7 +118,9 @@ impl IntoResponse for AppError {
             AppError::Embedding(err) => {
                 error!("EmbeddingError: {:?}", err);
                 let status_code = match err {
-                    EmbeddingError::NotFound(_) => StatusCode::NOT_FOUND,
+                    EmbeddingError::NotFound(_) | EmbeddingError::FaqNotFound(_) => {
+                        StatusCode::NOT_FOUND
+                    }
                     EmbeddingError::Database(_) => StatusCode::INTERNAL_SERVER_ERROR,
                     EmbeddingError::Embedding(_) => StatusCode::BAD_GATEWAY,
                 };

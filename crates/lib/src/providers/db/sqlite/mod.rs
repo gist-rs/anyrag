@@ -20,6 +20,13 @@ use turso::{params, Database, Value as TursoValue};
 
 mod sql;
 
+/// Represents a search result from the `faq_kb` table, used for RAG context.
+#[derive(Debug)]
+pub struct FaqSearchResult {
+    pub answer: String,
+    pub score: f64,
+}
+
 /// A provider for interacting with a local SQLite database using Turso.
 ///
 /// This provider holds a `Database` instance, which manages a connection pool.
@@ -69,6 +76,52 @@ impl SqliteProvider {
                 .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
         }
         Ok(())
+    }
+
+    /// Performs a vector similarity search on the `faq_kb` table.
+    pub async fn vector_search_faqs(
+        &self,
+        query_vector: Vec<f32>,
+        limit: u32,
+    ) -> Result<Vec<FaqSearchResult>, SearchError> {
+        info!("Executing SQLite vector search on faq_kb.");
+        let conn = self.db.connect()?;
+
+        let vector_str = format!(
+            "vector('[{}]')",
+            query_vector
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        // A value of 0.7 means we are looking for vectors with a cosine similarity > 0.3.
+        let distance_threshold = 0.7;
+        let sql = format!(
+            "SELECT answer, vector_distance_cos(embedding, {vector_str}) AS distance
+             FROM faq_kb
+             WHERE embedding IS NOT NULL AND distance < {distance_threshold}
+             ORDER BY distance ASC
+             LIMIT {limit};"
+        );
+
+        let mut results = conn.query(&sql, ()).await?;
+        let mut search_results = Vec::new();
+
+        while let Some(row) = results.next().await? {
+            let answer = match row.get_value(0)? {
+                TursoValue::Text(s) => s,
+                _ => String::new(),
+            };
+            let score = match row.get_value(1)? {
+                TursoValue::Real(f) => f,
+                _ => 0.0,
+            };
+            search_results.push(FaqSearchResult { answer, score });
+        }
+
+        Ok(search_results)
     }
 }
 

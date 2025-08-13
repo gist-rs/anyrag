@@ -69,3 +69,20 @@ Please provide only the JSON object in your response.
 pub const AUGMENTATION_USER_PROMPT: &str = r#"# Content Chunk to Analyze:
 {content_chunk}
 "#;
+
+// --- RAG (Retrieval-Augmented Generation) Prompts ---
+
+/// The system prompt for synthesizing an answer from retrieved knowledge base context.
+/// This instructs the AI to answer only based on the provided context.
+pub const KNOWLEDGE_RAG_SYSTEM_PROMPT: &str = "You are a helpful AI assistant. Your task is to answer the user's question accurately and concisely based *only* on the provided #Context. Do not use any external knowledge. If the context does not contain the answer, state that you cannot answer the question with the information provided.";
+
+/// The user prompt for the RAG synthesis step.
+/// This structures the input with the user's query and the retrieved context.
+/// Placeholders: `{prompt}`, `{context}`
+pub const KNOWLEDGE_RAG_USER_PROMPT: &str = r#"# User Question
+{prompt}
+
+# Context
+{context}
+
+# Your Answer:"#;

@@ -1,8 +1,9 @@
 use super::{errors::AppError, state::AppState};
+use anyrag::types::ContentType;
 use anyrag::{
     ingest::{
-        embed_article, export_for_finetuning, ingest_from_google_sheet_url, ingest_from_url,
-        run_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
+        embed_article, embed_faq, export_for_finetuning, ingest_from_google_sheet_url,
+        ingest_from_url, run_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
     },
     providers::{
         ai::generate_embedding,
@@ -27,7 +28,7 @@ pub struct PromptResponse {
 
 #[derive(Deserialize)]
 pub struct IngestRequest {
-    url: String,
+    pub url: String,
 }
 
 #[derive(Serialize)]
@@ -38,8 +39,8 @@ pub struct IngestResponse {
 
 #[derive(Serialize)]
 pub struct KnowledgeIngestResponse {
-    message: String,
-    ingested_faqs: usize,
+    pub message: String,
+    pub ingested_faqs: usize,
 }
 
 #[derive(Deserialize)]
@@ -49,7 +50,7 @@ pub struct EmbedRequest {
 
 #[derive(Deserialize, Debug)]
 pub struct EmbedNewRequest {
-    limit: Option<usize>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Serialize, Debug)]
@@ -60,10 +61,11 @@ pub struct EmbedNewResponse {
 
 #[derive(Deserialize)]
 pub struct SearchRequest {
-    query: String,
-    limit: Option<u32>,
+    pub query: String,
+    pub limit: Option<u32>,
+    pub instruction: Option<String>,
     #[serde(default)] // This makes the field optional, defaulting to SearchMode::default()
-    mode: SearchMode,
+    pub mode: SearchMode,
 }
 
 // --- Route Handlers ---
@@ -231,7 +233,7 @@ pub async fn embed_new_handler(
     }
 
     stream::iter(articles_to_embed)
-        .for_each_concurrent(10, |article_id| {
+        .for_each_concurrent(1, |article_id| {
             let db = app_state.sqlite_provider.db.clone();
             let api_url = api_url.clone();
             let model = model.clone();
@@ -356,4 +358,122 @@ pub async fn knowledge_export_handler(
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge export failed: {e}")))?;
     Ok(jsonl_data)
+}
+
+pub async fn knowledge_search_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<SearchRequest>,
+) -> Result<Json<PromptResponse>, AppError> {
+    let limit = payload.limit.unwrap_or(5); // Use a smaller limit for context
+    info!(
+        "Received knowledge RAG search for query: '{}', limit: {}",
+        payload.query, limit
+    );
+
+    // 1. Get embedding provider details from app state
+    let api_url = app_state
+        .embeddings_api_url
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
+    let model = app_state
+        .embeddings_model
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
+    // 2. Generate embedding for the search query
+    let query_vector = generate_embedding(api_url, model, &payload.query).await?;
+
+    // 3. Perform a vector search to find relevant knowledge base entries.
+    let search_results = app_state
+        .sqlite_provider
+        .vector_search_faqs(query_vector, limit)
+        .await?;
+
+    // 4. Build context from search results and handle empty case
+    if search_results.is_empty() {
+        return Ok(Json(PromptResponse {
+            result: "I could not find any relevant information in the knowledge base to answer your question.".to_string(),
+        }));
+    }
+
+    let context = search_results
+        .iter()
+        .map(|result| format!("- {}", result.answer))
+        .collect::<Vec<String>>()
+        .join("\n\n");
+
+    // 5. Use the prompt client to generate a synthesized answer
+    let options = ExecutePromptOptions {
+        prompt: payload.query,
+        content_type: Some(ContentType::Knowledge),
+        context: Some(context),
+        instruction: payload.instruction,
+        ..Default::default()
+    };
+
+    let result = app_state
+        .prompt_client
+        .execute_prompt_with_options(options)
+        .await?;
+
+    Ok(Json(PromptResponse { result }))
+}
+
+pub async fn embed_faqs_new_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<EmbedNewRequest>,
+) -> Result<Json<EmbedNewResponse>, AppError> {
+    let limit = payload.limit.unwrap_or(20); // Default to a higher limit for batch jobs
+    info!("Received request to embed up to {limit} new FAQs.");
+
+    let api_url = app_state
+        .embeddings_api_url
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?
+        .clone();
+    let model = app_state
+        .embeddings_model
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?
+        .clone();
+
+    let conn = app_state.sqlite_provider.db.connect()?;
+    let sql = format!("SELECT id FROM faq_kb WHERE embedding IS NULL LIMIT {limit}");
+    let mut stmt = conn.prepare(&sql).await?;
+    let mut rows = stmt.query(()).await?;
+
+    let mut faqs_to_embed = Vec::new();
+    while let Some(row) = rows.next().await? {
+        if let Ok(TursoValue::Integer(id)) = row.get_value(0) {
+            faqs_to_embed.push(id);
+        }
+    }
+    let embed_count = faqs_to_embed.len();
+    info!("Found {embed_count} FAQs to embed.");
+
+    if faqs_to_embed.is_empty() {
+        return Ok(Json(EmbedNewResponse {
+            message: "No new FAQs to embed.".to_string(),
+            embedded_articles: 0,
+        }));
+    }
+
+    stream::iter(faqs_to_embed)
+        .for_each_concurrent(1, |faq_id| {
+            let db = app_state.sqlite_provider.db.clone();
+            let api_url = api_url.clone();
+            let model = model.clone();
+            async move {
+                match embed_faq(&db, &api_url, &model, faq_id).await {
+                    Ok(_) => info!("Successfully embedded FAQ ID: {faq_id}"),
+                    Err(e) => error!("Failed to embed FAQ ID: {faq_id}. Error: {e}"),
+                }
+            }
+        })
+        .await;
+
+    Ok(Json(EmbedNewResponse {
+        message: format!("Successfully processed {embed_count} FAQs."),
+        embedded_articles: embed_count,
+    }))
 }
