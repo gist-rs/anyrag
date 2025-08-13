@@ -36,6 +36,8 @@ The server is configured using environment variables. For local development, you
 -   `AI_API_KEY`: **(Required)** Your API key for the selected AI Provider.
 -   `BIGQUERY_PROJECT_ID`: **(Required)** The ID of your Google Cloud project.
 -   `AI_API_URL`: **(Required)** The full URL for the AI provider's API endpoint.
+-   `EMBEDDINGS_API_URL`: **(Required for RAG)** The URL for the text embeddings model.
+-   `EMBEDDINGS_MODEL`: **(Required for RAG)** The name of the embeddings model.
 -   `AI_PROVIDER`: The AI provider to use. Can be "gemini" or "local". Defaults to "gemini".
 -   `PORT`: The port for the server to listen on. Defaults to `9090`.
 -   `RUST_LOG`: The logging level (e.g., `info`, `debug`).
@@ -109,15 +111,15 @@ gcloud run services update YOUR_SERVICE_NAME \
 
 ## API Endpoints
 
-The server exposes several endpoints for interacting with the `anyrag` library. All `POST` endpoints expect a JSON body and return a JSON response.
+The server exposes a comprehensive set of endpoints for interacting with the `anyrag` library.
 
-### Prompt API
+### Text-to-SQL API
 
 This endpoint is for the core Natural Language to Query functionality.
 
 #### `POST /prompt`
 
-Translates a natural language prompt into a query, executes it against the storage provider (e.g., BigQuery), and formats the result. It is highly configurable.
+Translates a natural language prompt into a query, executes it against a data warehouse (e.g., BigQuery), and formats the result. It is highly configurable and can also handle direct questions or ingest data from Google Sheets on the fly.
 
 **Request Body:** An `ExecutePromptOptions` JSON object.
 
@@ -131,85 +133,15 @@ curl -X POST http://localhost:9090/prompt \
   }'
 ```
 
-### Search API
+### Knowledge Base Management API
 
-These endpoints are for searching articles ingested into the local SQLite database. They provide different search strategies to suit various needs.
-
-**Common Request Body:**
-```json
-{
-  "query": "your search query",
-  "limit": 10
-}
-```
-- `query`: The text you want to search for.
-- `limit`: (Optional) The maximum number of results to return. Defaults to 10.
-
----
-
-#### `POST /search/keyword`
-
-Performs a fast, traditional keyword search using a Full-Text Search (FTS) index. This is best for finding exact words or phrases.
-
-**Example:**
-```sh
-curl -X POST http://localhost:9090/search/keyword \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "PostgreSQL performance",
-    "limit": 5
-  }'
-```
-
----
-
-#### `POST /search/vector`
-
-Performs a semantic or conceptual search using vector embeddings. This is best for finding articles that are thematically similar to the query, even if they don't contain the exact keywords.
-
-**Example:**
-```sh
-curl -X POST http://localhost:9090/search/vector \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "building web applications with Rust",
-    "limit": 5
-  }'
-```
-
----
-
-#### `POST /search/hybrid`
-
-Combines the strengths of both keyword and vector search using a Reciprocal Rank Fusion (RRF) algorithm. It provides the most balanced and often the most relevant results. **This is the recommended endpoint for general-purpose search.**
-
-**Example:**
-```sh
-curl -X POST http://localhost:9090/search/hybrid \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "Qwen3",
-    "limit": 5
-  }'
-```
-
-### Knowledge Base API
-
-This API provides tools for building and maintaining the internal knowledge base used for RAG.
+These endpoints are for building and maintaining the self-improving knowledge base.
 
 #### `POST /knowledge/ingest`
 
-Initiates the full ingestion pipeline for a given URL. This process involves:
-1.  Fetching the content from the URL.
-2.  Using an LLM to distill the content into structured Q&A pairs.
-3.  Storing the results in the local SQLite database.
+Triggers the full ingestion pipeline for a given URL. This process involves fetching the content, using an LLM to distill it into structured Q&A pairs, and storing it in the knowledge base.
 
-**Request Body:**
-```json
-{
-  "url": "https://your-url-to-process.com/some/article"
-}
-```
+**Request Body:** `{"url": "https://..."}`
 
 **Example:**
 ```sh
@@ -220,11 +152,66 @@ curl -X POST http://localhost:9090/knowledge/ingest \
   }'
 ```
 
-#### `GET /knowledge/export`
+#### `POST /embed/faqs/new`
 
-Exports the entire `faq_kb` table from the SQLite database into a `finetuning_dataset.jsonl` file. This file is formatted for use in fine-tuning language models, completing the virtuous cycle.
+Finds all FAQs in the knowledge base that have not yet been embedded and generates vector embeddings for them. This step is crucial for enabling semantic search.
+
+**Request Body:** `{"limit": 100}` (Optional)
 
 **Example:**
 ```sh
-curl -X GET http://localhost:9090/knowledge/export -o finetuning_dataset.jsonl
+curl -X POST http://localhost:9090/embed/faqs/new \
+  -H "Content-Type: application/json" \
+  -d '{"limit": 50}'
 ```
+
+#### `GET /knowledge/export`
+
+Exports the entire FAQ knowledge base into a JSONL (JSON Lines) file suitable for fine-tuning a large language model. This completes the "virtuous cycle".
+
+**Example:**
+```sh
+curl http://localhost:9090/knowledge/export -o finetuning_dataset.jsonl
+```
+
+### RAG & Search API
+
+These endpoints are for searching the knowledge base.
+
+#### `POST /search/knowledge`
+
+**This is the primary RAG endpoint.** It takes a user's question, performs a semantic vector search to find the most relevant facts in the knowledge base, and then uses an LLM to synthesize a final, coherent answer based on that context.
+
+**Request Body:** `{"query": "...", "limit": 5, "instruction": "..."}`
+- `query`: The user's question.
+- `limit`: (Optional) The number of facts to retrieve for context. Defaults to 5.
+- `instruction`: (Optional) A specific instruction for the final LLM synthesis step.
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/search/knowledge \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "ทำยังไงถึงจะได้เทสล่า",
+    "instruction": "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า"
+  }'
+```
+
+---
+
+The following endpoints are for searching the legacy `articles` table, which is populated by the `/ingest` (RSS) endpoint.
+
+#### `POST /search/hybrid`
+
+Combines keyword and vector search for the most relevant results from the `articles` table.
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/search/hybrid \
+  -H "Content-Type: application/json" \
+  -d '{ "query": "Qwen3" }'
+```
+
+#### `POST /search/vector` and `POST /search/keyword`
+
+Perform pure semantic or keyword searches on the `articles` table, respectively.

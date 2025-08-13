@@ -1,13 +1,23 @@
 # `anyrag` Library
 
-This crate provides the core logic for translating natural language prompts into executable queries (e.g., SQL) and executing them. It leverages a configurable AI provider for natural language processing and integrates with different storage backends like Google BigQuery.
+This crate provides the core logic for two main functionalities:
+1.  **Text-to-Query:** Translating natural language prompts into executable queries (e.g., SQL) and executing them against data warehouses like Google BigQuery.
+2.  **RAG Pipeline:** A full pipeline for building a self-improving knowledge base from web URLs and using it to answer questions via Retrieval-Augmented Generation (RAG).
+
+It leverages a configurable AI provider for natural language processing and integrates with different storage backends like Google BigQuery and local SQLite databases.
 
 This library is the foundation of the `anyrag` workspace and is used by the `anyrag-server` crate to expose its functionality over a REST API.
 
 ## Features
 
 *   **Natural Language to Query:** Converts plain English prompts into executable queries (e.g., SQL).
-*   **Pluggable Providers:** Supports different AI and storage providers (defaulting to Gemini and BigQuery).
+*   **Knowledge Base Pipeline:** A complete "virtuous cycle" for RAG:
+    *   **Ingest & Cache:** Fetches clean markdown from any URL and caches it.
+    *   **Distill & Augment:** Uses a two-pass LLM process to extract explicit FAQs and generate new ones from raw text.
+    *   **Store & Embed:** Saves structured Q&A pairs into a local SQLite database and generates vector embeddings for semantic search.
+    *   **Export for Fine-tuning:** Generates a dataset in the correct format for fine-tuning your base LLM.
+*   **Retrieval-Augmented Generation (RAG):** Synthesizes answers to user questions by retrieving relevant facts from the knowledge base.
+*   **Pluggable Providers:** Supports different AI and storage providers (e.g., Gemini, local models, BigQuery, SQLite).
 *   **Robust and Asynchronous:** Built with Tokio for efficient, non-blocking I/O.
 
 ## Prerequisites
@@ -40,6 +50,8 @@ The library is configured using environment variables. You can create a `.env` f
 *   `AI_API_KEY`: Your API key for the chosen AI provider. Required for the default `gemini` provider.
 *   `AI_API_URL`: The full API endpoint URL for the AI provider.
 *   `BIGQUERY_PROJECT_ID`: The ID of your Google Cloud project where BigQuery is enabled.
+*   `EMBEDDINGS_API_URL`: The API endpoint for the text embeddings model (used for RAG).
+*   `EMBEDDINGS_MODEL`: The name of the text embeddings model to use.
 
 **Optional Environment Variables:**
 
@@ -101,7 +113,8 @@ cargo test -p anyrag
 This library relies on several key Rust crates:
 
 *   [**`tokio`**](https://crates.io/crates/tokio): For the asynchronous runtime.
-*   [**`reqwest`**](https://crates.io/crates/reqwest): For making HTTP requests to the Gemini API.
+*   [**`reqwest`**](https://crates.io/crates/reqwest): For making HTTP requests to AI provider APIs.
 *   [**`gcp-bigquery-client`**](https://crates.io/crates/gcp-bigquery-client): For interacting with the Google BigQuery API.
+*   [**`turso`**](https://crates.io/crates/turso): For interacting with the local SQLite database for the knowledge base.
 *   [**`serde`**](https://crates.io/crates/serde): For serializing and deserializing data.
 *   [**`tracing`**](https://crates.io/crates/tracing): For application-level logging.

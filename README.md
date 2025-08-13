@@ -1,13 +1,23 @@
-# AnyRag: Natural Language to SQL
+# AnyRag: Your Self-Improving Knowledge Base and RAG Engine
 
-This project is a Rust-based workspace designed to translate natural language prompts into BigQuery SQL queries and execute them. It uses Google's Gemini API for translation and the Google BigQuery API for execution.
+This project is a comprehensive Rust-based platform for building a self-improving knowledge base and interacting with your data using natural language.
+
+## Core Features
+
+-   **Natural Language to SQL:** Translates user prompts into executable SQL queries for providers like Google BigQuery, allowing you to "talk" to your databases.
+-   **Self-Improving Knowledge Base:** Implements a "virtuous cycle" for RAG:
+    1.  **Ingest:** Fetches and cleans content from any URL.
+    2.  **Distill & Augment:** Uses an LLM to automatically extract explicit Q&A pairs and generate new ones from unstructured text.
+    3.  **Store:** Saves the structured knowledge into a local SQLite database, ready for retrieval.
+    4.  **Export:** Generates a fine-tuning dataset from the knowledge base, allowing you to improve your base LLM, which in turn leads to better data extraction.
+-   **Retrieval-Augmented Generation (RAG):** Provides an API endpoint to ask questions against the knowledge base. It retrieves the most relevant facts using vector search and uses an LLM to synthesize a coherent, accurate answer.
 
 ## Workspace Crates
 
 The workspace is divided into two main crates. For detailed information on configuration, setup, and usage, please refer to the `README.md` file within each crate's directory.
 
--   **[`anyrag`](crates/lib/README.md)**: The core library responsible for prompt-to-SQL conversion and BigQuery interaction.
--   **[`anyrag-server`](crates/server/README.md)**: A lightweight `axum` web server that exposes the library's functionality via a REST API, ready for containerized deployment.
+-   **[`anyrag`](crates/lib/README.md)**: The core library containing all business logic. This includes prompt-to-SQL conversion, the knowledge base ingestion pipeline (fetch, distill, augment, store), and the RAG implementation.
+-   **[`anyrag-server`](crates/server/README.md)**: A lightweight `axum` web server that exposes the library's functionality via a REST API. It provides endpoints for NL-to-SQL, knowledge base management, and RAG-based searches.
 
 ## Project Structure
 
