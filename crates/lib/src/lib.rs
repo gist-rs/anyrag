@@ -130,12 +130,9 @@ impl PromptClient {
 
         let now = Utc::now();
         let today_rfc2822 = now.to_rfc2822();
-        let today_ymd = now.format("%Y-%m-%d").to_string();
-        let today_mdy = now.format("%-m/%-d/%Y").to_string(); // e.g., 8/12/2025
+        let today_iso8601 = now.to_rfc3339();
 
-        let mut context = format!(
-            "# TODAY\n- RFC2822: {today_rfc2822}\n- YYYY-MM-DD: {today_ymd}\n- M/D/YYYY: {today_mdy}\n\n"
-        );
+        let mut context = format!("# TODAY\nRFC2822: {today_rfc2822}\nUTC: {today_iso8601}\n\n");
         let language = self.storage_provider.language();
 
         let alias_instruction = get_alias_instruction(options.answer_key.as_deref());
