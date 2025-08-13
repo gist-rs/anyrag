@@ -141,6 +141,9 @@ async fn main() -> Result<()> {
     let instruction2 = "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า";
     let answer2 = ask_question(app_state.clone(), question2, Some(instruction2)).await?;
 
+    let question3 = "ถ้าใช้ True App เวอร์ชันเก่าอยู่ จะได้สิทธิ์ไหม?";
+    let answer3 = ask_question(app_state.clone(), question3, None).await?;
+
     // --- 5. Print Final Results ---
     println!("\n\n✅ Knowledge RAG Workflow Complete!");
     println!("========================================");
@@ -149,6 +152,9 @@ async fn main() -> Result<()> {
     println!("\n========================================");
     println!("❓ Question 2: {question2}");
     println!("💡 Answer 2:\n---\n{answer2}\n---");
+    println!("\n========================================");
+    println!("❓ Question 3: {question3}");
+    println!("💡 Answer 3:\n---\n{answer3}\n---");
 
     Ok(())
 }
