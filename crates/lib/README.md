@@ -108,6 +108,16 @@ You can run the tests for this specific crate from the workspace root:
 cargo test -p anyrag
 ```
 
+### Enabling Logs in Tests
+
+To see detailed logs during test execution, you can set the `RUST_LOG` environment variable. This is incredibly helpful for debugging.
+
+```sh
+RUST_LOG=info cargo test -p anyrag -- --nocapture
+```
+
+The `-- --nocapture` flag tells the test runner to display the output immediately instead of capturing it. You can adjust the log level (e.g., `info`, `debug`, `trace`) as needed.
+
 ## Core Dependencies
 
 This library relies on several key Rust crates:

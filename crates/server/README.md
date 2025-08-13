@@ -61,6 +61,18 @@ For running the server directly on your machine for development.
     cargo run
     ```
 
+## Running Examples
+
+The server crate includes several examples in the `examples/` directory that demonstrate key features. You can run them from the workspace root.
+
+**Example: Running the Knowledge Base RAG Workflow**
+This example demonstrates the full end-to-end process of ingesting a URL, embedding the content, and asking questions against it.
+
+```sh
+# Ensure your .env file is configured, especially for the AI provider
+RUST_LOG=info cargo run -p anyrag-server --example knowledge_prompt
+```
+
 ## Docker Deployment
 
 This is the recommended way to run the server in a production-like environment.
@@ -108,6 +120,24 @@ Use the `gcloud run services update` command to apply changes.
 gcloud run services update YOUR_SERVICE_NAME \
   --update-env-vars QUERY_SYSTEM_PROMPT_TEMPLATE="You are a SQL expert who only writes queries using Common Table Expressions (CTEs)."
 ```
+
+## Running Tests
+
+To run the tests for this specific server crate, you can execute the following command from the workspace root:
+
+```sh
+cargo test -p anyrag-server
+```
+
+### Enabling Logs During Tests
+
+For more detailed output during test runs, you can set the `RUST_LOG` environment variable. This is particularly useful for debugging.
+
+```sh
+RUST_LOG=info cargo test -p anyrag-server -- --nocapture
+```
+
+The `-- --nocapture` flag tells the test runner to display output from `println!` or `log` macros immediately, rather than capturing it and only showing it on test failure.
 
 ## API Endpoints
 
