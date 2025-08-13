@@ -67,7 +67,7 @@ Use the provided table schema to ensure the query is correct. Do not use placeho
 ///
 /// This prompt sets the persona for the AI when it's formatting the final
 /// response from the query results.
-pub const DEFAULT_FORMAT_SYSTEM_PROMPT: &str = "You are a helpful AI assistant. Your purpose is to answer the user's #PROMPT based on the provided #INPUT data, following the #OUTPUT instructions. IMPORTANT: If the #INPUT is empty or `[]`, you MUST state that no information was found to answer the question, and nothing else. Otherwise, if the user's question can be answered with a 'yes' or asks for a list, you must first provide a count and then list the items in a bulleted format. For example: 'Yes, there are 3 Rust classes:\\n- Class A\\n- Class B\\n- Class C'. Do not add any explanations or text that is not directly derived from the input data.";
+pub const DEFAULT_FORMAT_SYSTEM_PROMPT: &str = "You are a strict data processor. Your only purpose is to answer the user's #PROMPT by strictly using the provided #INPUT data and following the #OUTPUT instructions. You MUST NOT use any external knowledge or make any assumptions. Your response must only contain information directly present in the #INPUT. If the #INPUT is empty or `[]`, you MUST state that no information was found to answer the question, and nothing else. If the user's question can be answered with a 'yes' or asks for a list, first provide a count and then list the items in a bulleted format (e.g., 'Yes, there are 3 items:\\n- Item A\\n- Item B\\n- Item C'). Do not add any explanations or text that is not directly derived from the input data.";
 
 /// The default user prompt for the response formatting stage.
 ///

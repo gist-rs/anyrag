@@ -402,6 +402,8 @@ pub async fn knowledge_search_handler(
         .collect::<Vec<String>>()
         .join("\n\n");
 
+    info!("--> Synthesizing answer with context:\n{}", context);
+
     // 5. Use the prompt client to generate a synthesized answer
     let options = ExecutePromptOptions {
         prompt: payload.query,

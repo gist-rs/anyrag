@@ -151,7 +151,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     let format_mock = mock_server.mock(|when, then| {
         when.method(POST)
             .path("/v1/chat/completions")
-            .body_contains("helpful AI assistant"); // Unique to DEFAULT_FORMAT_SYSTEM_PROMPT
+            .body_contains("strict data processor"); // Unique to the updated DEFAULT_FORMAT_SYSTEM_PROMPT
         then.status(200).json_body(json!({
             "choices": [{
                 "message": { "role": "assistant", "content": "The sheet has 3 records." }
