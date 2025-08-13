@@ -6,3 +6,4 @@ output.json
 .test
 *.db
 *.db-wal
+*.db-shm
