@@ -39,36 +39,63 @@ Please provide only the JSON object in your response.
 "#;
 
 /// The user prompt for the first pass of knowledge extraction.
-/// This prompt provides the raw Markdown content to be processed.
+/// This prompt is no longer used directly in the final version but is kept for reference.
 /// Placeholder: {markdown_content}
 pub const KNOWLEDGE_EXTRACTION_USER_PROMPT: &str = r#"# Markdown Content to Process:
 {markdown_content}
 "#;
 
 /// The system prompt for the second pass (augmentation).
-/// It instructs the model to take a chunk of informational content and generate
-/// a high-quality question that the content answers. The original content serves as the answer.
-pub const AUGMENTATION_SYSTEM_PROMPT: &str = r#"You are an expert content analyst. Your task is to generate a high-quality, comprehensive question that a given text block answers.
+/// It instructs the model to take a batch of informational content chunks and generate
+/// a high-quality question for each one.
+pub const AUGMENTATION_SYSTEM_PROMPT: &str = r#"You are an expert content analyst. Your task is to generate a high-quality, comprehensive question for EACH of the provided text blocks (Content Chunks).
 
 # Instructions:
-1.  Read the provided "Content Chunk".
-2.  Create a single, clear question that this content chunk fully and accurately answers.
-3.  The question should be phrased as a real user would ask it and contain rich keywords for better searchability.
-4.  Return a single JSON object with the key "question".
+1.  Analyze each "Content Chunk" provided in the input. Each chunk is clearly separated and has a unique integer ID.
+2.  For each chunk, create a single, clear question that the content fully and accurately answers.
+3.  The question should be phrased as a real user would ask it and must contain rich keywords for better searchability.
+4.  **Language Rule**: You **MUST** generate the question in the same language as the original 'Content Chunk'. For example, if the content is in Thai, the question must be in Thai.
+5.  Return a single JSON object containing a list named `augmented_faqs`. Each item in the list must correspond to one of the input chunks.
 
 # JSON Output Schema:
 {
-  "question": "The generated, user-focused question."
+  "augmented_faqs": [
+    {
+      "id": <The integer ID of the original content chunk>,
+      "question": "The generated, user-focused question for that chunk."
+    }
+  ]
 }
 
-Please provide only the JSON object in your response.
-"#;
+# Example:
+## INPUT:
+---
+ID: 0
+TOPIC: Campaign Conditions
+CONTENT:
+The campaign runs from July 1, 2025 to December 31, 2025. All users with the latest app version are eligible.
+---
+ID: 1
+TOPIC: วิธีการลงทะเบียน
+CONTENT:
+หากต้องการลงทะเบียน ให้ไปที่หน้าแคมเปญในแอปแล้วกดปุ่ม "ลงทะเบียน"
+---
 
-/// The user prompt for the augmentation step.
-/// It provides the content chunk for which a question needs to be generated.
-/// Placeholder: {content_chunk}
-pub const AUGMENTATION_USER_PROMPT: &str = r#"# Content Chunk to Analyze:
-{content_chunk}
+## EXPECTED JSON OUTPUT:
+{
+  "augmented_faqs": [
+    {
+      "id": 0,
+      "question": "What are the conditions and duration of the 2025 campaign?"
+    },
+    {
+      "id": 1,
+      "question": "ขั้นตอนการลงทะเบียนแคมเปญผ่านแอปต้องทำอย่างไร?"
+    }
+  ]
+}
+
+Please provide only the JSON object in your response. Do not add any extra text or explanations.
 "#;
 
 // --- RAG (Retrieval-Augmented Generation) Prompts ---
