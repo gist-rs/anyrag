@@ -57,7 +57,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The `execute_prompt_from_value` method allows for maximum flexibility,
     // as any field in `ExecutePromptOptions` can be passed in the JSON.
     match client.execute_prompt_from_value(options_value).await {
-        Ok(result) => println!("Query Result:\n{result}"),
+        Ok(prompt_result) => {
+            println!("--- Final Result ---");
+            println!("{}", prompt_result.result);
+
+            if let Some(sql) = prompt_result.generated_sql {
+                println!("\n--- Generated SQL ---");
+                println!("{sql}");
+            }
+
+            if let Some(db_result) = prompt_result.database_result {
+                println!("\n--- Raw Database Result ---");
+                println!("{db_result}");
+            }
+        }
         Err(e) => eprintln!("Error: {e}"),
     }
 

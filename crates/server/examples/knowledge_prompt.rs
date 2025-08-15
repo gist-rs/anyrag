@@ -22,7 +22,7 @@
 mod main;
 
 use anyhow::Result;
-use axum::Json;
+use axum::{extract::Query, Json};
 use main::{
     handlers::{self, EmbedNewRequest, IngestRequest, SearchRequest},
     state::AppState,
@@ -59,11 +59,15 @@ async fn ask_question(
         mode: anyrag::SearchMode::LlmReRank, // Mode is not used in knowledge search
     };
 
-    let result =
-        handlers::knowledge_search_handler(axum::extract::State(app_state), Json(payload)).await;
+    let result = handlers::knowledge_search_handler(
+        axum::extract::State(app_state),
+        Query(main::types::DebugParams::default()),
+        Json(payload),
+    )
+    .await;
 
     match result {
-        Ok(Json(response)) => Ok(response.result),
+        Ok(Json(response)) => Ok(response.result.result),
         Err(e) => anyhow::bail!("Error occurred while asking question: {:?}", e),
     }
 }
@@ -96,6 +100,7 @@ async fn main() -> Result<()> {
 
     match handlers::knowledge_ingest_handler(
         axum::extract::State(app_state.clone()),
+        Query(main::types::DebugParams::default()),
         Json(ingest_payload),
     )
     .await
@@ -103,9 +108,9 @@ async fn main() -> Result<()> {
         Ok(Json(response)) => {
             info!(
                 "Ingestion successful. Stored {} new FAQs.",
-                response.ingested_faqs
+                response.result.ingested_faqs
             );
-            if response.ingested_faqs == 0 {
+            if response.result.ingested_faqs == 0 {
                 info!("Content may be unchanged from a previous run. Continuing...");
             }
         }
@@ -121,6 +126,7 @@ async fn main() -> Result<()> {
 
     match handlers::embed_faqs_new_handler(
         axum::extract::State(app_state.clone()),
+        Query(main::types::DebugParams::default()),
         Json(embed_payload),
     )
     .await

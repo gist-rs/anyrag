@@ -17,6 +17,8 @@ use tokio::time::{sleep, Duration};
 #[path = "../src/main.rs"]
 mod main;
 
+use main::types::ApiResponse;
+
 /// Spawns the application in the background for testing, configured with a temporary DB
 /// and mock URLs for all external services.
 async fn spawn_app_with_mocks(
@@ -141,7 +143,8 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
         .await?
         .error_for_status()?;
 
-    let llm_results: Vec<Value> = llm_res.json().await?;
+    let llm_response: ApiResponse<Vec<Value>> = llm_res.json().await?;
+    let llm_results = llm_response.result;
     println!("LLM Re-ranked Results: {llm_results:?}");
 
     assert_eq!(
@@ -170,7 +173,8 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
         .await?
         .error_for_status()?;
 
-    let rrf_results: Vec<Value> = rrf_res.json().await?;
+    let rrf_response: ApiResponse<Vec<Value>> = rrf_res.json().await?;
+    let rrf_results = rrf_response.result;
     println!("RRF Results: {rrf_results:?}");
     // Since the vector search is generic and returns both, and the keyword search returns one,
     // the RRF should correctly combine and boost the keyword match to the top.

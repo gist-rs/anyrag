@@ -18,6 +18,8 @@ use turso::Value as TursoValue;
 #[path = "../src/main.rs"]
 mod main;
 
+use main::types::ApiResponse;
+
 /// Spawns the application in the background for testing, configured with a temporary DB and mock APIs.
 async fn spawn_app_for_embedding_test(
     db_path: PathBuf,
@@ -128,7 +130,8 @@ async fn test_embed_and_search_flow() -> Result<()> {
 
     embeddings_mock.assert_hits(2);
 
-    let search_results: Vec<serde_json::Value> = search_res.json().await?;
+    let response: ApiResponse<Vec<serde_json::Value>> = search_res.json().await?;
+    let search_results = response.result;
     assert_eq!(search_results.len(), 1);
     let top_result = &search_results[0];
     assert_eq!(top_result["title"], "Test Article 1");

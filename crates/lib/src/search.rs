@@ -14,13 +14,13 @@ use crate::{
     rerank::{llm_rerank, reciprocal_rank_fusion, RerankError},
     types::SearchResult,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
 use tracing::info;
 
 /// Defines the re-ranking strategy for hybrid search.
-#[derive(Default, Debug, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SearchMode {
     /// Uses a Large Language Model to intelligently re-rank candidates. (Default)

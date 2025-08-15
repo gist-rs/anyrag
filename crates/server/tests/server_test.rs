@@ -27,6 +27,10 @@ async fn spawn_app() -> Result<String> {
         .compact()
         .try_init();
 
+    // Use a unique in-memory database for each test instance to avoid conflicts.
+    let db_url = ":memory:";
+    std::env::set_var("DB_URL", db_url);
+
     // Load the application configuration.
     let config = main::config::get_config().expect("Failed to load test configuration");
 

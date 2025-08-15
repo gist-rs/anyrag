@@ -25,7 +25,7 @@ use tokio::time::{sleep, Duration};
 use tracing::info;
 use turso::Value as TursoValue;
 
-use crate::main::state::AppState;
+use crate::main::{handlers::PromptResponse, state::AppState, types::ApiResponse};
 
 // Include the binary's main source file to access its components.
 #[path = "../src/main.rs"]
@@ -196,8 +196,8 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
 
     // --- 4. Assert Server Response ---
     info!("[test] Asserting server response.");
-    let result_body: serde_json::Value = response.json().await?;
-    let result_str = result_body["result"].as_str().unwrap();
+    let result_body: ApiResponse<PromptResponse> = response.json().await?;
+    let result_str = &result_body.result.result;
     assert!(
         result_str.contains("3 records"),
         "The final response did not contain the formatted text '3 records'. Got: {result_str}"

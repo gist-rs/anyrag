@@ -14,7 +14,9 @@ pub mod types;
 pub use errors::PromptError;
 pub use rerank::{RerankError, Rerankable};
 pub use search::{SearchError, SearchMode};
-pub use types::{ExecutePromptOptions, PromptClient, PromptClientBuilder, SearchResult};
+pub use types::{
+    ExecutePromptOptions, PromptClient, PromptClientBuilder, PromptResult, SearchResult,
+};
 
 use crate::prompts::core::{
     get_alias_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT,
@@ -24,7 +26,7 @@ use chrono::Utc;
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use regex::Regex;
 use serde_json::Value;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 /// Represents the result of a prompt that could be either a query or a direct answer.
 pub enum QueryOrAnswer {
@@ -46,32 +48,47 @@ impl PromptClient {
     pub async fn execute_prompt_with_options(
         &self,
         options: ExecutePromptOptions,
-    ) -> Result<String, PromptError> {
+    ) -> Result<PromptResult, PromptError> {
         info!("[execute_prompt] Starting query generation pipeline.");
         let query_or_answer = self.get_query_from_prompt_internal(&options).await?;
 
         match query_or_answer {
             QueryOrAnswer::Query(query) => {
                 if query.trim().is_empty() {
-                    return Ok("The prompt did not result in a valid query.".to_string());
+                    return Ok(PromptResult {
+                        result: "The prompt did not result in a valid query.".to_string(),
+                        ..Default::default()
+                    });
                 }
 
-                let result = self.storage_provider.execute_query(&query).await;
-                if let Err(e) = &result {
+                let database_result = self.storage_provider.execute_query(&query).await;
+                if let Err(e) = &database_result {
                     error!("[execute_prompt] Query execution error: {e:?}");
                 }
-                let result = result?;
+                let database_result = database_result?;
 
                 // Pre-process the JSON to make it more readable for the model.
-                let json_data: serde_json::Value = serde_json::from_str(&result)?;
+                let json_data: serde_json::Value = serde_json::from_str(&database_result)?;
                 let pretty_json = serde_json::to_string_pretty(&json_data)?;
-                self.format_response(&pretty_json, &options).await
+                let final_result = self.format_response(&pretty_json, &options).await?;
+
+                Ok(PromptResult {
+                    result: final_result,
+                    generated_sql: Some(query),
+                    database_result: Some(database_result),
+                })
             }
             QueryOrAnswer::Answer(answer) => {
                 if answer.trim().is_empty() {
-                    return Ok("The prompt did not result in a valid query.".to_string());
+                    return Ok(PromptResult {
+                        result: "The prompt did not result in a valid query.".to_string(),
+                        ..Default::default()
+                    });
                 }
-                Ok(answer)
+                Ok(PromptResult {
+                    result: answer,
+                    ..Default::default()
+                })
             }
         }
     }
@@ -86,7 +103,7 @@ impl PromptClient {
         table_name: Option<&str>,
         instruction: Option<&str>,
         answer_key: Option<&str>,
-    ) -> Result<String, PromptError> {
+    ) -> Result<PromptResult, PromptError> {
         let options = ExecutePromptOptions {
             prompt: prompt.to_string(),
             table_name: table_name.map(String::from),
@@ -100,7 +117,10 @@ impl PromptClient {
     /// Executes a prompt from a serde_json::Value.
     ///
     /// This allows for easy integration with APIs that receive JSON payloads.
-    pub async fn execute_prompt_from_value(&self, value: Value) -> Result<String, PromptError> {
+    pub async fn execute_prompt_from_value(
+        &self,
+        value: Value,
+    ) -> Result<PromptResult, PromptError> {
         let options: ExecutePromptOptions = serde_json::from_value(value)?;
         self.execute_prompt_with_options(options).await
     }
@@ -110,11 +130,14 @@ impl PromptClient {
     pub async fn get_query_from_prompt(
         &self,
         options: &ExecutePromptOptions,
-    ) -> Result<String, PromptError> {
+    ) -> Result<PromptResult, PromptError> {
         match self.get_query_from_prompt_internal(options).await? {
-            QueryOrAnswer::Query(q) => Ok(q),
+            QueryOrAnswer::Query(q) => Ok(PromptResult {
+                result: q,
+                ..Default::default()
+            }),
             // For backward compatibility and simple testing, return empty string for non-queries.
-            QueryOrAnswer::Answer(_) => Ok(String::new()),
+            QueryOrAnswer::Answer(_) => Ok(PromptResult::default()),
         }
     }
 
@@ -230,7 +253,7 @@ impl PromptClient {
             (system_prompt, user_prompt)
         };
 
-        debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider");
+        info!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider");
 
         let raw_response = self
             .ai_provider
@@ -321,7 +344,7 @@ impl PromptClient {
                 .replace("{content}", content)
         };
 
-        debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider for formatting");
+        info!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompts to AI Provider for formatting");
 
         self.ai_provider
             .generate(&system_prompt, &user_prompt)

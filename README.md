@@ -12,6 +12,36 @@ This project is a comprehensive Rust-based platform for building a self-improvin
     4.  **Export:** Generates a fine-tuning dataset from the knowledge base, allowing you to improve your base LLM, which in turn leads to better data extraction.
 -   **Retrieval-Augmented Generation (RAG):** Provides an API endpoint to ask questions against the knowledge base. It retrieves the most relevant facts using vector search and uses an LLM to synthesize a coherent, accurate answer.
 
+## API Response Structure
+
+All JSON API responses follow a consistent structure for predictability. The primary content is always nested inside a `result` object.
+
+### Debug Mode
+
+All endpoints support a `debug` query parameter. When you append `?debug=true` to a request URL, the server adds a `debug` object to the response, containing contextual information about the request.
+
+-   **Standard Response (`/ingest`)**
+    ```json
+    {
+      "result": {
+        "message": "Ingestion successful",
+        "ingested_articles": 2
+      }
+    }
+    ```
+-   **Debug Response (`/ingest?debug=true`)**
+    ```json
+    {
+      "debug": {
+        "url": "http://example.com/rss"
+      },
+      "result": {
+        "message": "Ingestion successful",
+        "ingested_articles": 2
+      }
+    }
+    ```
+
 ## Workspace Crates
 
 The workspace is divided into two main crates. For detailed information on configuration, setup, and usage, please refer to the `README.md` file within each crate's directory.

@@ -1,4 +1,8 @@
-use super::{errors::AppError, state::AppState};
+use super::{
+    errors::AppError,
+    state::AppState,
+    types::{ApiResponse, DebugParams},
+};
 use anyrag::types::ContentType;
 use anyrag::{
     ingest::{
@@ -12,7 +16,10 @@ use anyrag::{
     search::{hybrid_search, SearchMode},
     ExecutePromptOptions, PromptClientBuilder, SearchResult,
 };
-use axum::{extract::State, Json};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -21,7 +28,7 @@ use turso::Value as TursoValue;
 
 // --- API Payloads ---
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct PromptResponse {
     pub result: String,
 }
@@ -68,6 +75,22 @@ pub struct SearchRequest {
     pub mode: SearchMode,
 }
 
+// --- Helper Functions ---
+
+fn wrap_response<T>(
+    result: T,
+    debug_params: Query<DebugParams>,
+    debug_info: Option<Value>,
+) -> Json<ApiResponse<T>> {
+    let debug = if debug_params.debug.unwrap_or(false) {
+        debug_info
+    } else {
+        None
+    };
+
+    Json(ApiResponse { debug, result })
+}
+
 // --- Route Handlers ---
 
 pub async fn root() -> &'static str {
@@ -80,8 +103,9 @@ pub async fn health_check() -> &'static str {
 
 pub async fn prompt_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<Value>,
-) -> Result<Json<PromptResponse>, AppError> {
+) -> Result<Json<ApiResponse<PromptResponse>>, AppError> {
     info!("Received prompt payload: '{}'", payload);
 
     let mut options: ExecutePromptOptions =
@@ -108,7 +132,7 @@ pub async fn prompt_handler(
         .split_whitespace()
         .find(|word| word.contains("/spreadsheets/d/"));
 
-    let result = if let Some(url) = sheet_url {
+    let prompt_result = if let Some(url) = sheet_url {
         // --- Google Sheet Flow ---
         info!("Detected Google Sheet URL in prompt: {}", url);
 
@@ -141,36 +165,55 @@ pub async fn prompt_handler(
         // Execute the prompt. The library will now automatically select the correct
         // SQL dialect prompts because the storage provider is SQLite.
         sqlite_prompt_client
-            .execute_prompt_with_options(options)
+            .execute_prompt_with_options(options.clone())
             .await?
     } else {
         // --- Default Flow (BigQuery) ---
         app_state
             .prompt_client
-            .execute_prompt_with_options(options)
+            .execute_prompt_with_options(options.clone())
             .await?
     };
 
-    Ok(Json(PromptResponse { result }))
+    let debug_info = if debug_params.debug.unwrap_or(false) {
+        Some(json!({
+            "options": options,
+            "generated_sql": prompt_result.generated_sql,
+            "database_result": prompt_result.database_result,
+        }))
+    } else {
+        None
+    };
+
+    Ok(wrap_response(
+        PromptResponse {
+            result: prompt_result.result,
+        },
+        debug_params,
+        debug_info,
+    ))
 }
 
 pub async fn ingest_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<IngestRequest>,
-) -> Result<Json<IngestResponse>, AppError> {
+) -> Result<Json<ApiResponse<IngestResponse>>, AppError> {
     info!("Received ingest request for URL: {}", payload.url);
     let ingested_count = ingest_from_url(&app_state.sqlite_provider.db, &payload.url).await?;
     let response = IngestResponse {
         message: "Ingestion successful".to_string(),
         ingested_articles: ingested_count,
     };
-    Ok(Json(response))
+    let debug_info = json!({ "url": payload.url });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
 pub async fn embed_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<EmbedRequest>,
-) -> Result<Json<Value>, AppError> {
+) -> Result<Json<ApiResponse<Value>>, AppError> {
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -188,13 +231,16 @@ pub async fn embed_handler(
     )
     .await?;
 
-    Ok(Json(json!({ "success": true })))
+    let response = json!({ "success": true });
+    let debug_info = json!({ "article_id": payload.article_id });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
 pub async fn embed_new_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<EmbedNewRequest>,
-) -> Result<Json<EmbedNewResponse>, AppError> {
+) -> Result<Json<ApiResponse<EmbedNewResponse>>, AppError> {
     let limit = payload.limit.unwrap_or(10);
     info!("Received request to embed up to {limit} new articles.");
 
@@ -226,12 +272,15 @@ pub async fn embed_new_handler(
     info!("Found {embed_count} articles to embed.");
 
     if articles_to_embed.is_empty() {
-        return Ok(Json(EmbedNewResponse {
+        let response = EmbedNewResponse {
             message: "No new articles to embed.".to_string(),
             embedded_articles: 0,
-        }));
+        };
+        let debug_info = json!({ "limit": limit, "found": 0 });
+        return Ok(wrap_response(response, debug_params, Some(debug_info)));
     }
 
+    let articles_to_embed_clone = articles_to_embed.clone();
     stream::iter(articles_to_embed)
         .for_each_concurrent(1, |article_id| {
             let db = app_state.sqlite_provider.db.clone();
@@ -246,16 +295,20 @@ pub async fn embed_new_handler(
         })
         .await;
 
-    Ok(Json(EmbedNewResponse {
+    let response = EmbedNewResponse {
         message: format!("Successfully processed {embed_count} articles."),
         embedded_articles: embed_count,
-    }))
+    };
+    let debug_info =
+        json!({ "limit": limit, "found": embed_count, "embedded_ids": articles_to_embed_clone });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
 pub async fn vector_search_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
-) -> Result<Json<Vec<SearchResult>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<SearchResult>>>, AppError> {
     let limit = payload.limit.unwrap_or(10);
     info!(
         "Received vector search request for query: '{}', limit: {}",
@@ -277,13 +330,15 @@ pub async fn vector_search_handler(
         .vector_search(query_vector, limit)
         .await?;
 
-    Ok(Json(results))
+    let debug_info = json!({ "query": payload.query, "limit": limit });
+    Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
 
 pub async fn keyword_search_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
-) -> Result<Json<Vec<SearchResult>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<SearchResult>>>, AppError> {
     let limit = payload.limit.unwrap_or(10);
     info!(
         "Received keyword search request for query: '{}', limit: {}",
@@ -293,13 +348,15 @@ pub async fn keyword_search_handler(
         .sqlite_provider
         .keyword_search(&payload.query, limit)
         .await?;
-    Ok(Json(results))
+    let debug_info = json!({ "query": payload.query, "limit": limit });
+    Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
 
 pub async fn hybrid_search_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
-) -> Result<Json<Vec<SearchResult>>, AppError> {
+) -> Result<Json<ApiResponse<Vec<SearchResult>>>, AppError> {
     let limit = payload.limit.unwrap_or(10);
     info!(
         "Received hybrid search request for query: '{}', limit: {}, mode: {:?}",
@@ -326,13 +383,19 @@ pub async fn hybrid_search_handler(
     )
     .await?;
 
-    Ok(Json(results))
+    let debug_info = json!({
+        "query": payload.query,
+        "limit": limit,
+        "mode": payload.mode,
+    });
+    Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
 
 pub async fn knowledge_ingest_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<IngestRequest>,
-) -> Result<Json<KnowledgeIngestResponse>, AppError> {
+) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
     info!("Received knowledge ingest request for URL: {}", payload.url);
 
     let ingested_count = run_ingestion_pipeline(
@@ -347,7 +410,9 @@ pub async fn knowledge_ingest_handler(
         message: "Knowledge ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,
     };
-    Ok(Json(response))
+
+    let debug_info = json!({ "url": payload.url });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
 pub async fn knowledge_export_handler(
@@ -362,8 +427,9 @@ pub async fn knowledge_export_handler(
 
 pub async fn knowledge_search_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
-) -> Result<Json<PromptResponse>, AppError> {
+) -> Result<Json<ApiResponse<PromptResponse>>, AppError> {
     let limit = payload.limit.unwrap_or(5); // Use a smaller limit for context
     info!(
         "Received knowledge RAG search for query: '{}', limit: {}",
@@ -391,9 +457,17 @@ pub async fn knowledge_search_handler(
 
     // 4. Build context from search results and handle empty case
     if search_results.is_empty() {
-        return Ok(Json(PromptResponse {
-            result: "I could not find any relevant information in the knowledge base to answer your question.".to_string(),
-        }));
+        let result = "I could not find any relevant information in the knowledge base to answer your question.".to_string();
+        let debug_info = json!({
+            "query": payload.query,
+            "limit": limit,
+            "status": "No results found"
+        });
+        return Ok(wrap_response(
+            PromptResponse { result },
+            debug_params,
+            Some(debug_info),
+        ));
     }
 
     let context = search_results
@@ -406,25 +480,42 @@ pub async fn knowledge_search_handler(
 
     // 5. Use the prompt client to generate a synthesized answer
     let options = ExecutePromptOptions {
-        prompt: payload.query,
+        prompt: payload.query.clone(),
         content_type: Some(ContentType::Knowledge),
-        context: Some(context),
+        context: Some(context.clone()),
         instruction: payload.instruction,
         ..Default::default()
     };
 
-    let result = app_state
+    let prompt_result = app_state
         .prompt_client
-        .execute_prompt_with_options(options)
+        .execute_prompt_with_options(options.clone())
         .await?;
 
-    Ok(Json(PromptResponse { result }))
+    let debug_info = if debug_params.debug.unwrap_or(false) {
+        Some(json!({
+            "options": options,
+            "generated_sql": prompt_result.generated_sql,
+            "database_result": prompt_result.database_result,
+        }))
+    } else {
+        None
+    };
+
+    Ok(wrap_response(
+        PromptResponse {
+            result: prompt_result.result,
+        },
+        debug_params,
+        debug_info,
+    ))
 }
 
 pub async fn embed_faqs_new_handler(
     State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
     Json(payload): Json<EmbedNewRequest>,
-) -> Result<Json<EmbedNewResponse>, AppError> {
+) -> Result<Json<ApiResponse<EmbedNewResponse>>, AppError> {
     let limit = payload.limit.unwrap_or(20); // Default to a higher limit for batch jobs
     info!("Received request to embed up to {limit} new FAQs.");
 
@@ -454,12 +545,15 @@ pub async fn embed_faqs_new_handler(
     info!("Found {embed_count} FAQs to embed.");
 
     if faqs_to_embed.is_empty() {
-        return Ok(Json(EmbedNewResponse {
+        let response = EmbedNewResponse {
             message: "No new FAQs to embed.".to_string(),
             embedded_articles: 0,
-        }));
+        };
+        let debug_info = json!({ "limit": limit, "found": 0 });
+        return Ok(wrap_response(response, debug_params, Some(debug_info)));
     }
 
+    let faqs_to_embed_clone = faqs_to_embed.clone();
     stream::iter(faqs_to_embed)
         .for_each_concurrent(1, |faq_id| {
             let db = app_state.sqlite_provider.db.clone();
@@ -474,8 +568,11 @@ pub async fn embed_faqs_new_handler(
         })
         .await;
 
-    Ok(Json(EmbedNewResponse {
+    let response = EmbedNewResponse {
         message: format!("Successfully processed {embed_count} FAQs."),
         embedded_articles: embed_count,
-    }))
+    };
+    let debug_info =
+        json!({ "limit": limit, "found": embed_count, "embedded_ids": faqs_to_embed_clone });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
 }

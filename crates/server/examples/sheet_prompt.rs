@@ -73,14 +73,21 @@ async fn main() -> anyhow::Result<()> {
 
     // Directly call the handler function with the app state and payload.
     tracing::info!("Executing prompt handler...");
-    let result =
-        main::handlers::prompt_handler(axum::extract::State(app_state), Json(payload)).await;
+    let result = main::handlers::prompt_handler(
+        axum::extract::State(app_state),
+        axum::extract::Query(main::types::DebugParams::default()),
+        Json(payload),
+    )
+    .await;
 
     // Print the final result.
     match result {
         Ok(Json(response)) => {
             println!("\n✅ Success!");
-            println!("Final formatted response:\n---\n{}\n---", response.result);
+            println!(
+                "Final formatted response:\n---\n{}\n---",
+                response.result.result
+            );
         }
         Err(e) => {
             // The AppError has a custom IntoResponse implementation, but for a CLI,

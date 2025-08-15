@@ -17,6 +17,10 @@ async fn spawn_app() -> String {
         .compact()
         .try_init();
 
+    // Use a unique in-memory database for each test run to avoid conflicts.
+    let db_url = ":memory:";
+    std::env::set_var("DB_URL", db_url);
+
     let config = main::config::get_config().expect("Failed to read configuration for test");
 
     let listener = TcpListener::bind("127.0.0.1:0")
@@ -48,7 +52,7 @@ async fn test_e2e_prompt_execution() {
     });
 
     let response = client
-        .post(format!("{address}/prompt"))
+        .post(format!("{address}/prompt?debug=true"))
         .json(&payload)
         .send()
         .await
@@ -66,9 +70,16 @@ async fn test_e2e_prompt_execution() {
         .await
         .expect("Failed to parse response JSON");
 
-    let result = body["result"]
-        .as_str()
-        .expect("Result field is not a string");
+    // The result can be a string or a number, so handle both cases.
+    let result_value = &body["result"]["result"];
+    let result = if result_value.is_string() {
+        result_value.as_str().unwrap().to_owned()
+    } else {
+        result_value.to_string()
+    };
+
+    // Also verify that the debug field is present.
+    assert!(body["debug"].is_object(), "Debug field should be present");
 
     println!("E2E Test Response from server: '{result}'");
     assert!(

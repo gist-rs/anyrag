@@ -3,6 +3,7 @@ mod errors;
 pub mod handlers;
 pub mod router;
 pub mod state;
+pub mod types;
 
 pub use self::router::create_router;
 use self::{

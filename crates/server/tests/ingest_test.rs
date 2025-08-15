@@ -114,7 +114,7 @@ async fn test_ingest_endpoint_success() -> Result<()> {
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_body["ingested_articles"], 2);
+    assert_eq!(response_body["result"]["ingested_articles"], 2);
     rss_mock.assert();
 
     // --- Assert (Database State) ---

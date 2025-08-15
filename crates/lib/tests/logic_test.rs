@@ -43,8 +43,16 @@ async fn test_today_in_context_and_direct_answer_handling() {
 
     // 5. Assert that the final result is the direct answer from the AI
     assert_eq!(
-        final_result, today_str,
+        final_result.result, today_str,
         "The final result should be the direct answer from the AI"
+    );
+    assert!(
+        final_result.generated_sql.is_none(),
+        "No SQL should be generated for a direct answer"
+    );
+    assert!(
+        final_result.database_result.is_none(),
+        "No database result should exist for a direct answer"
     );
 
     // 6. Assert that the prompt context sent TO the AI was correctly formatted

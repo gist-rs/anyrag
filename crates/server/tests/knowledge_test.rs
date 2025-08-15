@@ -43,17 +43,21 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     let extraction_mock = mock_server.mock(|when, then| {
         when.method(POST)
             .path("/v1/chat/completions")
-            .body_contains("You are an expert data extraction agent");
+            .body_contains("## FAQ Section");
         then.status(200)
             .json_body(json!({"choices": [{"message": {"role": "assistant", "content": extraction_response.to_string()}}]}));
     });
 
     // B. Mock the LLM Augmentation call (Pass 2).
-    let augmentation_response = json!({ "question": "What is mentioned in the details section?" });
+    // This mock now returns the expected structure for `AugmentationResponse`.
+    let augmentation_response = json!({
+        "augmented_faqs": [{ "id": 0, "question": "What is mentioned in the details section?" }]
+    });
     let augmentation_mock = mock_server.mock(|when, then| {
         when.method(POST)
             .path("/v1/chat/completions")
-            .body_contains("You are an expert content analyst");
+            // Match based on content unique to the augmentation prompt.
+            .body_contains("Content Chunks to Analyze");
         then.status(200)
             .json_body(json!({"choices": [{"message": {"role": "assistant", "content": augmentation_response.to_string()}}]}));
     });

@@ -95,6 +95,19 @@ pub struct ExecutePromptOptions {
     pub format_user_prompt_template: Option<String>,
 }
 
+/// The result of a successful prompt execution, including debug information.
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct PromptResult {
+    /// The final, user-facing result, typically a natural language answer.
+    pub result: String,
+    /// The generated SQL query that was executed against the database.
+    #[serde(default)]
+    pub generated_sql: Option<String>,
+    /// The raw, unprocessed result from the database query.
+    #[serde(default)]
+    pub database_result: Option<String>,
+}
+
 /// A builder for creating `PromptClient` instances.
 ///
 /// This builder facilitates the creation of a `PromptClient` by allowing
