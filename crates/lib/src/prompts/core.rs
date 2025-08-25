@@ -28,6 +28,7 @@ pub const DEFAULT_QUERY_USER_PROMPT: &str = r#"Follow these rules to create prod
 5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
 6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
 
+{select_instruction}
 {alias_instruction}
 
 Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
@@ -51,6 +52,7 @@ pub const SQLITE_QUERY_USER_PROMPT: &str = r#"Follow these rules to create produ
 5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
 6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
 
+{select_instruction}
 {alias_instruction}
 
 Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
@@ -95,6 +97,19 @@ pub fn get_alias_instruction(answer_key: Option<&str>) -> String {
             "If the query uses an aggregate function or returns a single column, alias the result with `AS {key}`."
         ),
         None => "If the query uses an aggregate function or returns a single column, choose a descriptive, single-word, lowercase alias for the result based on the user's question (e.g., for 'how many users', use `count`; for 'who is the manager', use `manager`).".to_string(),
+    }
+}
+
+/// Generates the instruction for selecting specific columns in a query.
+///
+/// This function returns a specific instruction if a user `instruction` is provided,
+/// otherwise it returns a general instruction to avoid using `SELECT *`.
+pub fn get_select_instruction(instruction: Option<&str>) -> String {
+    match instruction {
+        Some(inst) if !inst.trim().is_empty() => format!(
+            "Based on the user's #OUTPUT instruction, you MUST select only the necessary columns to fulfill the request. The instruction is: \"{inst}\". Do not use `SELECT *`."
+        ),
+        _ => "Unless the user asks for 'everything' or 'all details', select only the most relevant columns to answer the question, not `SELECT *`.".to_string(),
     }
 }
 

@@ -19,8 +19,9 @@ pub use types::{
 };
 
 use crate::prompts::core::{
-    get_alias_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT, DEFAULT_FORMAT_USER_PROMPT,
-    DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT, SQLITE_QUERY_USER_PROMPT,
+    get_alias_instruction, get_select_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT,
+    DEFAULT_FORMAT_USER_PROMPT, DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT,
+    SQLITE_QUERY_USER_PROMPT,
 };
 use chrono::Utc;
 use gcp_bigquery_client::model::table_schema::TableSchema;
@@ -159,6 +160,7 @@ impl PromptClient {
         let language = self.storage_provider.language();
 
         let alias_instruction = get_alias_instruction(options.answer_key.as_deref());
+        let select_instruction = get_select_instruction(options.instruction.as_deref());
 
         // If a content_type is provided, we use specialized prompts.
         // Otherwise, we fall back to the table-based or direct question logic.
@@ -212,6 +214,7 @@ impl PromptClient {
                     .replace("{language}", language)
                     .replace("{context}", &context)
                     .replace("{prompt}", &options.prompt)
+                    .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
             } else if self.storage_provider.name() == "SQLite" {
                 // If the storage provider is SQLite, use the specialized user prompt.
@@ -219,12 +222,14 @@ impl PromptClient {
                     .replace("{language}", language)
                     .replace("{context}", &context)
                     .replace("{prompt}", &options.prompt)
+                    .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
             } else {
                 DEFAULT_QUERY_USER_PROMPT
                     .replace("{language}", language)
                     .replace("{context}", &context)
                     .replace("{prompt}", &options.prompt)
+                    .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
             };
             (system_prompt, user_prompt)
