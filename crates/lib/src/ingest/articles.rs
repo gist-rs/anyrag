@@ -5,7 +5,7 @@
 //! (e.g., RSS, text) to ensure consistent data handling and to avoid code duplication.
 
 use thiserror::Error;
-use tracing::{info, warn};
+use tracing::info;
 use turso::{params, Connection, Value};
 
 /// Custom error types for article ingestion.
@@ -77,8 +77,6 @@ pub async fn insert_articles(
     let mut new_article_ids = Vec::new();
 
     for article in articles {
-        let link_for_logging = article.link.clone();
-
         // Prepare the statement inside the loop. This is more robust than reusing
         // the statement, as it avoids potential driver issues with parameter binding in a loop.
         let mut stmt = tx
@@ -98,22 +96,12 @@ pub async fn insert_articles(
             article.source_url
         ];
 
-        info!("Attempting to insert article: {}", link_for_logging);
         let mut result_set = stmt.query(params).await?;
 
         if let Some(row) = result_set.next().await? {
             if let Ok(Value::Integer(id)) = row.get_value(0) {
-                info!(
-                    "  -> SUCCESS: Inserted article '{}' with new ID: {}",
-                    link_for_logging, id
-                );
                 new_article_ids.push(id);
             }
-        } else {
-            info!(
-                "  -> INFO: Article already exists, skipping: {}",
-                link_for_logging
-            );
         }
     }
 

@@ -56,6 +56,17 @@ impl SqliteProvider {
             .build()
             .await
             .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+
+        // Enable WAL mode for better concurrency. This is beneficial for file-based databases.
+        // It has no effect on in-memory databases but is safe to run.
+        let conn = db
+            .connect()
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+        // Use `query` for PRAGMA statements that return a value to avoid "unexpected row" errors.
+        conn.query("PRAGMA journal_mode=WAL;", ())
+            .await
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+
         Ok(Self {
             db,
             schema_cache: Arc::new(RwLock::new(HashMap::new())),
