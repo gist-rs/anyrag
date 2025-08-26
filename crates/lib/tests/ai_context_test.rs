@@ -65,8 +65,8 @@ async fn test_e2e_ai_query_with_today_context() {
     debug!("E2E `TODAY` context test output: {output:?}");
 
     // 4. Assert that the response contains today's tasks but not others.
-    assert!(output.result.contains("Team meeting"));
-    assert!(output.result.contains("Review PRs"));
-    assert!(!output.result.contains("Write report"));
-    assert!(!output.result.contains("Plan weekend"));
+    assert!(output.text.contains("Team meeting"));
+    assert!(output.text.contains("Review PRs"));
+    assert!(!output.text.contains("Write report"));
+    assert!(!output.text.contains("Plan weekend"));
 }

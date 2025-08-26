@@ -57,7 +57,7 @@ impl PromptClient {
             QueryOrAnswer::Query(query) => {
                 if query.trim().is_empty() {
                     return Ok(PromptResult {
-                        result: "The prompt did not result in a valid query.".to_string(),
+                        text: "The prompt did not result in a valid query.".to_string(),
                         ..Default::default()
                     });
                 }
@@ -74,7 +74,7 @@ impl PromptClient {
                 let final_result = self.format_response(&pretty_json, &options).await?;
 
                 Ok(PromptResult {
-                    result: final_result,
+                    text: final_result,
                     generated_sql: Some(query),
                     database_result: Some(database_result),
                 })
@@ -82,12 +82,12 @@ impl PromptClient {
             QueryOrAnswer::Answer(answer) => {
                 if answer.trim().is_empty() {
                     return Ok(PromptResult {
-                        result: "The prompt did not result in a valid query.".to_string(),
+                        text: "The prompt did not result in a valid query.".to_string(),
                         ..Default::default()
                     });
                 }
                 Ok(PromptResult {
-                    result: answer,
+                    text: answer,
                     ..Default::default()
                 })
             }
@@ -134,7 +134,7 @@ impl PromptClient {
     ) -> Result<PromptResult, PromptError> {
         match self.get_query_from_prompt_internal(options).await? {
             QueryOrAnswer::Query(q) => Ok(PromptResult {
-                result: q,
+                text: q,
                 ..Default::default()
             }),
             // For backward compatibility and simple testing, return empty string for non-queries.

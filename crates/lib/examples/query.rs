@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match client.execute_prompt_from_value(options_value).await {
         Ok(prompt_result) => {
             println!("--- Final Result ---");
-            println!("{}", prompt_result.result);
+            println!("{}", prompt_result.text);
 
             if let Some(sql) = prompt_result.generated_sql {
                 println!("\n--- Generated SQL ---");

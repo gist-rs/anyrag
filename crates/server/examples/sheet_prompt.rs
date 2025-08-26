@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
             println!("\n✅ Success!");
             println!(
                 "Final formatted response:\n---\n{}\n---",
-                response.result.result
+                response.result.text
             );
         }
         Err(e) => {

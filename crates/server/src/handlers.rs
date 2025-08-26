@@ -30,7 +30,7 @@ use turso::Value as TursoValue;
 
 #[derive(Serialize, Deserialize)]
 pub struct PromptResponse {
-    pub result: String,
+    pub text: String,
 }
 
 #[derive(Deserialize)]
@@ -187,7 +187,7 @@ pub async fn prompt_handler(
 
     Ok(wrap_response(
         PromptResponse {
-            result: prompt_result.result,
+            text: prompt_result.text,
         },
         debug_params,
         debug_info,
@@ -457,14 +457,14 @@ pub async fn knowledge_search_handler(
 
     // 4. Build context from search results and handle empty case
     if search_results.is_empty() {
-        let result = "I could not find any relevant information in the knowledge base to answer your question.".to_string();
+        let text = "I could not find any relevant information in the knowledge base to answer your question.".to_string();
         let debug_info = json!({
             "query": payload.query,
             "limit": limit,
             "status": "No results found"
         });
         return Ok(wrap_response(
-            PromptResponse { result },
+            PromptResponse { text },
             debug_params,
             Some(debug_info),
         ));
@@ -504,7 +504,7 @@ pub async fn knowledge_search_handler(
 
     Ok(wrap_response(
         PromptResponse {
-            result: prompt_result.result,
+            text: prompt_result.text,
         },
         debug_params,
         debug_info,

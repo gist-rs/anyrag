@@ -43,7 +43,7 @@ async fn test_today_in_context_and_direct_answer_handling() {
 
     // 5. Assert that the final result is the direct answer from the AI
     assert_eq!(
-        final_result.result, today_str,
+        final_result.text, today_str,
         "The final result should be the direct answer from the AI"
     );
     assert!(

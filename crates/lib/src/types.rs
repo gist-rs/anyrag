@@ -99,7 +99,7 @@ pub struct ExecutePromptOptions {
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct PromptResult {
     /// The final, user-facing result, typically a natural language answer.
-    pub result: String,
+    pub text: String,
     /// The generated SQL query that was executed against the database.
     #[serde(default)]
     pub generated_sql: Option<String>,

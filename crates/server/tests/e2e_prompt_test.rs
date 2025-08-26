@@ -71,7 +71,7 @@ async fn test_e2e_prompt_execution() {
         .expect("Failed to parse response JSON");
 
     // The result can be a string or a number, so handle both cases.
-    let result_value = &body["result"]["result"];
+    let result_value = &body["result"]["text"];
     let result = if result_value.is_string() {
         result_value.as_str().unwrap().to_owned()
     } else {

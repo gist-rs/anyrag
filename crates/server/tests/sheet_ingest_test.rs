@@ -197,7 +197,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     // --- 4. Assert Server Response ---
     info!("[test] Asserting server response.");
     let result_body: ApiResponse<PromptResponse> = response.json().await?;
-    let result_str = &result_body.result.result;
+    let result_str = &result_body.result.text;
     assert!(
         result_str.contains("3 records"),
         "The final response did not contain the formatted text '3 records'. Got: {result_str}"

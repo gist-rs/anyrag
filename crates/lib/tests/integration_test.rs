@@ -47,7 +47,7 @@ async fn test_execute_prompt_success() {
     }
     assert!(result.is_ok());
     let output = result.unwrap();
-    assert!(!output.result.is_empty());
+    assert!(!output.text.is_empty());
 }
 
 /// Tests the handling of an invalid prompt that doesn't generate a valid query.
@@ -75,8 +75,8 @@ async fn test_execute_prompt_invalid_query() {
     // and not a query.
     assert!(result.is_ok());
     let response = result.unwrap();
-    assert!(!response.result.is_empty());
-    assert!(!response.result.to_uppercase().contains("SELECT"));
+    assert!(!response.text.is_empty());
+    assert!(!response.text.to_uppercase().contains("SELECT"));
 }
 
 /// Tests that the builder returns an error if the ai provider is missing.
@@ -142,8 +142,8 @@ async fn test_execute_prompt_with_formatting() {
 
     // The alias is chosen by the model, so we check that the raw key isn't present
     // and that the expected formatted number is.
-    assert!(!output.result.contains("f0_"));
-    assert!(output.result.contains("27,894"));
+    assert!(!output.text.contains("f0_"));
+    assert!(output.text.contains("27,894"));
 }
 
 /// Tests using a custom system prompt for query generation.
@@ -177,7 +177,7 @@ async fn test_execute_with_custom_query_prompt() {
     let output = result.unwrap();
 
     // The model should translate "hello" to "こんにちは".
-    assert!(output.result.contains("こんにちは"));
+    assert!(output.text.contains("こんにちは"));
 }
 
 /// Tests using a custom system prompt for the final response formatting.
@@ -220,7 +220,7 @@ async fn test_execute_with_custom_format_prompt() {
 
     // Check for the original number. The winky face is commented out as it's not
     // reliably produced by all models. The main goal is to test the custom prompt.
-    assert!(output.result.contains("27,894"));
+    assert!(output.text.contains("27,894"));
     // assert!(output.result.trim().ends_with(";)"));
 }
 
@@ -283,7 +283,7 @@ async fn test_get_query_from_prompt_local_provider() {
     // 6. Assertions
     mock.assert(); // Verify the mock server was called exactly once.
     assert!(query_result.is_ok());
-    let query = query_result.unwrap().result;
+    let query = query_result.unwrap().text;
     assert_eq!(query, "SELECT * FROM mock_table;");
 }
 
@@ -381,6 +381,6 @@ async fn test_execute_prompt_direct_answer() {
     // We can't know the exact output, but it should contain the current year.
     // This confirms the AI used the injected `TODAY` context.
     let current_year = Utc::now().format("%Y").to_string();
-    assert!(output.result.contains(&current_year));
-    assert!(!output.result.to_uppercase().contains("SELECT"));
+    assert!(output.text.contains(&current_year));
+    assert!(!output.text.to_uppercase().contains("SELECT"));
 }
