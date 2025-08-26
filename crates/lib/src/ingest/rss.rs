@@ -106,7 +106,7 @@ pub async fn ingest_from_url(db: &Database, feed_url: &str) -> Result<usize, Ing
 }
 
 /// Creates the `articles` table in the database if it does not already exist.
-async fn create_table_if_not_exists(conn: &Connection) -> Result<(), turso::Error> {
+pub async fn create_table_if_not_exists(conn: &Connection) -> Result<(), turso::Error> {
     let table_sql = "
         CREATE TABLE IF NOT EXISTS articles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

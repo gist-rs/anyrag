@@ -182,6 +182,24 @@ curl -X POST http://localhost:9090/knowledge/ingest \
   }'
 ```
 
+#### `POST /ingest/text`
+
+Ingests raw text directly from the request body. The server will automatically chunk the text into smaller, manageable pieces based on paragraphs and a size limit, then store them in the `articles` table for later embedding and search.
+
+**Request Body:** `{"text": "...", "source": "..."}`
+- `text`: The raw text content to ingest.
+- `source`: (Optional) A string to identify the origin of the text. Defaults to `text_input`.
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/ingest/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "This is the first document about Rust macros.\n\nThis is a second paragraph about the same topic.",
+    "source": "rust_docs_macros"
+  }'
+```
+
 #### `POST /embed/faqs/new`
 
 Finds all FAQs in the knowledge base that have not yet been embedded and generates vector embeddings for them. This step is crucial for enabling semantic search.

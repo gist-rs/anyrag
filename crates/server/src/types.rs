@@ -12,3 +12,22 @@ pub struct ApiResponse<T> {
     pub debug: Option<Value>,
     pub result: T,
 }
+
+// --- Ingestion Payloads ---
+
+#[derive(Deserialize)]
+pub struct IngestTextRequest {
+    pub text: String,
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+fn default_source() -> String {
+    "text_input".to_string()
+}
+
+#[derive(Serialize)]
+pub struct IngestTextResponse {
+    pub message: String,
+    pub ingested_chunks: usize,
+}

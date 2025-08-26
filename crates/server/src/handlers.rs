@@ -1,7 +1,7 @@
 use super::{
     errors::AppError,
     state::AppState,
-    types::{ApiResponse, DebugParams},
+    types::{ApiResponse, DebugParams, IngestTextRequest, IngestTextResponse},
 };
 use anyrag::types::ContentType;
 use anyrag::{
@@ -574,5 +574,67 @@ pub async fn embed_faqs_new_handler(
     };
     let debug_info =
         json!({ "limit": limit, "found": embed_count, "embedded_ids": faqs_to_embed_clone });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+pub async fn ingest_text_handler(
+    State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<IngestTextRequest>,
+) -> Result<Json<ApiResponse<IngestTextResponse>>, AppError> {
+    info!(
+        "Received text ingest request from source: {}",
+        payload.source
+    );
+
+    let chunks = anyrag::ingest::text::chunk_text(&payload.text)
+        .map_err(|e| anyrag::PromptError::StorageOperationFailed(e.to_string()))?;
+
+    let db = app_state.sqlite_provider.db.clone();
+    let conn = db.connect()?;
+
+    // Ensure the articles table exists before ingesting.
+    anyrag::ingest::rss::create_table_if_not_exists(&conn).await?;
+
+    let mut ingested_count = 0;
+    for chunk in chunks {
+        let title: String = chunk.chars().take(80).collect();
+        // Create a unique link to avoid collisions, similar to how knowledge ingest does it.
+        // We use a simple hash as md5 is not a direct dependency of the server.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::hash::Hash::hash(&chunk, &mut hasher);
+        let hash = std::hash::Hasher::finish(&hasher);
+        let link = format!("{}_{:x}", payload.source, hash);
+
+        let params = turso::params![title, link.clone(), chunk, payload.source.clone()];
+        let res = conn
+            .execute(
+                "INSERT INTO articles (title, link, description, source_url) VALUES (?, ?, ?, ?)",
+                params,
+            )
+            .await;
+
+        match res {
+            Ok(changes) => {
+                if changes > 0 {
+                    ingested_count += 1;
+                }
+            }
+            Err(e) => {
+                if e.to_string().contains("UNIQUE constraint failed") {
+                    tracing::warn!("Skipping duplicate content chunk with link: {}", link);
+                } else {
+                    return Err(AppError::Database(e));
+                }
+            }
+        }
+    }
+
+    let response = IngestTextResponse {
+        message: "Text ingestion successful".to_string(),
+        ingested_chunks: ingested_count,
+    };
+
+    let debug_info = json!({ "source": payload.source, "chunks_processed": ingested_count, "original_text_length": payload.text.len() });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }

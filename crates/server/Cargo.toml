@@ -69,3 +69,8 @@ harness = true
 name = "embedding_test"
 path = "tests/embedding_test.rs"
 harness = true
+
+[[test]]
+name = "ingest_text_test"
+path = "tests/ingest_text_test.rs"
+harness = true

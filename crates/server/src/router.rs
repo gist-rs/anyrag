@@ -12,6 +12,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/health", get(health_check))
         .route("/prompt", post(prompt_handler))
         .route("/ingest", post(ingest_handler))
+        .route("/ingest/text", post(ingest_text_handler))
         .route("/embed", post(embed_handler))
         .route("/embed/new", post(embed_new_handler))
         .route("/embed/faqs/new", post(embed_faqs_new_handler))
