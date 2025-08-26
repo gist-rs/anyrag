@@ -200,6 +200,19 @@ curl -X POST http://localhost:9090/ingest/text \
   }'
 ```
 
+```
+
+**Verifying the Ingestion**
+
+After ingesting, you can use one of the search endpoints (like `/search/keyword`) to confirm that the text was stored.
+
+```sh
+curl -X POST http://localhost:9090/search/keyword \
+  -H "Content-Type: application/json" \
+  -d '{ "query": "macros" }'
+```
+This will return the chunks of text that contain the word "macros", proving the ingestion was successful.
+
 #### `POST /embed/faqs/new`
 
 Finds all FAQs in the knowledge base that have not yet been embedded and generates vector embeddings for them. This step is crucial for enabling semantic search.
