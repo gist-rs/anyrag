@@ -71,7 +71,7 @@ async fn setup_database_with_manual_vectors() -> Result<(SqliteProvider, Vec<f32
 ///
 /// It uses a manually prepared database with perfect, orthogonal vectors to ensure
 /// that if the search function is given an exact vector, it returns the correct
-/// article with a perfect score of 0.0, proving the underlying SQL and
+/// article with a perfect similarity score of 1.0, proving the underlying SQL and
 /// data handling are correct.
 #[tokio::test]
 async fn test_vector_search_logic_is_correct() -> Result<(), SearchError> {
@@ -105,11 +105,11 @@ async fn test_vector_search_logic_is_correct() -> Result<(), SearchError> {
         "The returned article is not the one we searched for."
     );
 
-    // 3. The score (distance) must be 0.0 for a perfect match.
+    // 3. The score (similarity) must be 1.0 for a perfect match.
     // We use a small epsilon for floating-point comparison.
     assert!(
-        top_result.score < 1e-9,
-        "Expected a perfect score (0.0 distance), but got {}",
+        (1.0 - top_result.score).abs() < 1e-9,
+        "Expected a perfect similarity score (1.0), but got {}",
         top_result.score
     );
 

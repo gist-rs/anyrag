@@ -3,17 +3,20 @@ use super::{
     state::AppState,
     types::{ApiResponse, DebugParams, IngestTextRequest, IngestTextResponse},
 };
-use anyrag::types::ContentType;
 use anyrag::{
     ingest::{
-        embed_article, embed_faq, export_for_finetuning, ingest_from_google_sheet_url,
-        ingest_from_url, run_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
+        articles::{insert_articles, Article as IngestArticle},
+        create_articles_table_if_not_exists, embed_article, embed_faq, export_for_finetuning,
+        ingest_from_google_sheet_url, ingest_from_url, run_ingestion_pipeline,
+        sheet_url_to_export_url_and_table_name,
+        text::chunk_text,
     },
     providers::{
         ai::generate_embedding,
         db::storage::{KeywordSearch, Storage, VectorSearch},
     },
     search::{hybrid_search, SearchMode},
+    types::ContentType,
     ExecutePromptOptions, PromptClientBuilder, SearchResult,
 };
 use axum::{
@@ -23,7 +26,8 @@ use axum::{
 use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tracing::{error, info};
+use std::hash::{Hash, Hasher};
+use tracing::{error, info, warn};
 use turso::Value as TursoValue;
 
 // --- API Payloads ---
@@ -71,7 +75,7 @@ pub struct SearchRequest {
     pub query: String,
     pub limit: Option<u32>,
     pub instruction: Option<String>,
-    #[serde(default)] // This makes the field optional, defaulting to SearchMode::default()
+    #[serde(default)]
     pub mode: SearchMode,
 }
 
@@ -87,7 +91,6 @@ fn wrap_response<T>(
     } else {
         None
     };
-
     Json(ApiResponse { debug, result })
 }
 
@@ -107,12 +110,9 @@ pub async fn prompt_handler(
     Json(payload): Json<Value>,
 ) -> Result<Json<ApiResponse<PromptResponse>>, AppError> {
     info!("Received prompt payload: '{}'", payload);
-
     let mut options: ExecutePromptOptions =
         serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
 
-    // Apply server-wide default prompts first. If these are not set, the library's
-    // own defaults will be used. This allows server admins to customize behavior.
     if options.system_prompt_template.is_none() {
         options.system_prompt_template = app_state.query_system_prompt_template.clone();
     }
@@ -126,20 +126,16 @@ pub async fn prompt_handler(
         options.format_user_prompt_template = app_state.format_user_prompt_template.clone();
     }
 
-    // Check for a Google Sheet URL in the prompt to trigger the special ingestion flow.
     let sheet_url = options
         .prompt
         .split_whitespace()
         .find(|word| word.contains("/spreadsheets/d/"));
 
     let prompt_result = if let Some(url) = sheet_url {
-        // --- Google Sheet Flow ---
         info!("Detected Google Sheet URL in prompt: {}", url);
-
         let (export_url, table_name) = sheet_url_to_export_url_and_table_name(url)
             .map_err(|e| anyhow::anyhow!("Sheet URL transformation failed: {e}"))?;
 
-        // Ingest the sheet data if the corresponding table doesn't already exist.
         if app_state
             .sqlite_provider
             .get_table_schema(&table_name)
@@ -155,20 +151,14 @@ pub async fn prompt_handler(
         }
 
         options.table_name = Some(table_name);
-
-        // Create a temporary client that uses the SQLite provider for this request.
         let sqlite_prompt_client = PromptClientBuilder::new()
             .ai_provider(app_state.prompt_client.ai_provider.clone())
             .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
             .build()?;
-
-        // Execute the prompt. The library will now automatically select the correct
-        // SQL dialect prompts because the storage provider is SQLite.
         sqlite_prompt_client
             .execute_prompt_with_options(options.clone())
             .await?
     } else {
-        // --- Default Flow (BigQuery) ---
         app_state
             .prompt_client
             .execute_prompt_with_options(options.clone())
@@ -184,7 +174,6 @@ pub async fn prompt_handler(
     } else {
         None
     };
-
     Ok(wrap_response(
         PromptResponse {
             text: prompt_result.text,
@@ -209,6 +198,95 @@ pub async fn ingest_handler(
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
+pub async fn ingest_text_handler(
+    State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<IngestTextRequest>,
+) -> Result<Json<ApiResponse<IngestTextResponse>>, AppError> {
+    info!(
+        "Received text ingest request from source: {}",
+        payload.source
+    );
+    let chunks = chunk_text(&payload.text)?;
+    let total_chunks = chunks.len();
+
+    let db = app_state.sqlite_provider.db.clone();
+    let conn = db.connect()?;
+    if let Err(e) = create_articles_table_if_not_exists(&conn).await {
+        if !e.to_string().contains("already exists") {
+            return Err(e.into());
+        }
+        warn!(
+            "Ignoring benign 'index already exists' error during table setup: {}",
+            e
+        );
+    }
+
+    let articles_to_insert: Vec<IngestArticle> = chunks
+        .into_iter()
+        .map(|chunk| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            chunk.hash(&mut hasher);
+            let hash = hasher.finish();
+            IngestArticle {
+                title: chunk.chars().take(80).collect(),
+                link: format!("{}_{:x}", payload.source, hash),
+                description: chunk,
+                source_url: payload.source.clone(),
+                pub_date: None,
+            }
+        })
+        .collect();
+
+    let new_article_ids = insert_articles(&conn, articles_to_insert).await?;
+    let ingested_count = new_article_ids.len();
+
+    if !new_article_ids.is_empty() {
+        info!("Found {} new articles to embed.", new_article_ids.len());
+        let api_url = app_state.embeddings_api_url.clone().ok_or_else(|| {
+            anyhow::anyhow!("EMBEDDINGS_API_URL not set to auto-embed ingested text")
+        })?;
+        let model = app_state.embeddings_model.clone().ok_or_else(|| {
+            anyhow::anyhow!("EMBEDDINGS_MODEL not set to auto-embed ingested text")
+        })?;
+
+        stream::iter(new_article_ids)
+            .for_each_concurrent(10, |article_id| {
+                let db_clone = db.clone();
+                let api_url_clone = api_url.clone();
+                let model_clone = model.clone();
+                async move {
+                    match embed_article(&db_clone, &api_url_clone, &model_clone, article_id).await {
+                        Ok(_) => info!("Auto-embedded article ID: {}", article_id),
+                        Err(e) => error!(
+                            "Failed to auto-embed article ID: {}. Error: {}",
+                            article_id, e
+                        ),
+                    }
+                }
+            })
+            .await;
+    }
+
+    let message = if ingested_count > 0 {
+        format!(
+            "Text ingestion successful. Stored and embedded {} new chunks.",
+            ingested_count
+        )
+    } else if total_chunks > 0 {
+        "All content already exists. No new chunks were ingested.".to_string()
+    } else {
+        "No text chunks found to ingest.".to_string()
+    };
+
+    let response = IngestTextResponse {
+        message,
+        ingested_chunks: ingested_count,
+    };
+    let debug_info = json!({ "source": payload.source, "chunks_processed": ingested_count, "original_text_length": payload.text.len() });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
 pub async fn embed_handler(
     State(app_state): State<AppState>,
     debug_params: Query<DebugParams>,
@@ -230,7 +308,6 @@ pub async fn embed_handler(
         payload.article_id,
     )
     .await?;
-
     let response = json!({ "success": true });
     let debug_info = json!({ "article_id": payload.article_id });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
@@ -242,8 +319,10 @@ pub async fn embed_new_handler(
     Json(payload): Json<EmbedNewRequest>,
 ) -> Result<Json<ApiResponse<EmbedNewResponse>>, AppError> {
     let limit = payload.limit.unwrap_or(10);
-    info!("Received request to embed up to {limit} new articles.");
-
+    info!(
+        "Received request to find and embed up to {} new articles.",
+        limit
+    );
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -257,7 +336,7 @@ pub async fn embed_new_handler(
 
     let conn = app_state.sqlite_provider.db.connect()?;
     let sql = format!(
-        "SELECT id FROM articles WHERE embedding IS NULL ORDER BY pub_date DESC LIMIT {limit}"
+        "SELECT id FROM articles WHERE embedding IS NULL ORDER BY created_at DESC LIMIT {limit}"
     );
     let mut stmt = conn.prepare(&sql).await?;
     let mut rows = stmt.query(()).await?;
@@ -282,7 +361,7 @@ pub async fn embed_new_handler(
 
     let articles_to_embed_clone = articles_to_embed.clone();
     stream::iter(articles_to_embed)
-        .for_each_concurrent(1, |article_id| {
+        .for_each_concurrent(10, |article_id| {
             let db = app_state.sqlite_provider.db.clone();
             let api_url = api_url.clone();
             let model = model.clone();
@@ -314,7 +393,6 @@ pub async fn vector_search_handler(
         "Received vector search request for query: '{}', limit: {}",
         payload.query, limit
     );
-
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -323,13 +401,11 @@ pub async fn vector_search_handler(
         .embeddings_model
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
-
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = app_state
         .sqlite_provider
-        .vector_search(query_vector, limit)
+        .vector_search(query_vector, limit as u32)
         .await?;
-
     let debug_info = json!({ "query": payload.query, "limit": limit });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
@@ -346,7 +422,7 @@ pub async fn keyword_search_handler(
     );
     let results = app_state
         .sqlite_provider
-        .keyword_search(&payload.query, limit)
+        .keyword_search(&payload.query, limit as u32)
         .await?;
     let debug_info = json!({ "query": payload.query, "limit": limit });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
@@ -362,7 +438,6 @@ pub async fn hybrid_search_handler(
         "Received hybrid search request for query: '{}', limit: {}, mode: {:?}",
         payload.query, limit, payload.mode
     );
-
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -371,23 +446,17 @@ pub async fn hybrid_search_handler(
         .embeddings_model
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
-
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = hybrid_search(
         app_state.sqlite_provider.as_ref(),
         &*app_state.prompt_client.ai_provider,
         query_vector,
         &payload.query,
-        limit,
+        limit as u32,
         payload.mode,
     )
     .await?;
-
-    let debug_info = json!({
-        "query": payload.query,
-        "limit": limit,
-        "mode": payload.mode,
-    });
+    let debug_info = json!({ "query": payload.query, "limit": limit, "mode": payload.mode });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
 
@@ -397,7 +466,6 @@ pub async fn knowledge_ingest_handler(
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
     info!("Received knowledge ingest request for URL: {}", payload.url);
-
     let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
         &*app_state.prompt_client.ai_provider,
@@ -405,12 +473,10 @@ pub async fn knowledge_ingest_handler(
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
-
     let response = KnowledgeIngestResponse {
         message: "Knowledge ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,
     };
-
     let debug_info = json!({ "url": payload.url });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
@@ -430,13 +496,11 @@ pub async fn knowledge_search_handler(
     debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<ApiResponse<PromptResponse>>, AppError> {
-    let limit = payload.limit.unwrap_or(5); // Use a smaller limit for context
+    let limit = payload.limit.unwrap_or(5);
     info!(
         "Received knowledge RAG search for query: '{}', limit: {}",
         payload.query, limit
     );
-
-    // 1. Get embedding provider details from app state
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -445,40 +509,29 @@ pub async fn knowledge_search_handler(
         .embeddings_model
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
-
-    // 2. Generate embedding for the search query
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
-
-    // 3. Perform a vector search to find relevant knowledge base entries.
     let search_results = app_state
         .sqlite_provider
-        .vector_search_faqs(query_vector, limit)
+        .vector_search_faqs(query_vector, limit as u32)
         .await?;
 
-    // 4. Build context from search results and handle empty case
     if search_results.is_empty() {
-        let text = "I could not find any relevant information in the knowledge base to answer your question.".to_string();
-        let debug_info = json!({
-            "query": payload.query,
-            "limit": limit,
-            "status": "No results found"
-        });
+        let text = "I could not find any relevant information to answer your question.".to_string();
+        let debug_info =
+            json!({ "query": payload.query, "limit": limit, "status": "No results found" });
         return Ok(wrap_response(
             PromptResponse { text },
             debug_params,
             Some(debug_info),
         ));
     }
-
     let context = search_results
         .iter()
         .map(|result| format!("- {}", result.answer))
         .collect::<Vec<String>>()
         .join("\n\n");
-
     info!("--> Synthesizing answer with context:\n{}", context);
 
-    // 5. Use the prompt client to generate a synthesized answer
     let options = ExecutePromptOptions {
         prompt: payload.query.clone(),
         content_type: Some(ContentType::Knowledge),
@@ -486,22 +539,16 @@ pub async fn knowledge_search_handler(
         instruction: payload.instruction,
         ..Default::default()
     };
-
     let prompt_result = app_state
         .prompt_client
         .execute_prompt_with_options(options.clone())
         .await?;
 
     let debug_info = if debug_params.debug.unwrap_or(false) {
-        Some(json!({
-            "options": options,
-            "generated_sql": prompt_result.generated_sql,
-            "database_result": prompt_result.database_result,
-        }))
+        Some(json!({ "options": options, "retrieved_context": context }))
     } else {
         None
     };
-
     Ok(wrap_response(
         PromptResponse {
             text: prompt_result.text,
@@ -516,9 +563,8 @@ pub async fn embed_faqs_new_handler(
     debug_params: Query<DebugParams>,
     Json(payload): Json<EmbedNewRequest>,
 ) -> Result<Json<ApiResponse<EmbedNewResponse>>, AppError> {
-    let limit = payload.limit.unwrap_or(20); // Default to a higher limit for batch jobs
+    let limit = payload.limit.unwrap_or(20);
     info!("Received request to embed up to {limit} new FAQs.");
-
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -555,7 +601,7 @@ pub async fn embed_faqs_new_handler(
 
     let faqs_to_embed_clone = faqs_to_embed.clone();
     stream::iter(faqs_to_embed)
-        .for_each_concurrent(1, |faq_id| {
+        .for_each_concurrent(10, |faq_id| {
             let db = app_state.sqlite_provider.db.clone();
             let api_url = api_url.clone();
             let model = model.clone();
@@ -574,67 +620,5 @@ pub async fn embed_faqs_new_handler(
     };
     let debug_info =
         json!({ "limit": limit, "found": embed_count, "embedded_ids": faqs_to_embed_clone });
-    Ok(wrap_response(response, debug_params, Some(debug_info)))
-}
-
-pub async fn ingest_text_handler(
-    State(app_state): State<AppState>,
-    debug_params: Query<DebugParams>,
-    Json(payload): Json<IngestTextRequest>,
-) -> Result<Json<ApiResponse<IngestTextResponse>>, AppError> {
-    info!(
-        "Received text ingest request from source: {}",
-        payload.source
-    );
-
-    let chunks = anyrag::ingest::text::chunk_text(&payload.text)
-        .map_err(|e| anyrag::PromptError::StorageOperationFailed(e.to_string()))?;
-
-    let db = app_state.sqlite_provider.db.clone();
-    let conn = db.connect()?;
-
-    // Ensure the articles table exists before ingesting.
-    anyrag::ingest::rss::create_table_if_not_exists(&conn).await?;
-
-    let mut ingested_count = 0;
-    for chunk in chunks {
-        let title: String = chunk.chars().take(80).collect();
-        // Create a unique link to avoid collisions, similar to how knowledge ingest does it.
-        // We use a simple hash as md5 is not a direct dependency of the server.
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(&chunk, &mut hasher);
-        let hash = std::hash::Hasher::finish(&hasher);
-        let link = format!("{}_{:x}", payload.source, hash);
-
-        let params = turso::params![title, link.clone(), chunk, payload.source.clone()];
-        let res = conn
-            .execute(
-                "INSERT INTO articles (title, link, description, source_url) VALUES (?, ?, ?, ?)",
-                params,
-            )
-            .await;
-
-        match res {
-            Ok(changes) => {
-                if changes > 0 {
-                    ingested_count += 1;
-                }
-            }
-            Err(e) => {
-                if e.to_string().contains("UNIQUE constraint failed") {
-                    tracing::warn!("Skipping duplicate content chunk with link: {}", link);
-                } else {
-                    return Err(AppError::Database(e));
-                }
-            }
-        }
-    }
-
-    let response = IngestTextResponse {
-        message: "Text ingestion successful".to_string(),
-        ingested_chunks: ingested_count,
-    };
-
-    let debug_info = json!({ "source": payload.source, "chunks_processed": ingested_count, "original_text_length": payload.text.len() });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }

@@ -136,7 +136,7 @@ async fn test_embed_and_search_flow() -> Result<()> {
     let top_result = &search_results[0];
     assert_eq!(top_result["title"], "Test Article 1");
     assert_eq!(top_result["link"], "http://m.com/1");
-    assert_eq!(top_result["score"], 0.0);
+    assert_eq!(top_result["score"], 1.0);
 
     Ok(())
 }

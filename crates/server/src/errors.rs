@@ -1,5 +1,5 @@
 use anyrag::{
-    ingest::{EmbeddingError, IngestError, KnowledgeError},
+    ingest::{ArticleError, EmbeddingError, KnowledgeError, RssIngestError, TextIngestError},
     search::SearchError,
     PromptError,
 };
@@ -20,8 +20,12 @@ use turso::Error as TursoError;
 pub enum AppError {
     /// Errors originating from the `anyrag`.
     Prompt(PromptError),
-    /// Errors from the ingestion process.
-    Ingest(IngestError),
+    /// Errors from the text ingestion process.
+    TextIngest(TextIngestError),
+    /// Errors from the RSS ingestion process.
+    RssIngest(RssIngestError),
+    /// Errors from the shared article ingestion process.
+    ArticleIngest(ArticleError),
     /// Errors from the embedding process.
     Embedding(EmbeddingError),
     /// Errors from the knowledge base pipeline.
@@ -34,10 +38,24 @@ pub enum AppError {
     Internal(anyhow::Error),
 }
 
-/// Conversion from `IngestError` to `AppError`.
-impl From<IngestError> for AppError {
-    fn from(err: IngestError) -> Self {
-        AppError::Ingest(err)
+/// Conversion from `TextIngestError` to `AppError`.
+impl From<TextIngestError> for AppError {
+    fn from(err: TextIngestError) -> Self {
+        AppError::TextIngest(err)
+    }
+}
+
+/// Conversion from `RssIngestError` to `AppError`.
+impl From<RssIngestError> for AppError {
+    fn from(err: RssIngestError) -> Self {
+        AppError::RssIngest(err)
+    }
+}
+
+/// Conversion from `ArticleError` to `AppError`.
+impl From<ArticleError> for AppError {
+    fn from(err: ArticleError) -> Self {
+        AppError::ArticleIngest(err)
     }
 }
 
@@ -86,11 +104,25 @@ impl From<TursoError> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status_code, error_message) = match self {
-            AppError::Ingest(err) => {
-                error!("IngestError: {:?}", err);
+            AppError::TextIngest(err) => {
+                error!("TextIngestError: {:?}", err);
                 (
                     StatusCode::UNPROCESSABLE_ENTITY,
-                    format!("Failed to ingest data: {err}"),
+                    format!("Failed to ingest text: {err}"),
+                )
+            }
+            AppError::RssIngest(err) => {
+                error!("RssIngestError: {:?}", err);
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("Failed to ingest RSS feed: {err}"),
+                )
+            }
+            AppError::ArticleIngest(err) => {
+                error!("ArticleIngestError: {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to store articles: {err}"),
                 )
             }
             AppError::Knowledge(err) => {
@@ -107,7 +139,6 @@ impl IntoResponse for AppError {
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Failed to parse LLM response: {e}"),
                     ),
-                    // ContentUnchanged is handled within the library and should not bubble up.
                     _ => (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Knowledge base operation failed: {err}"),

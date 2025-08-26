@@ -174,7 +174,7 @@ pub struct SearchResult {
     pub title: String,
     pub link: String,
     pub description: String,
-    /// A generic score. For vector search, lower is better (distance). For RRF/LLM, higher is better.
+    /// A relevance score where higher is better. For vector search, this is the cosine similarity (1.0 is a perfect match). For keyword search, this is a placeholder 0.0.
     pub score: f64,
 }
 

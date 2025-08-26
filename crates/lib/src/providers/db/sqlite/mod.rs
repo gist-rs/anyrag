@@ -96,13 +96,14 @@ impl SqliteProvider {
                 .join(", ")
         );
 
-        // A value of 0.7 means we are looking for vectors with a cosine similarity > 0.3.
-        let distance_threshold = 0.7;
+        // A similarity score of 0.3 means we are looking for vectors with a cosine similarity > 0.3.
+        // This helps filter out completely irrelevant results before ranking.
+        let similarity_threshold = 0.3;
         let sql = format!(
-            "SELECT answer, vector_distance_cos(embedding, {vector_str}) AS distance
+            "SELECT answer, 1.0 - vector_distance_cos(embedding, {vector_str}) AS similarity
              FROM faq_kb
-             WHERE embedding IS NOT NULL AND distance < {distance_threshold}
-             ORDER BY distance ASC
+             WHERE embedding IS NOT NULL AND similarity > {similarity_threshold}
+             ORDER BY similarity DESC
              LIMIT {limit};"
         );
 
@@ -313,15 +314,14 @@ impl VectorSearch for SqliteProvider {
                 .join(", ")
         );
 
-        // This distance threshold is specific to the cosine distance from Turso's vector extension.
-        // A value of 0.6 means we are looking for vectors that are reasonably close (cosine similarity > 0.4).
+        // A similarity score of 0.4 means we are looking for vectors with a cosine similarity > 0.4.
         // This helps filter out completely irrelevant results before ranking.
-        let distance_threshold = 0.6;
+        let similarity_threshold = 0.4;
         let sql = format!(
-            "SELECT title, link, description, vector_distance_cos(embedding, {vector_str}) AS distance
+            "SELECT title, link, description, 1.0 - vector_distance_cos(embedding, {vector_str}) AS similarity
              FROM articles
-             WHERE embedding IS NOT NULL AND distance < {distance_threshold}
-             ORDER BY distance ASC
+             WHERE embedding IS NOT NULL AND similarity > {similarity_threshold}
+             ORDER BY similarity DESC
              LIMIT {limit};"
         );
 
