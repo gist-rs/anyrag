@@ -3318,8 +3318,8 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "turso"
-version = "0.1.4-pre.6"
-source = "git+https://github.com/tursodatabase/turso.git?rev=81da795#81da795a66bcc352d3dd4fd58f64f8068490a61b"
+version = "0.1.4"
+source = "git+https://github.com/tursodatabase/turso.git?rev=494ce41#494ce41d806b25d49227fcfab242c1fe1ce4c121"
 dependencies = [
  "thiserror 2.0.14",
  "turso_core",
@@ -3327,8 +3327,8 @@ dependencies = [
 
 [[package]]
 name = "turso_core"
-version = "0.1.4-pre.6"
-source = "git+https://github.com/tursodatabase/turso.git?rev=81da795#81da795a66bcc352d3dd4fd58f64f8068490a61b"
+version = "0.1.4"
+source = "git+https://github.com/tursodatabase/turso.git?rev=494ce41#494ce41d806b25d49227fcfab242c1fe1ce4c121"
 dependencies = [
  "bitflags",
  "built",
@@ -3368,8 +3368,8 @@ dependencies = [
 
 [[package]]
 name = "turso_ext"
-version = "0.1.4-pre.6"
-source = "git+https://github.com/tursodatabase/turso.git?rev=81da795#81da795a66bcc352d3dd4fd58f64f8068490a61b"
+version = "0.1.4"
+source = "git+https://github.com/tursodatabase/turso.git?rev=494ce41#494ce41d806b25d49227fcfab242c1fe1ce4c121"
 dependencies = [
  "chrono",
  "getrandom 0.3.3",
@@ -3378,8 +3378,8 @@ dependencies = [
 
 [[package]]
 name = "turso_macros"
-version = "0.1.4-pre.6"
-source = "git+https://github.com/tursodatabase/turso.git?rev=81da795#81da795a66bcc352d3dd4fd58f64f8068490a61b"
+version = "0.1.4"
+source = "git+https://github.com/tursodatabase/turso.git?rev=494ce41#494ce41d806b25d49227fcfab242c1fe1ce4c121"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3388,8 +3388,8 @@ dependencies = [
 
 [[package]]
 name = "turso_sqlite3_parser"
-version = "0.1.4-pre.6"
-source = "git+https://github.com/tursodatabase/turso.git?rev=81da795#81da795a66bcc352d3dd4fd58f64f8068490a61b"
+version = "0.1.4"
+source = "git+https://github.com/tursodatabase/turso.git?rev=494ce41#494ce41d806b25d49227fcfab242c1fe1ce4c121"
 dependencies = [
  "bitflags",
  "cc",
