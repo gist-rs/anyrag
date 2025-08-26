@@ -96,13 +96,15 @@ impl SqliteProvider {
                 .join(", ")
         );
 
-        // A similarity score of 0.3 means we are looking for vectors with a cosine similarity > 0.3.
-        // This helps filter out completely irrelevant results before ranking.
-        let similarity_threshold = 0.3;
+        // A similarity score of 0.65 means we are looking for vectors that are reasonably close.
+        // This corresponds to a cosine distance of 0.7. (1.0 - (0.7 / 2.0) = 0.65)
+        let similarity_threshold = 0.65;
+        let distance_calculation =
+            format!("(1.0 - (vector_distance_cos(embedding, {vector_str}) / 2.0))");
         let sql = format!(
-            "SELECT answer, 1.0 - vector_distance_cos(embedding, {vector_str}) AS similarity
+            "SELECT answer, {distance_calculation} AS similarity
              FROM faq_kb
-             WHERE embedding IS NOT NULL AND similarity > {similarity_threshold}
+             WHERE embedding IS NOT NULL AND {distance_calculation} > {similarity_threshold}
              ORDER BY similarity DESC
              LIMIT {limit};"
         );
@@ -314,13 +316,15 @@ impl VectorSearch for SqliteProvider {
                 .join(", ")
         );
 
-        // A similarity score of 0.4 means we are looking for vectors with a cosine similarity > 0.4.
-        // This helps filter out completely irrelevant results before ranking.
-        let similarity_threshold = 0.4;
+        // A similarity score of 0.7 means we are looking for vectors that are reasonably close.
+        // This corresponds to a cosine distance of 0.6. (1.0 - (0.6 / 2.0) = 0.7)
+        let similarity_threshold = 0.7;
+        let distance_calculation =
+            format!("(1.0 - (vector_distance_cos(embedding, {vector_str}) / 2.0))");
         let sql = format!(
-            "SELECT title, link, description, 1.0 - vector_distance_cos(embedding, {vector_str}) AS similarity
+            "SELECT title, link, description, {distance_calculation} AS similarity
              FROM articles
-             WHERE embedding IS NOT NULL AND similarity > {similarity_threshold}
+             WHERE embedding IS NOT NULL AND {distance_calculation} > {similarity_threshold}
              ORDER BY similarity DESC
              LIMIT {limit};"
         );

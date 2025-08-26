@@ -211,7 +211,7 @@ pub async fn ingest_text_handler(
     let total_chunks = chunks.len();
 
     let db = app_state.sqlite_provider.db.clone();
-    let conn = db.connect()?;
+    let mut conn = db.connect()?;
     if let Err(e) = create_articles_table_if_not_exists(&conn).await {
         if !e.to_string().contains("already exists") {
             return Err(e.into());
@@ -238,7 +238,7 @@ pub async fn ingest_text_handler(
         })
         .collect();
 
-    let new_article_ids = insert_articles(&conn, articles_to_insert).await?;
+    let new_article_ids = insert_articles(&mut conn, articles_to_insert).await?;
     let ingested_count = new_article_ids.len();
 
     if !new_article_ids.is_empty() {
@@ -269,10 +269,7 @@ pub async fn ingest_text_handler(
     }
 
     let message = if ingested_count > 0 {
-        format!(
-            "Text ingestion successful. Stored and embedded {} new chunks.",
-            ingested_count
-        )
+        format!("Text ingestion successful. Stored and embedded {ingested_count} new chunks.",)
     } else if total_chunks > 0 {
         "All content already exists. No new chunks were ingested.".to_string()
     } else {
@@ -404,7 +401,7 @@ pub async fn vector_search_handler(
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = app_state
         .sqlite_provider
-        .vector_search(query_vector, limit as u32)
+        .vector_search(query_vector, limit)
         .await?;
     let debug_info = json!({ "query": payload.query, "limit": limit });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
@@ -422,7 +419,7 @@ pub async fn keyword_search_handler(
     );
     let results = app_state
         .sqlite_provider
-        .keyword_search(&payload.query, limit as u32)
+        .keyword_search(&payload.query, limit)
         .await?;
     let debug_info = json!({ "query": payload.query, "limit": limit });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
@@ -452,7 +449,7 @@ pub async fn hybrid_search_handler(
         &*app_state.prompt_client.ai_provider,
         query_vector,
         &payload.query,
-        limit as u32,
+        limit,
         payload.mode,
     )
     .await?;
@@ -512,7 +509,7 @@ pub async fn knowledge_search_handler(
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let search_results = app_state
         .sqlite_provider
-        .vector_search_faqs(query_vector, limit as u32)
+        .vector_search_faqs(query_vector, limit)
         .await?;
 
     if search_results.is_empty() {

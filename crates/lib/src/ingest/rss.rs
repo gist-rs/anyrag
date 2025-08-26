@@ -40,7 +40,7 @@ pub enum IngestError {
 ///
 /// The number of *new* articles that were successfully inserted into the database.
 pub async fn ingest_from_url(db: &Database, feed_url: &str) -> Result<usize, IngestError> {
-    let conn = db
+    let mut conn = db
         .connect()
         .map_err(|e| IngestError::Connection(e.to_string()))?;
 
@@ -78,7 +78,7 @@ pub async fn ingest_from_url(db: &Database, feed_url: &str) -> Result<usize, Ing
         .collect();
 
     // Use the shared function to insert the articles.
-    let new_ids = insert_articles(&conn, articles_to_insert).await?;
+    let new_ids = insert_articles(&mut conn, articles_to_insert).await?;
 
     Ok(new_ids.len())
 }

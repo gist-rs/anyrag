@@ -48,12 +48,13 @@ pub async fn create_articles_table_if_not_exists(conn: &Connection) -> Result<()
 
 /// Inserts a batch of articles into the database within a single transaction.
 ///
-/// It handles duplicate articles gracefully by skipping them based on the `link`'s
-/// UNIQUE constraint.
+/// This function uses an `INSERT ... ON CONFLICT DO NOTHING` statement, which
+/// allows it to efficiently and atomically skip any articles that already exist
+/// in the database based on the `link`'s UNIQUE constraint.
 ///
 /// # Arguments
 ///
-/// * `conn`: A reference to a Turso database connection.
+/// * `conn`: A mutable reference to a Turso database connection.
 /// * `articles`: A vector of `Article` structs to be inserted.
 ///
 /// # Returns
@@ -61,7 +62,7 @@ pub async fn create_articles_table_if_not_exists(conn: &Connection) -> Result<()
 /// A `Result` containing a vector of the `id`s of the articles that were newly inserted,
 /// or an `ArticleError` on failure.
 pub async fn insert_articles(
-    conn: &Connection,
+    conn: &mut Connection,
     articles: Vec<Article>,
 ) -> Result<Vec<i64>, ArticleError> {
     if articles.is_empty() {
@@ -72,46 +73,52 @@ pub async fn insert_articles(
         "Starting database transaction to ingest {} articles.",
         articles.len()
     );
-    conn.execute("BEGIN TRANSACTION", ()).await?;
-
+    let tx = conn.transaction().await?;
     let mut new_article_ids = Vec::new();
-    let mut stmt = conn
-        .prepare(
-            "INSERT INTO articles (title, link, description, pub_date, source_url) VALUES (?, ?, ?, ?, ?) RETURNING id",
-        )
-        .await?;
 
     for article in articles {
+        let link_for_logging = article.link.clone();
+
+        // Prepare the statement inside the loop. This is more robust than reusing
+        // the statement, as it avoids potential driver issues with parameter binding in a loop.
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO articles (title, link, description, pub_date, source_url)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT(link) DO NOTHING
+                 RETURNING id",
+            )
+            .await?;
+
         let params = params![
             article.title,
-            article.link.clone(),
+            article.link,
             article.description,
             article.pub_date.unwrap_or_default(),
             article.source_url
         ];
 
-        match stmt.query(params).await {
-            Ok(mut result_set) => {
-                if let Some(row) = result_set.next().await? {
-                    if let Ok(Value::Integer(id)) = row.get_value(0) {
-                        new_article_ids.push(id);
-                    }
-                }
+        info!("Attempting to insert article: {}", link_for_logging);
+        let mut result_set = stmt.query(params).await?;
+
+        if let Some(row) = result_set.next().await? {
+            if let Ok(Value::Integer(id)) = row.get_value(0) {
+                info!(
+                    "  -> SUCCESS: Inserted article '{}' with new ID: {}",
+                    link_for_logging, id
+                );
+                new_article_ids.push(id);
             }
-            Err(turso::Error::SqlExecutionFailure(msg))
-                if msg.contains("UNIQUE constraint failed") =>
-            {
-                warn!("Skipping duplicate article: {}", article.link);
-            }
-            Err(e) => {
-                // For any other database error, we should rollback and abort.
-                conn.execute("ROLLBACK", ()).await?;
-                return Err(ArticleError::Database(e));
-            }
+        } else {
+            info!(
+                "  -> INFO: Article already exists, skipping: {}",
+                link_for_logging
+            );
         }
     }
 
-    conn.execute("COMMIT", ()).await?;
+    tx.commit().await?;
+
     info!(
         "Transaction committed. Ingested {} new articles.",
         new_article_ids.len()

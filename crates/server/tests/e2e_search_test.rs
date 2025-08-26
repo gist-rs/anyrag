@@ -71,11 +71,28 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     // --- 2. Mock External Services ---
 
     // A. Mock the RSS feed with two distinct articles.
+    // The descriptions are crafted to ensure keyword search finds both.
     let mock_rss_content = r#"
-        <rss version="2.0"><channel><title>Mock</title><link>http://m.com</link>
-        <item><title>The Rise of Qwen3</title><link>http://m.com/qwen3</link><description>An article about large language models.</description></item>
-        <item><title>PostgreSQL Performance</title><link>http://m.com/postgres</link><description>An article about database tuning.</description></item>
-        </channel></rss>
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+        <channel>
+            <title>Mock Feed</title>
+            <link>http://m.com</link>
+            <description>A mock feed for testing.</description>
+            <item>
+                <title>The Rise of Qwen3</title>
+                <link>http://m.com/qwen3</link>
+                <description>An article about a database and large language models.</description>
+                <pubDate>Mon, 01 Jan 2024 12:00:00 GMT</pubDate>
+            </item>
+            <item>
+                <title>PostgreSQL Performance</title>
+                <link>http://m.com/postgres</link>
+                <description>An article about database tuning.</description>
+                <pubDate>Tue, 02 Jan 2024 12:00:00 GMT</pubDate>
+            </item>
+        </channel>
+        </rss>
     "#;
     server.mock(|when, then| {
         when.method(GET).path("/rss");
