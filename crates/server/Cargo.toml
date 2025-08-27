@@ -45,8 +45,7 @@ tempfile = "3.20.0"
 turso = { workspace = true }
 regex = { workspace = true }
 md5 = "0.7.0"
-genpdf = "0.2.0"
-rusttype = "0.9.3"
+pdf-writer = "0.13.0"
 
 [[test]]
 name = "config_test"
