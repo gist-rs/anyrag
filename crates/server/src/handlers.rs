@@ -3,6 +3,7 @@ use super::{
     state::AppState,
     types::{ApiResponse, DebugParams, ExtractorChoice, IngestTextRequest, IngestTextResponse},
 };
+use anyrag::providers::db::storage::Storage;
 use anyrag::{
     ingest::{
         articles::{insert_articles, Article as IngestArticle},
@@ -14,7 +15,7 @@ use anyrag::{
     },
     providers::{
         ai::generate_embedding,
-        db::storage::{KeywordSearch, Storage, VectorSearch},
+        db::storage::{KeywordSearch, VectorSearch},
     },
     search::{hybrid_search, SearchMode},
     types::ContentType,
@@ -286,6 +287,75 @@ pub async fn ingest_text_handler(
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
+pub async fn ingest_file_handler(
+    State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
+    mut multipart: Multipart,
+) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
+    let mut pdf_data: Option<Vec<u8>> = None;
+    let mut source_identifier: Option<String> = None;
+    let mut extractor_choice = ExtractorChoice::default();
+
+    while let Some(field) = multipart.next_field().await.map_err(anyhow::Error::from)? {
+        let name = field.name().unwrap_or("").to_string();
+
+        match name.as_str() {
+            "file" => {
+                source_identifier =
+                    Some(field.file_name().unwrap_or("uploaded_file.pdf").to_string());
+                pdf_data = Some(field.bytes().await.map_err(anyhow::Error::from)?.to_vec());
+                info!(
+                    "Received file upload: {}",
+                    source_identifier.as_deref().unwrap()
+                );
+            }
+            "extractor" => {
+                let extractor_str = field.text().await.map_err(anyhow::Error::from)?;
+                extractor_choice =
+                    serde_json::from_str(&format!("\"{extractor_str}\"")).map_err(|e| {
+                        AppError::Internal(anyhow::anyhow!("Invalid extractor choice: {}", e))
+                    })?;
+                info!("Extractor choice set to: {:?}", extractor_choice);
+            }
+            _ => {
+                // Ignore other fields
+            }
+        }
+    }
+
+    let pdf_data = pdf_data
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("File data not found in request.")))?;
+    let source_identifier = source_identifier
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("File name not found in request.")))?;
+
+    let extractor_strategy = match extractor_choice {
+        ExtractorChoice::Local => PdfSyncExtractor::Local,
+        ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
+    };
+
+    let ingested_count = run_pdf_ingestion_pipeline(
+        &app_state.sqlite_provider.db,
+        &*app_state.prompt_client.ai_provider,
+        pdf_data.clone(),
+        &source_identifier,
+        extractor_strategy,
+    )
+    .await?;
+
+    let response = KnowledgeIngestResponse {
+        message: "PDF ingestion pipeline completed successfully.".to_string(),
+        ingested_faqs: ingested_count,
+    };
+
+    let debug_info = json!({
+        "filename": source_identifier,
+        "size": pdf_data.len(),
+        "extractor": extractor_choice,
+    });
+
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
 pub async fn embed_handler(
     State(app_state): State<AppState>,
     debug_params: Query<DebugParams>,
@@ -523,77 +593,6 @@ pub async fn knowledge_search_handler(
             debug_params,
             Some(debug_info),
         ));
-    }
-
-    pub async fn ingest_file_handler(
-        State(app_state): State<AppState>,
-        debug_params: Query<DebugParams>,
-        mut multipart: Multipart,
-    ) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
-        let mut pdf_data: Option<Vec<u8>> = None;
-        let mut source_identifier: Option<String> = None;
-        let mut extractor_choice = ExtractorChoice::default();
-
-        while let Some(field) = multipart.next_field().await.map_err(anyhow::Error::from)? {
-            let name = field.name().unwrap_or("").to_string();
-
-            match name.as_str() {
-                "file" => {
-                    source_identifier =
-                        Some(field.file_name().unwrap_or("uploaded_file.pdf").to_string());
-                    pdf_data = Some(field.bytes().await.map_err(anyhow::Error::from)?.to_vec());
-                    info!(
-                        "Received file upload: {}",
-                        source_identifier.as_deref().unwrap()
-                    );
-                }
-                "extractor" => {
-                    let extractor_str = field.text().await.map_err(anyhow::Error::from)?;
-                    extractor_choice = serde_json::from_str(&format!("\"{}\"", extractor_str))
-                        .map_err(|e| {
-                            AppError::Internal(anyhow::anyhow!("Invalid extractor choice: {}", e))
-                        })?;
-                    info!("Extractor choice set to: {:?}", extractor_choice);
-                }
-                _ => {
-                    // Ignore other fields
-                }
-            }
-        }
-
-        let pdf_data = pdf_data.ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!("File data not found in request."))
-        })?;
-        let source_identifier = source_identifier.ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!("File name not found in request."))
-        })?;
-
-        let extractor_strategy = match extractor_choice {
-            ExtractorChoice::Local => PdfSyncExtractor::Local,
-            ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
-        };
-
-        let ingested_count = run_pdf_ingestion_pipeline(
-            &app_state.sqlite_provider.db,
-            &*app_state.prompt_client.ai_provider,
-            pdf_data.clone(),
-            &source_identifier,
-            extractor_strategy,
-        )
-        .await?;
-
-        let response = KnowledgeIngestResponse {
-            message: "PDF ingestion pipeline completed successfully.".to_string(),
-            ingested_faqs: ingested_count,
-        };
-
-        let debug_info = json!({
-            "filename": source_identifier,
-            "size": pdf_data.len(),
-            "extractor": extractor_choice,
-        });
-
-        Ok(wrap_response(response, debug_params, Some(debug_info)))
     }
     let context = search_results
         .iter()

@@ -1,4 +1,5 @@
 use super::{handlers::*, state::AppState};
+use axum::extract::DefaultBodyLimit;
 use axum::{
     routing::{get, post},
     Router,
@@ -13,7 +14,10 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/prompt", post(prompt_handler))
         .route("/ingest", post(ingest_handler))
         .route("/ingest/text", post(ingest_text_handler))
-        .route("/ingest/file", post(ingest_file_handler))
+        .route(
+            "/ingest/file",
+            post(ingest_file_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+        )
         .route("/embed", post(embed_handler))
         .route("/embed/new", post(embed_new_handler))
         .route("/embed/faqs/new", post(embed_faqs_new_handler))

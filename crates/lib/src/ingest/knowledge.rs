@@ -39,6 +39,8 @@ pub enum KnowledgeError {
     JinaReaderFailed { status: u16, body: String },
     #[error("Failed to convert database value: expected text, found other type.")]
     TypeConversion,
+    #[error("An internal error occurred: {0}")]
+    Internal(#[from] anyhow::Error),
 }
 
 // --- Data Structures ---

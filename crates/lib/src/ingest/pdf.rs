@@ -14,7 +14,7 @@ use crate::{
 use md5;
 use pdf::file::FileOptions;
 use serde::de::Error as _; // For the `custom` method on serde_json::Error
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 use turso::{params, Connection, Database};
 
 // --- Prompts ---
@@ -61,8 +61,6 @@ pub async fn run_pdf_ingestion_pipeline(
 
     let content_hash = format!("{:x}", md5::compute(&pdf_data));
 
-    // TODO: Check if content_hash already exists in `refined_content` to avoid reprocessing.
-
     // --- Stage 1 & 2: Extraction and Refinement ---
     let refined_markdown = match extractor {
         PdfSyncExtractor::Local => {
@@ -75,8 +73,6 @@ pub async fn run_pdf_ingestion_pipeline(
                 .await?
         }
         PdfSyncExtractor::Gemini => {
-            // The Gemini-specific logic will be implemented here.
-            // For now, it returns an error as per the plan.
             return Err(KnowledgeError::Llm(crate::errors::PromptError::AiApi(
                 "Gemini PDF extractor is not yet implemented.".to_string(),
             )));
@@ -85,6 +81,7 @@ pub async fn run_pdf_ingestion_pipeline(
 
     // --- Stage 3: Store Refined Content ---
     let conn = db.connect()?;
+    crate::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
     store_refined_content(&conn, source_identifier, &refined_markdown, &content_hash).await?;
 
     // --- Stage 4: Distill & Augment ---
@@ -102,26 +99,54 @@ pub async fn run_pdf_ingestion_pipeline(
 // --- Helper Functions ---
 
 /// Extracts text from all pages of a PDF.
-///
 /// This function is designed to be run in a blocking-safe context as PDF parsing is CPU-intensive.
 async fn extract_text_from_pdf(pdf_data: &[u8]) -> Result<String, KnowledgeError> {
     info!("Extracting text from PDF...");
-    // The `pdf` crate requires the data to be owned, so we clone it for the blocking task.
     let data = pdf_data.to_vec();
 
-    // Spawn a blocking task to avoid stalling the async runtime with CPU-intensive PDF parsing.
-    let text_result = tokio::task::spawn_blocking(move || {
+    let text_result = tokio::task::spawn_blocking(move || -> Result<String, KnowledgeError> {
         let file = FileOptions::cached()
-            .load(&data)
+            .load(&data[..]) // Pass as a slice to satisfy trait bounds
             .map_err(|e| KnowledgeError::Parse(serde_json::Error::custom(e.to_string())))?;
-        let all_pages = 0..file.num_pages();
-        pdf::text::extract_text(&file, all_pages)
-            .map_err(|e| KnowledgeError::Parse(serde_json::Error::custom(e.to_string())))
+
+        let resolver = file.resolver();
+        let mut full_text = String::new();
+
+        for page_num in 0..file.num_pages() {
+            let page = file
+                .get_page(page_num)
+                .map_err(|e| KnowledgeError::Parse(serde_json::Error::custom(e.to_string())))?;
+
+            if let Some(content) = &page.contents {
+                let operations = content
+                    .operations(&resolver)
+                    .map_err(|e| KnowledgeError::Parse(serde_json::Error::custom(e.to_string())))?;
+                for op in operations.iter() {
+                    match op {
+                        pdf::content::Op::TextDraw { text } => {
+                            full_text.push_str(&text.to_string_lossy());
+                        }
+                        pdf::content::Op::TextDrawAdjusted { array } => {
+                            for item in array.iter() {
+                                if let pdf::content::TextDrawAdjusted::Text(text) = item {
+                                    full_text.push_str(&text.to_string_lossy());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                full_text.push_str("\n\n"); // Add a separator between pages
+            } else {
+                warn!("Page {} has no content stream.", page_num);
+            }
+        }
+        Ok(full_text)
     })
     .await;
 
     // Handle the result of the spawned task, converting JoinError and the inner Result into our KnowledgeError.
-    let text = text_result.map_err(|e| {
+    let text: String = text_result.map_err(|e| {
         KnowledgeError::Internal(anyhow::anyhow!("Tokio join error during PDF parsing: {e}"))
     })??;
 
