@@ -33,13 +33,13 @@ futures = { workspace = true }
 # Other
 dotenvy = { workspace = true }
 anyhow = { workspace = true }
+reqwest = { workspace = true, features = ["json", "multipart"] }
 
 [dev-dependencies]
 async-trait = { workspace = true }
 dyn-clone = { workspace = true }
 futures = "0.3.31"
 gcp-bigquery-client = { workspace = true }
-reqwest = { workspace = true, features = ["json", "multipart"] }
 httpmock = "0.7.0"
 tempfile = "3.20.0"
 turso = { workspace = true }
@@ -80,4 +80,9 @@ harness = true
 [[test]]
 name = "pdf_ingest_test"
 path = "tests/pdf_ingest_test.rs"
+harness = true
+
+[[test]]
+name = "pdf_url_ingest_test"
+path = "tests/pdf_url_ingest_test.rs"
 harness = true

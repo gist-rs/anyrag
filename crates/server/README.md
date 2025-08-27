@@ -196,6 +196,24 @@ curl -X POST http://localhost:9090/ingest/file \
   -F "extractor=local"
 ```
 
+#### `POST /ingest/pdf_url`
+
+Downloads and ingests a PDF from a given URL. The server follows redirects, downloads the file, and then processes it using the same pipeline as the `/ingest/file` endpoint.
+
+**Request Body:** `{"url": "...", "extractor": "..."}`
+- `url`: The direct URL to the PDF file.
+- `extractor`: (Optional) The extraction strategy. Can be `"local"` (default) or `"gemini"`.
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/ingest/pdf_url \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://arxiv.org/pdf/2403.05530.pdf",
+    "extractor": "local"
+  }'
+```
+
 #### `POST /ingest/text`
 
 Ingests raw text directly from the request body. The server will automatically chunk the text into smaller, manageable pieces based on paragraphs and a size limit, then store them in the `articles` table for later embedding and search.

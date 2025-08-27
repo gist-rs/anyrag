@@ -18,6 +18,7 @@ pub fn create_router(app_state: AppState) -> Router {
             "/ingest/file",
             post(ingest_file_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
         )
+        .route("/ingest/pdf_url", post(ingest_pdf_url_handler))
         .route("/embed", post(embed_handler))
         .route("/embed/new", post(embed_new_handler))
         .route("/embed/faqs/new", post(embed_faqs_new_handler))

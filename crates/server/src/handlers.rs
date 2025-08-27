@@ -356,6 +356,81 @@ pub async fn ingest_file_handler(
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
+#[derive(Deserialize)]
+pub struct IngestPdfUrlRequest {
+    pub url: String,
+    #[serde(default)]
+    pub extractor: ExtractorChoice,
+}
+
+pub async fn ingest_pdf_url_handler(
+    State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<IngestPdfUrlRequest>,
+) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
+    info!("Received PDF ingest request for URL: {}", payload.url);
+
+    // 1. Download the PDF, reqwest follows redirects by default.
+    let response = reqwest::get(&payload.url)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to download PDF from URL: {e}")))?;
+
+    if !response.status().is_success() {
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "Failed to download PDF, received status: {}",
+            response.status()
+        )));
+    }
+    let pdf_data = response
+        .bytes()
+        .await
+        .map_err(anyhow::Error::from)?
+        .to_vec();
+
+    // 2. Determine a source identifier from the URL.
+    let source_identifier = payload
+        .url
+        .split('/')
+        .next_back()
+        .unwrap_or("downloaded.pdf")
+        .to_string();
+
+    info!(
+        "PDF downloaded successfully. Size: {} bytes. Identifier: {}",
+        pdf_data.len(),
+        source_identifier
+    );
+
+    let extractor_strategy = match payload.extractor {
+        ExtractorChoice::Local => PdfSyncExtractor::Local,
+        ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
+    };
+
+    // 3. Run the existing ingestion pipeline.
+    let ingested_count = run_pdf_ingestion_pipeline(
+        &app_state.sqlite_provider.db,
+        &*app_state.prompt_client.ai_provider,
+        pdf_data.clone(),
+        &source_identifier,
+        extractor_strategy,
+    )
+    .await?;
+
+    let response = KnowledgeIngestResponse {
+        message: "PDF URL ingestion pipeline completed successfully.".to_string(),
+        ingested_faqs: ingested_count,
+    };
+
+    let debug_info = json!({
+        "url": payload.url,
+        "filename": source_identifier,
+        "size": pdf_data.len(),
+        "extractor": payload.extractor,
+    });
+
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
 pub async fn embed_handler(
     State(app_state): State<AppState>,
     debug_params: Query<DebugParams>,
