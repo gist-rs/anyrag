@@ -1,10 +1,10 @@
-//! Example: End-to-end Google Sheet FAQ RAG workflow.
+//! Example: End-to-end Google Sheet FAQ RAG workflow for date-sensitive questions.
 //!
-//! This example demonstrates the full workflow for sheet-based FAQs:
-//! 1.  It ingests Q&A pairs from a public Google Sheet.
+//! This example demonstrates the full workflow for sheet-based FAQs with time constraints:
+//! 1.  It ingests Q&A pairs from a public Google Sheet, including `start_at` and `end_at` columns.
 //! 2.  It generates vector embeddings for these new FAQs.
-//! 3.  It uses the RAG pattern (`/search/knowledge`) to ask a question
-//!     that can be answered by the sheet's content.
+//! 3.  It uses the RAG pattern (`/search/knowledge`) to ask a question ("Hobby?")
+//!     that has different answers depending on the current date.
 //!
 //! # Prerequisites
 //!
@@ -15,7 +15,7 @@
 //! # Usage
 //!
 //! From the workspace root (`anyrag/`):
-//! `cargo run -p anyrag-server --example sheet_faq_prompt`
+//! `cargo run -p anyrag-server --example sheet_faq_date_sensitive`
 
 // Include the binary's main source file to access its components.
 #[path = "../src/main.rs"]
@@ -32,10 +32,11 @@ use tracing_subscriber::EnvFilter;
 
 /// Cleans up database files for a fresh run.
 async fn cleanup_db(db_path: &str) -> Result<()> {
-    for path in [db_path, &format!("{db_path}-wal")] {
-        if fs::metadata(path).is_ok() {
+    for path_str in [db_path, &format!("{db_path}-wal")] {
+        let path = std::path::Path::new(path_str);
+        if path.exists() {
             fs::remove_file(path)?;
-            info!("Removed existing database file: {}", path);
+            info!("Removed existing database file: {}", path.display());
         }
     }
     Ok(())
@@ -50,8 +51,11 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     info!("Environment variables loaded.");
 
-    let db_path = "anyrag_sheet_faq.db";
+    let db_path = "anyrag_sheet_faq_date.db";
     cleanup_db(db_path).await?;
+
+    // Set DB_URL so the app state uses the same DB as the cleanup function.
+    std::env::set_var("DB_URL", db_path);
 
     let config =
         main::config::get_config().expect("Failed to load configuration. Is .env present?");
@@ -65,7 +69,7 @@ async fn main() -> Result<()> {
     let sheet_url = "https://docs.google.com/spreadsheets/d/1Upsr6r6ufkYougDFVBQOQNgNf9Syrwv2CTNhFbVNu2w/edit?usp=sharing";
     let ingest_payload = IngestSheetFaqRequest {
         url: sheet_url.to_string(),
-        gid: None,
+        gid: Some(856666263.to_string()),
         skip_header: true,
     };
 
@@ -108,13 +112,13 @@ async fn main() -> Result<()> {
     }
 
     // --- 4. Ask a Question using RAG ---
-    info!("--- Asking Question against Sheet Knowledge ---");
-    let question = "What was yesterday's email about?";
+    info!("--- Asking Date-Sensitive Question against Sheet Knowledge ---");
+    let question = "Hobby?";
     let search_payload = SearchRequest {
         query: question.to_string(),
         instruction: None,
         limit: Some(3),
-        mode: anyrag::SearchMode::LlmReRank, // Mode is not used in knowledge search
+        mode: anyrag::SearchMode::LlmReRank,
     };
 
     let final_answer = match handlers::knowledge_search_handler(
@@ -129,8 +133,8 @@ async fn main() -> Result<()> {
     };
 
     // --- 5. Print Final Results ---
-    println!("\n\n✅ Google Sheet FAQ RAG Workflow Complete!");
-    println!("========================================");
+    println!("\n\n✅ Google Sheet Date-Sensitive FAQ RAG Workflow Complete!");
+    println!("===========================================================");
     println!("❓ Question: {question}");
     println!("💡 Answer:\n---\n{final_answer}\n---");
 
