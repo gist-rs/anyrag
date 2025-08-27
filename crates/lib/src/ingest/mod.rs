@@ -7,6 +7,7 @@
 pub mod articles;
 pub mod embedding;
 pub mod knowledge;
+pub mod pdf;
 pub mod rss;
 pub mod sheets;
 pub mod text;
@@ -14,6 +15,7 @@ pub mod text;
 pub use articles::{create_articles_table_if_not_exists, insert_articles, Article, ArticleError};
 pub use embedding::{embed_article, embed_faq, EmbeddingError};
 pub use knowledge::{export_for_finetuning, run_ingestion_pipeline, KnowledgeError};
+pub use pdf::{run_pdf_ingestion_pipeline, PdfSyncExtractor};
 pub use rss::{ingest_from_url, IngestError as RssIngestError};
 pub use sheets::{
     ingest_from_google_sheet_url, sheet_url_to_export_url_and_table_name, IngestSheetError,

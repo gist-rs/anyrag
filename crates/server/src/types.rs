@@ -31,3 +31,11 @@ pub struct IngestTextResponse {
     pub message: String,
     pub ingested_chunks: usize,
 }
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtractorChoice {
+    #[default]
+    Local,
+    Gemini,
+}

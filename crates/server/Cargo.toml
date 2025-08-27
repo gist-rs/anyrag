@@ -32,6 +32,7 @@ futures = { workspace = true }
 # Other
 dotenvy = { workspace = true }
 anyhow = { workspace = true }
+axum-extra = { version = "0.10.1", features = ["multipart"] }
 
 [dev-dependencies]
 async-trait = { workspace = true }

@@ -123,6 +123,21 @@ pub async fn create_kb_tables_if_not_exists(conn: &Connection) -> Result<(), tur
     )
     .await?;
     conn.execute(
+        r#"CREATE TABLE IF NOT EXISTS refined_content (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_identifier TEXT NOT NULL,
+            refined_markdown TEXT NOT NULL,
+            raw_content_hash TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );"#,
+        (),
+    )
+    .await?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_refined_content_source_identifier ON refined_content(source_identifier);",
+        (),
+    ).await?;
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_faq_kb_source_url ON faq_kb(source_url);",
         (),
     )

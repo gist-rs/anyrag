@@ -158,8 +158,7 @@ Translates a natural language prompt into a query, executes it against a data wa
 curl -X POST http://localhost:9090/prompt \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "What is the total word_count for the corpus '\''kinghenryv'\''?",
-    "table_name": "bigquery-public-data.samples.shakespeare"
+    "prompt": "tell me a joke" 
   }'
 ```
 
@@ -180,6 +179,21 @@ curl -X POST http://localhost:9090/knowledge/ingest \
   -d '{
     "url": "https://www.true.th/betterliv/support/true-app-mega-campaign"
   }'
+```
+
+#### `POST /ingest/file`
+
+Ingests a PDF file directly. The server processes the PDF, uses an LLM to refine the extracted content into structured Markdown, stores this refined content, and then distills it into Q&A pairs for the knowledge base.
+
+**Request Body:** `multipart/form-data`
+- `file`: The PDF file to be ingested.
+- `extractor`: (Optional) A string specifying the extraction strategy. Can be `"local"` (default) or `"gemini"`. The `local` strategy uses a pure Rust library to extract text and a generic LLM to refine it. The `gemini` strategy uses the multimodal Gemini API.
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/ingest/file \
+  -F "file=@/path/to/your/document.pdf" \
+  -F "extractor=local"
 ```
 
 #### `POST /ingest/text`
