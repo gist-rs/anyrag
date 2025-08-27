@@ -113,7 +113,7 @@ async fn main() -> Result<()> {
 
     // --- 4. Ask a Question using RAG ---
     info!("--- Asking Date-Sensitive Question against Sheet Knowledge ---");
-    let question = "Hobby?";
+    let question = "What is the current hobby?";
     let search_payload = SearchRequest {
         query: question.to_string(),
         instruction: None,
