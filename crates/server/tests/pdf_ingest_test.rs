@@ -108,12 +108,13 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     let client = Client::new();
 
     // Define the magic sentence and the expected transformations
-    let messy_sentence = "ThisIsA   messy    sentence. It needs refinement.";
-    let refined_markdown = "- This is a messy sentence.\n- It needs refinement.";
-    let distilled_question = "What is the state of the sentence?";
-    let distilled_answer = "The sentence is messy and requires refinement.";
-    let final_rag_answer =
-        "Based on the document, the sentence is messy and in need of refinement.";
+    let messy_sentence =
+        "ThisIsA   messy    sentence. It needs refinement. The magic number is 3.14159.";
+    let refined_markdown =
+        "- This is a messy sentence.\n- It needs refinement.\n- The magic number is 3.14159.";
+    let distilled_question = "What is the magic number?";
+    let distilled_answer = "The magic number is 3.14159.";
+    let final_rag_answer = "Based on the document, the magic number is 3.14159.";
 
     // --- 2. Generate Test PDF ---
     let pdf_data = generate_test_pdf(messy_sentence)?;
@@ -193,7 +194,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     // --- 7. Execute RAG Search and Verify ---
     let search_res = client
         .post(format!("{app_address}/search/knowledge"))
-        .json(&json!({ "query": "what is the sentence like?" }))
+        .json(&json!({ "query": "what is the magic number?" }))
         .send()
         .await?
         .error_for_status()?;
