@@ -21,3 +21,22 @@ pub fn keyword_search_articles(limit: u32) -> String {
     "
     )
 }
+
+/// Returns the SQL for a keyword search on the `faq_kb` table.
+///
+/// The query uses `LOWER()` for case-insensitive matching on both the `question`
+/// and `answer` columns. It expects a single parameter (`?1`) for the search pattern.
+///
+/// # Arguments
+///
+/// * `limit`: The maximum number of results to return.
+pub fn keyword_search_faqs(limit: u32) -> String {
+    format!(
+        "
+        SELECT answer, 0.5 as score
+        FROM faq_kb
+        WHERE LOWER(question) LIKE ?1 OR LOWER(answer) LIKE ?1
+        LIMIT {limit};
+    "
+    )
+}

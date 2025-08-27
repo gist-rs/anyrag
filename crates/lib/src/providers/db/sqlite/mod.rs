@@ -137,6 +137,36 @@ impl SqliteProvider {
 
         Ok(search_results)
     }
+
+    /// Performs a keyword search on the `faq_kb` table.
+    pub async fn keyword_search_faqs(
+        &self,
+        query: &str,
+        limit: u32,
+    ) -> Result<Vec<FaqSearchResult>, SearchError> {
+        info!("Executing keyword search on faq_kb for: {}", query);
+        let conn = self.db.connect()?;
+        let pattern = format!("%{}%", query.to_lowercase());
+
+        let sql = sql::keyword_search_faqs(limit);
+
+        let mut results = conn.query(&sql, params![pattern]).await?;
+        let mut search_results = Vec::new();
+
+        while let Some(row) = results.next().await? {
+            let answer = match row.get_value(0)? {
+                TursoValue::Text(s) => s,
+                _ => String::new(),
+            };
+            let score = match row.get_value(1)? {
+                TursoValue::Real(f) => f,
+                _ => 0.0,
+            };
+            search_results.push(FaqSearchResult { answer, score });
+        }
+
+        Ok(search_results)
+    }
 }
 
 impl Debug for SqliteProvider {

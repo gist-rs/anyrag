@@ -654,10 +654,43 @@ pub async fn knowledge_search_handler(
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
-    let search_results = app_state
-        .sqlite_provider
-        .vector_search_faqs(query_vector, limit)
-        .await?;
+    // --- Stage 1: Fetch Candidates Concurrently ---
+    let (vector_results, keyword_results) = tokio::join!(
+        app_state
+            .sqlite_provider
+            .vector_search_faqs(query_vector, limit * 2), // Fetch more for better re-ranking
+        app_state
+            .sqlite_provider
+            .keyword_search_faqs(&payload.query, limit * 2)
+    );
+    let vector_results = vector_results?;
+    let keyword_results = keyword_results?;
+
+    // --- Stage 2: Combine and Deduplicate Results ---
+    // Use a HashMap to handle deduplication and score boosting.
+    let mut candidates = std::collections::HashMap::new();
+
+    // Insert vector results first.
+    for res in vector_results {
+        candidates.insert(res.answer.clone(), res);
+    }
+
+    // Insert keyword results, boosting the score of existing entries if they also appeared in the vector search.
+    for res in keyword_results {
+        candidates
+            .entry(res.answer.clone())
+            .and_modify(|existing| existing.score += res.score) // Boost score
+            .or_insert(res);
+    }
+    let mut search_results: Vec<_> = candidates.into_values().collect();
+
+    // Simple score-based sort as a basic re-ranking mechanism. Higher score is better.
+    search_results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    search_results.truncate(limit as usize);
 
     if search_results.is_empty() {
         let text = "I could not find any relevant information to answer your question.".to_string();
@@ -689,7 +722,11 @@ pub async fn knowledge_search_handler(
         .await?;
 
     let debug_info = if debug_params.debug.unwrap_or(false) {
-        Some(json!({ "options": options, "retrieved_context": context }))
+        Some(json!({
+            "options": options,
+            "retrieved_context": context,
+            "final_candidate_count": search_results.len()
+        }))
     } else {
         None
     };
