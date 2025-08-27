@@ -1,5 +1,8 @@
 use anyrag::{
-    ingest::{ArticleError, EmbeddingError, KnowledgeError, RssIngestError, TextIngestError},
+    ingest::{
+        ArticleError, EmbeddingError, IngestSheetFaqError, KnowledgeError, RssIngestError,
+        TextIngestError,
+    },
     search::SearchError,
     PromptError,
 };
@@ -24,6 +27,8 @@ pub enum AppError {
     TextIngest(TextIngestError),
     /// Errors from the RSS ingestion process.
     RssIngest(RssIngestError),
+    /// Errors from the sheet faq ingestion process.
+    SheetFaqIngest(IngestSheetFaqError),
     /// Errors from the shared article ingestion process.
     ArticleIngest(ArticleError),
     /// Errors from the embedding process.
@@ -49,6 +54,13 @@ impl From<TextIngestError> for AppError {
 impl From<RssIngestError> for AppError {
     fn from(err: RssIngestError) -> Self {
         AppError::RssIngest(err)
+    }
+}
+
+/// Conversion from `IngestSheetFaqError` to `AppError`.
+impl From<IngestSheetFaqError> for AppError {
+    fn from(err: IngestSheetFaqError) -> Self {
+        AppError::SheetFaqIngest(err)
     }
 }
 
@@ -116,6 +128,13 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     format!("Failed to ingest RSS feed: {err}"),
+                )
+            }
+            AppError::SheetFaqIngest(err) => {
+                error!("IngestSheetFaqError: {:?}", err);
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("Failed to ingest Sheet FAQ: {err}"),
                 )
             }
             AppError::ArticleIngest(err) => {

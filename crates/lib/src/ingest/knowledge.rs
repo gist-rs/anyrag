@@ -62,9 +62,9 @@ pub struct ExtractedKnowledge {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FaqItem {
-    question: String,
-    answer: String,
-    is_explicit: bool,
+    pub question: String,
+    pub answer: String,
+    pub is_explicit: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

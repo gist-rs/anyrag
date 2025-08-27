@@ -4,8 +4,8 @@
 //! Google Sheet and storing it in a local SQLite database. It includes logic
 //! to "sniff" column types to create a more descriptive and useful schema.
 
+use crate::ingest::shared::{construct_export_url_and_table_name, download_csv, SheetError};
 use chrono::NaiveDateTime;
-use regex::Regex;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 use turso::{Connection, Database, Value as TursoValue};
@@ -15,46 +15,21 @@ use turso::{Connection, Database, Value as TursoValue};
 pub enum IngestSheetError {
     #[error("Database error: {0}")]
     Database(#[from] turso::Error),
-    #[error("Failed to fetch sheet: {0}")]
-    Fetch(#[from] reqwest::Error),
     #[error("Failed to parse CSV from sheet: {0}")]
     Parse(#[from] csv::Error),
-    #[error("Invalid Google Sheet URL: {0}")]
-    InvalidUrl(String),
     #[error("The sheet has no data to ingest.")]
     NoData,
     #[error("Failed to get database connection: {0}")]
     Connection(String),
+    #[error(transparent)]
+    Sheet(#[from] SheetError),
 }
 
 /// Transforms a Google Sheet URL into a CSV export URL and a sanitized table name.
 pub fn sheet_url_to_export_url_and_table_name(
     url_str: &str,
 ) -> Result<(String, String), IngestSheetError> {
-    let parsed_url = reqwest::Url::parse(url_str)
-        .map_err(|e| IngestSheetError::InvalidUrl(format!("Failed to parse URL: {e}")))?;
-
-    let re = Regex::new(r"/spreadsheets/d/([a-zA-Z0-9-_]+)")
-        .map_err(|e| IngestSheetError::InvalidUrl(format!("Regex compilation failed: {e}")))?;
-    let caps = re.captures(parsed_url.path()).ok_or_else(|| {
-        IngestSheetError::InvalidUrl("Could not find sheet ID in URL path.".to_string())
-    })?;
-
-    let spreadsheets_id = caps.get(1).map(|m| m.as_str()).ok_or_else(|| {
-        IngestSheetError::InvalidUrl("Sheet ID capture group is missing.".to_string())
-    })?;
-
-    let base_url = match parsed_url.host_str() {
-        Some("127.0.0.1") | Some("localhost") => {
-            format!("{}://{}", parsed_url.scheme(), parsed_url.authority())
-        }
-        _ => "https://docs.google.com".to_string(),
-    };
-
-    let export_url = format!("{base_url}/spreadsheets/d/{spreadsheets_id}/export?format=csv");
-    let table_name = format!("spreadsheets_{}", spreadsheets_id.replace('-', "_"));
-
-    Ok((export_url, table_name))
+    Ok(construct_export_url_and_table_name(url_str, None)?)
 }
 
 /// Fetches a Google Sheet, parses it as CSV, and ingests it into a new SQLite table.
@@ -69,14 +44,7 @@ pub async fn ingest_from_google_sheet_url(
         .map_err(|e| IngestSheetError::Connection(e.to_string()))?;
     info!("[ingest_sheet] Successfully got database connection.");
 
-    info!("Fetching Google Sheet from: {export_url}");
-    let response = reqwest::get(export_url).await?;
-    if !response.status().is_success() {
-        return Err(IngestSheetError::Fetch(
-            response.error_for_status().unwrap_err(),
-        ));
-    }
-    let csv_data = response.text().await?;
+    let csv_data = download_csv(export_url).await?;
     debug!("[ingest_sheet] Raw CSV data: {}", csv_data);
 
     let mut reader = csv::Reader::from_reader(csv_data.as_bytes());

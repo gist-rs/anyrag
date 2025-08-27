@@ -9,6 +9,8 @@ pub mod embedding;
 pub mod knowledge;
 pub mod pdf;
 pub mod rss;
+pub mod shared;
+pub mod sheet_faq;
 pub mod sheets;
 pub mod text;
 
@@ -17,6 +19,7 @@ pub use embedding::{embed_article, embed_faq, EmbeddingError};
 pub use knowledge::{export_for_finetuning, run_ingestion_pipeline, KnowledgeError};
 pub use pdf::{run_pdf_ingestion_pipeline, PdfSyncExtractor};
 pub use rss::{ingest_from_url, IngestError as RssIngestError};
+pub use sheet_faq::{ingest_faq_from_google_sheet, IngestSheetFaqError};
 pub use sheets::{
     ingest_from_google_sheet_url, sheet_url_to_export_url_and_table_name, IngestSheetError,
 };

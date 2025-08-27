@@ -8,8 +8,8 @@ use anyrag::{
     ingest::{
         articles::{insert_articles, Article as IngestArticle},
         create_articles_table_if_not_exists, embed_article, embed_faq, export_for_finetuning,
-        ingest_from_google_sheet_url, ingest_from_url, run_ingestion_pipeline,
-        run_pdf_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
+        ingest_faq_from_google_sheet, ingest_from_google_sheet_url, ingest_from_url,
+        run_ingestion_pipeline, run_pdf_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
         text::chunk_text,
         PdfSyncExtractor,
     },
@@ -26,7 +26,6 @@ use axum::{
     Json,
 };
 use axum_extra::extract::Multipart;
-use futures::{stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::hash::{Hash, Hasher};
@@ -80,6 +79,25 @@ pub struct SearchRequest {
     pub instruction: Option<String>,
     #[serde(default)]
     pub mode: SearchMode,
+}
+
+#[derive(Deserialize)]
+pub struct IngestSheetFaqRequest {
+    pub url: String,
+    #[serde(default)]
+    pub gid: Option<String>,
+    #[serde(default = "default_true")]
+    pub skip_header: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Serialize)]
+pub struct IngestSheetFaqResponse {
+    pub message: String,
+    pub ingested_faqs: usize,
 }
 
 // --- Helper Functions ---
@@ -201,6 +219,32 @@ pub async fn ingest_handler(
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
+pub async fn ingest_sheet_faq_handler(
+    State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<IngestSheetFaqRequest>,
+) -> Result<Json<ApiResponse<IngestSheetFaqResponse>>, AppError> {
+    info!(
+        "Received Sheet FAQ ingest request for URL: {} with gid: {:?}",
+        payload.url, payload.gid
+    );
+    let ingested_count = ingest_faq_from_google_sheet(
+        &app_state.sqlite_provider.db,
+        &payload.url,
+        payload.gid.as_deref(),
+        payload.skip_header,
+    )
+    .await?;
+
+    let response = IngestSheetFaqResponse {
+        message: "Sheet FAQ ingestion successful".to_string(),
+        ingested_faqs: ingested_count,
+    };
+    let debug_info =
+        json!({ "url": payload.url, "gid": payload.gid, "skip_header": payload.skip_header });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
 pub async fn ingest_text_handler(
     State(app_state): State<AppState>,
     debug_params: Query<DebugParams>,
@@ -253,22 +297,18 @@ pub async fn ingest_text_handler(
             anyhow::anyhow!("EMBEDDINGS_MODEL not set to auto-embed ingested text")
         })?;
 
-        stream::iter(new_article_ids)
-            .for_each_concurrent(10, |article_id| {
-                let db_clone = db.clone();
-                let api_url_clone = api_url.clone();
-                let model_clone = model.clone();
-                async move {
-                    match embed_article(&db_clone, &api_url_clone, &model_clone, article_id).await {
-                        Ok(_) => info!("Auto-embedded article ID: {}", article_id),
-                        Err(e) => error!(
-                            "Failed to auto-embed article ID: {}. Error: {}",
-                            article_id, e
-                        ),
-                    }
-                }
-            })
-            .await;
+        for article_id in &new_article_ids {
+            let db_clone = db.clone();
+            let api_url_clone = api_url.clone();
+            let model_clone = model.clone();
+            match embed_article(&db_clone, &api_url_clone, &model_clone, *article_id).await {
+                Ok(_) => info!("Auto-embedded article ID: {}", article_id),
+                Err(e) => error!(
+                    "Failed to auto-embed article ID: {}. Error: {}",
+                    article_id, e
+                ),
+            }
+        }
     }
 
     let message = if ingested_count > 0 {
@@ -504,19 +544,15 @@ pub async fn embed_new_handler(
     }
 
     let articles_to_embed_clone = articles_to_embed.clone();
-    stream::iter(articles_to_embed)
-        .for_each_concurrent(10, |article_id| {
-            let db = app_state.sqlite_provider.db.clone();
-            let api_url = api_url.clone();
-            let model = model.clone();
-            async move {
-                match embed_article(&db, &api_url, &model, article_id).await {
-                    Ok(_) => info!("Successfully embedded article ID: {article_id}"),
-                    Err(e) => error!("Failed to embed article ID: {article_id}. Error: {e}"),
-                }
-            }
-        })
-        .await;
+    for article_id in &articles_to_embed {
+        let db = app_state.sqlite_provider.db.clone();
+        let api_url = api_url.clone();
+        let model = model.clone();
+        match embed_article(&db, &api_url, &model, *article_id).await {
+            Ok(_) => info!("Successfully embedded article ID: {article_id}"),
+            Err(e) => error!("Failed to embed article ID: {article_id}. Error: {e}"),
+        }
+    }
 
     let response = EmbedNewResponse {
         message: format!("Successfully processed {embed_count} articles."),
@@ -781,19 +817,18 @@ pub async fn embed_faqs_new_handler(
     }
 
     let faqs_to_embed_clone = faqs_to_embed.clone();
-    stream::iter(faqs_to_embed)
-        .for_each_concurrent(10, |faq_id| {
-            let db = app_state.sqlite_provider.db.clone();
-            let api_url = api_url.clone();
-            let model = model.clone();
-            async move {
-                match embed_faq(&db, &api_url, &model, faq_id).await {
-                    Ok(_) => info!("Successfully embedded FAQ ID: {faq_id}"),
-                    Err(e) => error!("Failed to embed FAQ ID: {faq_id}. Error: {e}"),
-                }
+    for faq_id in &faqs_to_embed {
+        let db = app_state.sqlite_provider.db.clone();
+        let api_url = api_url.clone();
+        let model = model.clone();
+        match embed_faq(&db, &api_url, &model, *faq_id).await {
+            Ok(_) => info!("Successfully embedded FAQ ID: {faq_id}"),
+            Err(e) => {
+                // Log the error but continue processing other items.
+                error!("Failed to embed FAQ ID: {faq_id}. Error: {e}");
             }
-        })
-        .await;
+        }
+    }
 
     let response = EmbedNewResponse {
         message: format!("Successfully processed {embed_count} FAQs."),
