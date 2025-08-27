@@ -4,7 +4,10 @@ This crate provides a lightweight `axum` web server that exposes the `anyrag` li
 
 ## Features
 
-*   **RESTful API:** Provides an easy-to-use API for integrations.
+*   **RESTful API:** Exposes all core functionalities via a simple API.
+*   **Dynamic Sheet Querying:** Accepts Google Sheet URLs directly in prompts, ingesting and querying them on the fly.
+*   **Multi-Source Ingestion:** Endpoints for building a knowledge base from web pages, PDFs (via upload or URL), raw text, and structured Google Sheets.
+*   **RAG Endpoint:** A dedicated endpoint to ask questions against the knowledge base, using a hybrid search backend.
 *   **Containerized Deployment:** Includes a multi-stage `Dockerfile` for building a minimal, secure server image.
 *   **Asynchronous:** Built on top of Tokio for non-blocking, efficient request handling.
 *   **Highly Configurable:** Uses environment variables for easy configuration of prompts and providers.
@@ -149,7 +152,7 @@ This endpoint is for the core Natural Language to Query functionality.
 
 #### `POST /prompt`
 
-Translates a natural language prompt into a query, executes it against a data warehouse (e.g., BigQuery), and formats the result. It is highly configurable and can also handle direct questions or ingest data from Google Sheets on the fly.
+Translates a natural language prompt into a query, executes it, and formats the result. It can query a configured data warehouse (e.g., BigQuery) or, if a Google Sheet URL is detected in the prompt, it will dynamically ingest the sheet into a temporary SQLite table and query it instead.
 
 **Request Body:** An `ExecutePromptOptions` JSON object.
 
@@ -214,6 +217,25 @@ curl -X POST http://localhost:9090/ingest/pdf_url \
   }'
 ```
 
+#### `POST /ingest/sheet_faq`
+
+Ingests Q&A pairs directly from a public Google Sheet. It's designed to handle structured FAQ data and can recognize date columns (`start_at`, `end_at`) to create time-sensitive knowledge.
+
+**Request Body:** `{"url": "...", "gid": "...", "skip_header": true}`
+- `url`: The public URL of the Google Sheet.
+- `gid`: (Optional) The specific sheet/tab ID (the number after `gid=` in the URL).
+- `skip_header`: (Optional) Whether to skip the first row of the sheet. Defaults to `true`.
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/ingest/sheet_faq \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://docs.google.com/spreadsheets/d/your_sheet_id/edit",
+    "gid": "856666263"
+  }'
+```
+
 #### `POST /ingest/text`
 
 Ingests raw text directly from the request body. The server will automatically chunk the text into smaller, manageable pieces based on paragraphs and a size limit, then store them in the `articles` table for later embedding and search.
@@ -273,7 +295,7 @@ These endpoints are for searching the knowledge base.
 
 #### `POST /search/knowledge`
 
-**This is the primary RAG endpoint.** It takes a user's question, performs a semantic vector search to find the most relevant facts in the knowledge base, and then uses an LLM to synthesize a final, coherent answer based on that context.
+**This is the primary RAG endpoint.** It takes a user's question, performs a hybrid search (combining semantic vector search and keyword matching) to find the most relevant facts in the knowledge base, and then uses an LLM to synthesize a final, coherent answer based on that context.
 
 **Request Body:** `{"query": "...", "limit": 5, "instruction": "..."}`
 - `query`: The user's question.

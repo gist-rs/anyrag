@@ -1,22 +1,31 @@
 # `anyrag` Library
 
-This crate provides the core logic for two main functionalities:
-1.  **Text-to-Query:** Translating natural language prompts into executable queries (e.g., SQL) and executing them against data warehouses like Google BigQuery.
-2.  **RAG Pipeline:** A full pipeline for building a self-improving knowledge base from web URLs and using it to answer questions via Retrieval-Augmented Generation (RAG).
+This crate provides the core logic for a comprehensive natural language data interaction and RAG platform. Its main functionalities include:
+1.  **Natural Language to Data:** Translating prompts into executable queries for data warehouses like Google BigQuery, or dynamically ingesting and querying data from sources like Google Sheets.
+2.  **RAG Pipeline:** A complete system for building a self-improving knowledge base from diverse sources (web pages, PDFs, text, and structured sheets) and answering questions using a hybrid search RAG model.
 
-It leverages a configurable AI provider for natural language processing and integrates with different storage backends like Google BigQuery and local SQLite databases.
+It uses a pluggable AI provider for NLP and integrates with both remote (BigQuery) and local (SQLite) storage backends.
 
 This library is the foundation of the `anyrag` workspace and is used by the `anyrag-server` crate to expose its functionality over a REST API.
 
 ## Features
 
-*   **Natural Language to Query:** Converts plain English prompts into executable queries (e.g., SQL).
+*   **Natural Language to Query:**
+    *   Converts plain English prompts into executable SQL queries.
+    *   Can dynamically ingest and query Google Sheets when a URL is provided in the prompt.
+    *   Automatically injects the current date into the AI's context for handling time-sensitive questions.
 *   **Knowledge Base Pipeline:** A complete "virtuous cycle" for RAG:
-    *   **Ingest & Cache:** Fetches clean markdown from any URL and caches it.
-    *   **Distill & Augment:** Uses a two-pass LLM process to extract explicit FAQs and generate new ones from raw text.
+    *   **Multi-Source Ingestion:** Ingests and processes content from:
+        -   Web URLs (fetching and cleaning Markdown).
+        -   PDF files (from uploads or direct URLs).
+        -   Google Sheets (for structured, time-sensitive FAQs).
+        -   Raw text (with automatic chunking).
+    *   **Distill & Augment:** Uses a two-pass LLM process to extract explicit FAQs and generate new ones from unstructured content.
     *   **Store & Embed:** Saves structured Q&A pairs into a local SQLite database and generates vector embeddings for semantic search.
     *   **Export for Fine-tuning:** Generates a dataset in the correct format for fine-tuning your base LLM.
-*   **Retrieval-Augmented Generation (RAG):** Synthesizes answers to user questions by retrieving relevant facts from the knowledge base.
+*   **Retrieval-Augmented Generation (RAG):**
+    *   Synthesizes answers to user questions by retrieving relevant facts from the knowledge base.
+    *   Uses a hybrid search model, combining vector similarity search and keyword matching for robust context retrieval.
 *   **Pluggable Providers:** Supports different AI and storage providers (e.g., Gemini, local models, BigQuery, SQLite).
 *   **Robust and Asynchronous:** Built with Tokio for efficient, non-blocking I/O.
 

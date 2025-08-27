@@ -1,16 +1,30 @@
 # AnyRag: Your Self-Improving Knowledge Base and RAG Engine
 
-This project is a comprehensive Rust-based platform for building a self-improving knowledge base and interacting with your data using natural language.
+This project is a comprehensive Rust-based platform for building a self-improving knowledge base and interacting with your data—from data warehouses to live Google Sheets—using natural language.
 
 ## Core Features
 
--   **Natural Language to SQL:** Translates user prompts into executable SQL queries for providers like Google BigQuery, allowing you to "talk" to your databases.
--   **Self-Improving Knowledge Base:** Implements a "virtuous cycle" for RAG:
-    1.  **Ingest:** Fetches and cleans content from any URL.
-    2.  **Distill & Augment:** Uses an LLM to automatically extract explicit Q&A pairs and generate new ones from unstructured text.
-    3.  **Store:** Saves the structured knowledge into a local SQLite database, ready for retrieval.
-    4.  **Export:** Generates a fine-tuning dataset from the knowledge base, allowing you to improve your base LLM, which in turn leads to better data extraction.
--   **Retrieval-Augmented Generation (RAG):** Provides an API endpoint to ask questions against the knowledge base. It retrieves the most relevant facts using vector search and uses an LLM to synthesize a coherent, accurate answer.
+-   **Natural Language to Data:**
+    -   **Text-to-SQL:** Translates prompts into executable SQL queries for providers like Google BigQuery.
+    -   **Dynamic Google Sheet Querying:** Automatically ingests a Google Sheet from a URL within a prompt and answers questions about its content on the fly.
+    -   **Context-Aware:** Automatically injects the current date and time into the context, enabling time-sensitive questions like "What is the current hobby?".
+
+-   **Comprehensive Knowledge Base Pipeline:**
+    -   **Multi-Source Ingestion:** Builds a knowledge base from various sources:
+        -   **Web URLs:** Fetches and cleans content from any webpage.
+        -   **PDFs:** Ingests documents directly from file uploads or URLs.
+        -   **Google Sheets:** Extracts structured Q&A pairs directly from sheets, respecting date ranges (`start_at`, `end_at`).
+        -   **Raw Text:** Ingests and automatically chunks plain text.
+    -   **AI-Powered Distillation:** Uses an LLM to automatically extract explicit Q&A pairs and generate new ones from unstructured text.
+    -   **Vector Embeddings:** Generates embeddings for semantic search, enabling the RAG functionality.
+
+-   **Retrieval-Augmented Generation (RAG):**
+    -   Provides an API to ask questions against the knowledge base.
+    -   Uses a hybrid search (vector + keyword) to find the most relevant facts.
+    -   Synthesizes coherent, accurate answers using an LLM based on the retrieved context.
+
+-   **Self-Improvement Cycle:**
+    -   **Fine-Tuning Export:** Generates a dataset from the knowledge base in the correct format for fine-tuning your base LLM, which in turn improves future data extraction.
 
 ## API Response Structure
 
