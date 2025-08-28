@@ -8,8 +8,16 @@ use tracing::debug;
 // --- Gemini-specific request and response structures ---
 
 #[derive(Debug, Serialize)]
+struct GenerationConfig {
+    #[serde(rename = "maxOutputTokens")]
+    max_output_tokens: i32,
+}
+
+#[derive(Debug, Serialize)]
 struct GeminiRequest {
     contents: Vec<Content>,
+    #[serde(rename = "generationConfig")]
+    generation_config: GenerationConfig,
 }
 
 #[derive(Debug, Serialize)]
@@ -28,8 +36,10 @@ struct GeminiResponse {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
 struct Candidate {
     content: ContentResponse,
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -81,6 +91,9 @@ impl AiProvider for GeminiProvider {
                     text: combined_prompt,
                 }],
             }],
+            generation_config: GenerationConfig {
+                max_output_tokens: 8192,
+            },
         };
 
         debug!(payload = ?request_body, "--> Sending request to Gemini");
@@ -104,10 +117,23 @@ impl AiProvider for GeminiProvider {
             .await
             .map_err(PromptError::AiDeserialization)?;
 
-        let raw_response = gemini_response
+        let first_candidate = gemini_response
             .candidates
             .first()
-            .and_then(|c| c.content.parts.first())
+            .ok_or_else(|| PromptError::AiApi("Gemini API returned no candidates".to_string()))?;
+
+        if let Some(reason) = &first_candidate.finish_reason {
+            if reason != "STOP" {
+                return Err(PromptError::AiApi(format!(
+                    "Gemini generation finished for a non-standard reason: {reason}. The response may be incomplete."
+                )));
+            }
+        }
+
+        let raw_response = first_candidate
+            .content
+            .parts
+            .first()
             .map(|p| p.text.clone())
             .unwrap_or_default();
 

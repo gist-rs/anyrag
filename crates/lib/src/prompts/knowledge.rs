@@ -18,19 +18,28 @@ pub const KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an expert data e
     -   The `faqs` key should contain a list of all found explicit FAQs.
     -   The `content_chunks` key should contain a list of all other informational content sections.
 
-# JSON Output Schema:
+# JSON Output Schema Example:
 {
   "faqs": [
     {
-      "question": "The exact question found on the page.",
-      "answer": "The corresponding answer found on the page. If this answer conflicts with the main content, prefer the main content's data.",
+      "question": "First question found on the page.",
+      "answer": "The corresponding answer.",
+      "is_explicit": true
+    },
+    {
+      "question": "Second question found on the page.",
+      "answer": "The second answer.",
       "is_explicit": true
     }
   ],
   "content_chunks": [
     {
-      "topic": "A concise title or topic for the content chunk (e.g., 'How to Redeem Points', 'Campaign Conditions').",
-      "content": "The full text of the informational content chunk."
+      "topic": "Topic for the first informational chunk.",
+      "content": "The full text of the first informational content chunk."
+    },
+    {
+      "topic": "Topic for the second informational chunk.",
+      "content": "The full text of the second informational content chunk."
     }
   ]
 }

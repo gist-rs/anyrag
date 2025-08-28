@@ -211,11 +211,31 @@ pub async fn distill_and_augment(
         .generate(KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT, &user_prompt)
         .await?;
     debug!("LLM extraction response: {}", llm_response);
-    let mut extracted_data: ExtractedKnowledge = serde_json::from_str(&llm_response)?;
+    let cleaned_response = llm_response
+        .trim()
+        .strip_prefix("```json")
+        .unwrap_or(&llm_response)
+        .strip_suffix("```")
+        .unwrap_or(&llm_response)
+        .trim();
+    let mut extracted_data: ExtractedKnowledge = serde_json::from_str(cleaned_response)?;
+    let original_chunk_count = extracted_data.content_chunks.len();
+    extracted_data
+        .content_chunks
+        .retain(|chunk| chunk.content.chars().any(|c| c.is_alphabetic()));
+    let cleaned_chunk_count = extracted_data.content_chunks.len();
+
+    if original_chunk_count > cleaned_chunk_count {
+        info!(
+            "Filtered out {} low-quality or separator-only chunks.",
+            original_chunk_count - cleaned_chunk_count
+        );
+    }
+
     info!(
-        "Pass 1 complete. Found {} explicit FAQs and {} content chunks.",
+        "Pass 1 complete. Found {} explicit FAQs and {} valid content chunks.",
         extracted_data.faqs.len(),
-        extracted_data.content_chunks.len()
+        cleaned_chunk_count
     );
 
     if !extracted_data.content_chunks.is_empty() {
@@ -241,7 +261,14 @@ pub async fn distill_and_augment(
             .generate(AUGMENTATION_SYSTEM_PROMPT, &augmentation_user_prompt)
             .await?;
 
-        match serde_json::from_str::<AugmentationResponse>(&llm_response) {
+        let cleaned_response = llm_response
+            .trim()
+            .strip_prefix("```json")
+            .unwrap_or(&llm_response)
+            .strip_suffix("```")
+            .unwrap_or(&llm_response)
+            .trim();
+        match serde_json::from_str::<AugmentationResponse>(cleaned_response) {
             Ok(parsed) => {
                 let mut augmented_faqs = Vec::new();
                 for aug_faq in parsed.augmented_faqs {

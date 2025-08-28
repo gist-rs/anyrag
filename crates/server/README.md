@@ -74,6 +74,8 @@ This example demonstrates the full end-to-end process of ingesting a URL, embedd
 ```sh
 # Ensure your .env file is configured, especially for the AI provider
 RUST_LOG=info cargo run -p anyrag-server --example knowledge_prompt
+RUST_LOG=info cargo run -p anyrag-server --example sheet_faq_date_sensitive
+RUST_LOG=info cargo run -p anyrag-server --example sheet_generic_prompt
 ```
 
 ## Docker Deployment
@@ -161,7 +163,7 @@ Translates a natural language prompt into a query, executes it, and formats the 
 curl -X POST http://localhost:9090/prompt \
   -H "Content-Type: application/json" \
   -d '{
-    "prompt": "tell me a joke" 
+    "prompt": "tell me a joke"
   }'
 ```
 
