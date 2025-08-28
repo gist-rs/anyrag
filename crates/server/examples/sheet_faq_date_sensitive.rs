@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     info!("Environment variables loaded.");
 
-    let db_path = "anyrag_sheet_faq_date.db";
+    let db_path = "db/anyrag_sheet_faq_date.db";
     cleanup_db(db_path).await?;
 
     // Set DB_URL so the app state uses the same DB as the cleanup function.

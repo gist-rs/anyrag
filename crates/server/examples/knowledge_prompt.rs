@@ -81,7 +81,7 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     info!("Environment variables loaded.");
 
-    let db_path = "anyrag.db";
+    let db_path = "db/anyrag.db";
     cleanup_db(db_path).await?;
 
     let config =

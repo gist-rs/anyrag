@@ -67,7 +67,7 @@ pub fn get_config() -> Result<Config, ConfigError> {
     let project_id = env::var("BIGQUERY_PROJECT_ID")
         .map_err(|_| ConfigError::Missing("BIGQUERY_PROJECT_ID".to_string()))?;
 
-    let db_url = env::var("DB_URL").unwrap_or_else(|_| "anyrag.db".to_string());
+    let db_url = env::var("DB_URL").unwrap_or_else(|_| "db/anyrag.db".to_string());
 
     let port = match env::var("PORT") {
         Ok(val) => val
