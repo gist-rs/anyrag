@@ -3,6 +3,9 @@
 //! This crate provides a client to convert natural language prompts into executable queries
 //! (e.g., SQL) using a configurable AI provider and execute them against a storage provider.
 
+#[cfg(feature = "graph_db")]
+pub mod graph;
+
 pub mod errors;
 pub mod ingest;
 pub mod prompts;

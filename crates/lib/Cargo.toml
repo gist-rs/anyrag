@@ -18,7 +18,7 @@ tracing = { workspace = true }
 serde_json = { workspace = true }
 async-trait.workspace = true
 dyn-clone = { workspace = true }
-chrono = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
 turso = { workspace = true }
 csv = { workspace = true }
 rss = { workspace = true }
@@ -27,14 +27,21 @@ futures = "0.3"
 md5 = "0.8"
 pdf = { version = "0.9.0" }
 anyhow.workspace = true
-
+indradb-lib = { version = "5.0.0", optional = true, features = [
+    "rocksdb-datastore",
+] }
+uuid = { version = "1.18.0", features = ["v4", "serde", "v5"], optional = true }
 
 [dev-dependencies]
 dotenvy = "0.15.7"
 httpmock = "0.7.0"
 tracing-subscriber = { workspace = true }
-tempfile = "3.20.0"
+tempfile = "3.21.0"
 anyhow = { workspace = true }
+
+[features]
+default = ["graph_db"]
+graph_db = ["dep:indradb-lib", "dep:uuid"]
 
 [[test]]
 name = "prompts"

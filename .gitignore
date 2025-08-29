@@ -8,3 +8,4 @@ output.json
 *.db-wal
 *.db-shm
 db/
+indradb
