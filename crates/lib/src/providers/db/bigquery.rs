@@ -1,5 +1,3 @@
-#![cfg(feature = "bigquery")]
-
 use crate::{errors::PromptError, providers::db::storage::Storage};
 use async_trait::async_trait;
 use gcp_bigquery_client::{
