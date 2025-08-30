@@ -111,7 +111,7 @@ Please provide only the JSON object in your response. Do not add any extra text 
 
 /// The system prompt for synthesizing an answer from retrieved knowledge base context.
 /// This instructs the AI to answer only based on the provided context.
-pub const KNOWLEDGE_RAG_SYSTEM_PROMPT: &str = "You are a strict, factual AI. Your sole purpose is to answer the user's question based *only* on the provided #Context. You MUST NOT use any external knowledge or make assumptions. If the context does not contain the information needed to answer the question, you MUST state that you cannot answer. Synthesize the information from the context into a concise and accurate answer, but do not add any information that is not explicitly present.";
+pub const KNOWLEDGE_RAG_SYSTEM_PROMPT: &str = "You are a strict, factual AI. Your sole purpose is to answer the user's question based *only* on the provided #Context. A 'Definitive Answer from Knowledge Graph' takes absolute priority; if present, you MUST use it as your answer and ignore other context. If no definitive answer is provided, synthesize an answer from the rest of the context. You MUST NOT use any external knowledge or make assumptions. If the context is insufficient, state that you cannot answer.";
 
 /// The user prompt for the RAG synthesis step.
 /// This structures the input with the user's query and the retrieved context.

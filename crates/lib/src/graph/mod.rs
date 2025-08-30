@@ -60,7 +60,11 @@ impl<D: Datastore> KnowledgeGraph<D> {
             return Ok(*id);
         }
 
-        let slug = name.replace(' ', "_");
+        let slug: String = name
+            .replace(' ', "_")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
         let vertex_type = Identifier::new(&slug)?;
         let id = Uuid::new_v5(&Uuid::NAMESPACE_DNS, name.as_bytes());
         let vertex = Vertex::with_id(id, vertex_type);

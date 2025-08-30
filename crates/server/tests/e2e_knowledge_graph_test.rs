@@ -189,7 +189,7 @@ async fn test_kg_provides_more_precise_answer() -> Result<()> {
         Ok(())
     }
 
-    let subject = "SuperWidget X500";
+    let subject = "SuperWidget_X500";
     let query_full_question = "What is the power source for the SuperWidget X500?";
     let generic_answer = "It uses a standard rechargeable battery pack";
     let precise_kg_answer = "The primary power source is the TX300 Solar Array";

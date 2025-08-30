@@ -76,6 +76,7 @@ This example demonstrates the full end-to-end process of ingesting a URL, embedd
 RUST_LOG=info cargo run -p anyrag-server --example knowledge_prompt
 RUST_LOG=info cargo run -p anyrag-server --example sheet_faq_date_sensitive
 RUST_LOG=info cargo run -p anyrag-server --example sheet_generic_prompt
+RUST_LOG=info cargo run -p anyrag-server --example knowledge_graph_precision
 ```
 
 ## Docker Deployment
