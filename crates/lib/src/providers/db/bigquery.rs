@@ -1,9 +1,10 @@
+use crate::types::{FieldType as AnyragFieldType, TableField, TableSchema as AnyragTableSchema};
 use crate::{errors::PromptError, providers::db::storage::Storage};
 use async_trait::async_trait;
 use gcp_bigquery_client::{
     model::{
-        query_request::QueryRequest, query_response::ResultSet, table::Table,
-        table_schema::TableSchema,
+        field_type::FieldType as BqFieldType, query_request::QueryRequest,
+        query_response::ResultSet, table::Table, table_schema::TableSchema as BqTableSchema,
     },
     Client,
 };
@@ -21,7 +22,7 @@ use tracing::debug;
 pub struct BigQueryProvider {
     client: Client,
     project_id: String,
-    schema_cache: Arc<RwLock<HashMap<String, Arc<TableSchema>>>>,
+    schema_cache: Arc<RwLock<HashMap<String, Arc<AnyragTableSchema>>>>,
 }
 
 impl BigQueryProvider {
@@ -35,6 +36,34 @@ impl BigQueryProvider {
             project_id,
             schema_cache: Arc::new(RwLock::new(HashMap::new())),
         })
+    }
+
+    /// Converts a BigQuery-specific schema to the provider-agnostic `AnyragTableSchema`.
+    fn convert_schema(bq_schema: &BqTableSchema) -> AnyragTableSchema {
+        let fields = bq_schema
+            .fields
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|bq_field| TableField {
+                name: bq_field.name.clone(),
+                r#type: match bq_field.r#type {
+                    BqFieldType::String => AnyragFieldType::String,
+                    BqFieldType::Integer => AnyragFieldType::Integer,
+                    BqFieldType::Float => AnyragFieldType::Float,
+                    BqFieldType::Boolean => AnyragFieldType::Boolean,
+                    BqFieldType::Timestamp => AnyragFieldType::Timestamp,
+                    BqFieldType::Date => AnyragFieldType::Date,
+                    BqFieldType::Bytes => AnyragFieldType::Bytes,
+                    BqFieldType::Json => AnyragFieldType::Json,
+                    // Default to String for complex/unhandled types like GEOGRAPHY, etc.
+                    _ => AnyragFieldType::String,
+                },
+                description: bq_field.description.clone(),
+            })
+            .collect();
+
+        AnyragTableSchema { fields }
     }
 }
 
@@ -98,7 +127,10 @@ impl Storage for BigQueryProvider {
     }
 
     /// Retrieves the schema for a given BigQuery table.
-    async fn get_table_schema(&self, table_name: &str) -> Result<Arc<TableSchema>, PromptError> {
+    async fn get_table_schema(
+        &self,
+        table_name: &str,
+    ) -> Result<Arc<AnyragTableSchema>, PromptError> {
         if let Some(schema) = self.schema_cache.read().await.get(table_name) {
             return Ok(schema.clone());
         }
@@ -120,8 +152,11 @@ impl Storage for BigQueryProvider {
             .await
             .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
 
-        let schema = table.schema;
-        let schema_arc = Arc::new(schema);
+        // Convert the BQ-specific schema to our generic, provider-agnostic schema.
+        let bq_schema = table.schema;
+        let anyrag_schema = Self::convert_schema(&bq_schema);
+        let schema_arc = Arc::new(anyrag_schema);
+
         self.schema_cache
             .write()
             .await

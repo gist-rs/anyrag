@@ -26,8 +26,8 @@ use crate::prompts::core::{
     DEFAULT_FORMAT_USER_PROMPT, DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT,
     SQLITE_QUERY_USER_PROMPT,
 };
+use crate::types::TableSchema;
 use chrono::Utc;
-use gcp_bigquery_client::model::table_schema::TableSchema;
 use serde_json::Value;
 use tracing::{error, info};
 
@@ -315,25 +315,22 @@ impl PromptClient {
     }
 
     fn format_schema_for_prompt(schema: &TableSchema) -> String {
-        if let Some(fields) = &schema.fields {
-            fields
-                .iter()
-                .map(|field| {
-                    let mut field_str = format!(
-                        "{field_name} {field_type:?}",
-                        field_name = field.name,
-                        field_type = field.r#type
-                    );
-                    if let Some(desc) = &field.description {
-                        field_str.push_str(&format!(" ({desc})"));
-                    }
-                    field_str
-                })
-                .collect::<Vec<String>>()
-                .join(", ")
-        } else {
-            "".to_string()
-        }
+        schema
+            .fields
+            .iter()
+            .map(|field| {
+                let mut field_str = format!(
+                    "{field_name} {field_type:?}",
+                    field_name = field.name,
+                    field_type = field.r#type
+                );
+                if let Some(desc) = &field.description {
+                    field_str.push_str(&format!(" ({desc})"));
+                }
+                field_str
+            })
+            .collect::<Vec<String>>()
+            .join(", ")
     }
 
     /// Formats the raw query result using the AI provider if an instruction is given.

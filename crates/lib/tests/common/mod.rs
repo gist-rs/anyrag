@@ -6,9 +6,9 @@
 
 use anyrag::providers::ai::{gemini::GeminiProvider, local::LocalAiProvider, AiProvider};
 use anyrag::providers::db::storage::Storage;
+use anyrag::types::TableSchema;
 use async_trait::async_trait;
 use dotenvy::dotenv;
-use gcp_bigquery_client::model::table_schema::TableSchema;
 use std::env;
 use std::fmt::Debug;
 use std::sync::{Arc, Once, RwLock};
@@ -80,7 +80,7 @@ impl Storage for MockStorageProvider {
         &self,
         _table_name: &str,
     ) -> Result<Arc<TableSchema>, anyrag::PromptError> {
-        Ok(Arc::new(TableSchema::new(vec![])))
+        Ok(Arc::new(TableSchema::default()))
     }
 }
 

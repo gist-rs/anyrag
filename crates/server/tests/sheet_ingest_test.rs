@@ -5,6 +5,7 @@
 //! the entire workflow from URL detection to final, formatted output.
 
 use anyhow::Result;
+use anyrag::types::TableSchema;
 use anyrag::{
     providers::{
         ai::local::LocalAiProvider,
@@ -13,7 +14,6 @@ use anyrag::{
     PromptClient, PromptClientBuilder, PromptError,
 };
 use async_trait::async_trait;
-use gcp_bigquery_client::model::table_schema::TableSchema;
 use httpmock::prelude::*;
 use reqwest::Client;
 use serde_json::json;
@@ -51,7 +51,7 @@ impl Storage for MockStorageProvider {
     }
     async fn get_table_schema(&self, _table_name: &str) -> Result<Arc<TableSchema>, PromptError> {
         // The schema isn't needed for the formatting step, so an empty one is fine.
-        Ok(Arc::new(TableSchema::new(vec![])))
+        Ok(Arc::new(TableSchema::default()))
     }
 }
 

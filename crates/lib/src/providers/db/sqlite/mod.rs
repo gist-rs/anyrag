@@ -1,3 +1,4 @@
+use crate::types::{FieldType, TableField, TableSchema};
 use crate::{
     errors::PromptError,
     providers::db::storage::{KeywordSearch, Storage, VectorSearch},
@@ -5,9 +6,6 @@ use crate::{
     types::SearchResult,
 };
 use async_trait::async_trait;
-use gcp_bigquery_client::model::{
-    field_type::FieldType, table_field_schema::TableFieldSchema, table_schema::TableSchema,
-};
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -279,7 +277,7 @@ impl Storage for SqliteProvider {
             if let (Ok(TursoValue::Text(name)), Ok(TursoValue::Text(type_str))) =
                 (row.get_value(1), row.get_value(2))
             {
-                let bq_type = match type_str.to_uppercase().as_str() {
+                let field_type = match type_str.to_uppercase().as_str() {
                     "INTEGER" => FieldType::Integer,
                     "TEXT" => FieldType::String,
                     "REAL" => FieldType::Float,
@@ -290,14 +288,10 @@ impl Storage for SqliteProvider {
                     _ => FieldType::String,
                 };
 
-                fields.push(TableFieldSchema {
+                fields.push(TableField {
                     name,
-                    r#type: bq_type,
-                    mode: Some("NULLABLE".to_string()),
-                    fields: None,
-                    description: None, // Keep it simple, no format hints.
-                    categories: None,
-                    policy_tags: None,
+                    r#type: field_type,
+                    description: None, // SQLite PRAGMA doesn't provide column comments.
                 });
             }
         }
@@ -310,9 +304,7 @@ impl Storage for SqliteProvider {
 
         info!(table_name = %table_name, "Successfully fetched schema with {} columns.", fields.len());
 
-        let schema = Arc::new(TableSchema {
-            fields: Some(fields),
-        });
+        let schema = Arc::new(TableSchema { fields });
 
         self.schema_cache
             .write()

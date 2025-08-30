@@ -200,3 +200,31 @@ impl Rerankable for SearchResult {
         &self.description
     }
 }
+
+/// Represents the data type of a field in a table schema.
+/// This is a provider-agnostic representation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FieldType {
+    String,
+    Integer,
+    Float,
+    Boolean,
+    Timestamp,
+    Date,
+    Bytes,
+    Json,
+}
+
+/// Represents a single field (column) in a table schema.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableField {
+    pub name: String,
+    pub r#type: FieldType,
+    pub description: Option<String>,
+}
+
+/// Represents the schema of a table in a provider-agnostic way.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TableSchema {
+    pub fields: Vec<TableField>,
+}
