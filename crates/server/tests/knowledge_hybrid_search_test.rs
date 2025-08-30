@@ -12,11 +12,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 use turso::{params, Builder};
 
-// Include the binary's main source file to access its components.
-#[path = "../src/main.rs"]
-mod main;
-
-use main::types::ApiResponse;
+use common::main::types::ApiResponse;
 
 /// A helper to manually insert and embed a FAQ into the database.
 async fn seed_faq(db_path: &Path, question: &str, answer: &str, vector: Vec<f32>) -> Result<()> {

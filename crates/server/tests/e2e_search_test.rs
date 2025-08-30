@@ -12,12 +12,7 @@ use httpmock::Method;
 use serde_json::{json, Value};
 use tracing::info;
 
-// Include the binary's main source file to access its components.
-// This is necessary because integration tests cannot directly access `main.rs`.
-#[path = "../src/main.rs"]
-mod main;
-
-use main::types::ApiResponse;
+use common::main::types::ApiResponse;
 
 #[tokio::test]
 async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {

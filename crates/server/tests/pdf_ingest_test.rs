@@ -17,11 +17,7 @@ use httpmock::Method;
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str};
 use serde_json::{json, Value};
 
-// Include the binary's main source file to access its components.
-// This is necessary because integration tests cannot directly access `main.rs`.
-#[path = "../src/main.rs"]
-mod main;
-
+use crate::common::main;
 use main::types::ApiResponse;
 
 /// Generates a simple PDF with a specific messy sentence.

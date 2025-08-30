@@ -13,11 +13,7 @@ use serde_json::json;
 use tracing::info;
 use turso::Value as TursoValue;
 
-// Include the binary's main source file to access its components.
-#[path = "../src/main.rs"]
-mod main;
-
-use main::{handlers::PromptResponse, types::ApiResponse};
+use common::main::{handlers::PromptResponse, types::ApiResponse};
 
 #[tokio::test]
 async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {

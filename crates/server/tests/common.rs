@@ -17,7 +17,7 @@
 // available to the test suite under the `main` namespace. This is a standard
 // pattern for testing Rust binaries.
 #[path = "../src/main.rs"]
-mod main;
+pub mod main;
 
 use anyhow::Result;
 use anyrag::{
@@ -112,7 +112,7 @@ impl TestApp {
 
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr: SocketAddr = listener.local_addr()?;
-        let address = format!("http://{}", addr);
+        let address = format!("http://{addr}");
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let server_handle = tokio::spawn(async move {

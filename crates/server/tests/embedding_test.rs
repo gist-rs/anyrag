@@ -12,11 +12,7 @@ use httpmock::Method;
 use serde_json::json;
 use turso::Value as TursoValue;
 
-// Include the binary's main source file to access its components.
-#[path = "../src/main.rs"]
-mod main;
-
-use main::types::ApiResponse;
+use common::main::types::ApiResponse;
 
 #[tokio::test]
 async fn test_embed_and_search_flow() -> Result<()> {
