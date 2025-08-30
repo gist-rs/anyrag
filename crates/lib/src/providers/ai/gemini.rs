@@ -16,8 +16,8 @@ struct GenerationConfig {
 #[derive(Debug, Serialize)]
 struct GeminiRequest {
     contents: Vec<Content>,
-    #[serde(rename = "generationConfig")]
-    generation_config: GenerationConfig,
+    #[serde(rename = "generationConfig", skip_serializing_if = "Option::is_none")]
+    generation_config: Option<GenerationConfig>,
 }
 
 #[derive(Debug, Serialize)]
@@ -91,9 +91,7 @@ impl AiProvider for GeminiProvider {
                     text: combined_prompt,
                 }],
             }],
-            generation_config: GenerationConfig {
-                max_output_tokens: 8192,
-            },
+            generation_config: None,
         };
 
         debug!(payload = ?request_body, "--> Sending request to Gemini");
