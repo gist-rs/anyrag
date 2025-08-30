@@ -26,6 +26,7 @@ use axum::{
     Json,
 };
 use axum_extra::extract::Multipart;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::hash::{Hash, Hasher};
@@ -837,4 +838,46 @@ pub async fn embed_faqs_new_handler(
     let debug_info =
         json!({ "limit": limit, "found": embed_count, "embedded_ids": faqs_to_embed_clone });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+// --- Knowledge Graph Payloads ---
+
+#[derive(Deserialize)]
+pub struct KnowledgeGraphSearchRequest {
+    pub subject: String,
+    pub predicate: String,
+}
+
+#[derive(Serialize)]
+pub struct KnowledgeGraphSearchResponse {
+    pub object: Option<String>,
+}
+
+// --- Knowledge Graph Handler ---
+
+pub async fn knowledge_graph_search_handler(
+    State(app_state): State<AppState>,
+    Json(payload): Json<KnowledgeGraphSearchRequest>,
+) -> Result<Json<ApiResponse<KnowledgeGraphSearchResponse>>, AppError> {
+    info!(
+        "Received knowledge graph search for subject: '{}', predicate: '{}'",
+        payload.subject, payload.predicate
+    );
+
+    let object = {
+        let kg = app_state
+            .knowledge_graph
+            .read()
+            .map_err(|_| AppError::Internal(anyhow::anyhow!("Failed to acquire KG read lock")))?;
+        kg.get_fact_as_of(&payload.subject, &payload.predicate, Utc::now())
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge graph query failed: {e}")))?
+    };
+
+    let response = KnowledgeGraphSearchResponse { object };
+
+    // For simplicity, we are not including debug info in this handler for now.
+    Ok(Json(ApiResponse {
+        debug: None,
+        result: response,
+    }))
 }

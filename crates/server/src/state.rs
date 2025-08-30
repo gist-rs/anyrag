@@ -1,11 +1,12 @@
 use anyrag::{
+    graph::types::MemoryKnowledgeGraph,
     providers::{
         ai::{gemini::GeminiProvider, local::LocalAiProvider},
         db::sqlite::SqliteProvider,
     },
     PromptClient, PromptClientBuilder,
 };
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use super::config::Config;
 
@@ -20,6 +21,7 @@ pub struct AppState {
     pub query_user_prompt_template: Option<String>,
     pub format_system_prompt_template: Option<String>,
     pub format_user_prompt_template: Option<String>,
+    pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
 }
 
 /// Builds the shared application state from the configuration.
@@ -87,5 +89,6 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
         query_user_prompt_template: config.query_user_prompt_template,
         format_system_prompt_template: config.format_system_prompt_template,
         format_user_prompt_template: config.format_user_prompt_template,
+        knowledge_graph: Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory())),
     })
 }

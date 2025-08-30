@@ -16,11 +16,12 @@
 // By including `main.rs`, we make the binary's modules (like `state` and `router`)
 // available to the test suite under the `main` namespace. This is a standard
 // pattern for testing Rust binaries.
-#[path = "../../src/main.rs"]
+#[path = "../src/main.rs"]
 pub mod main;
 
 use anyhow::Result;
 use anyrag::{
+    graph::types::MemoryKnowledgeGraph,
     ingest::articles::CREATE_ARTICLES_TABLE_SQL,
     providers::{
         ai::local::LocalAiProvider,
@@ -32,7 +33,11 @@ use anyrag::{
 use axum::serve;
 use httpmock::MockServer;
 use reqwest::Client;
-use std::{net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 use tempfile::NamedTempFile;
 use tokio::{net::TcpListener, task::JoinHandle};
 
@@ -48,6 +53,7 @@ pub struct TestApp {
     pub client: Client,
     pub mock_server: MockServer,
     pub db_path: PathBuf,
+    pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
     _db_file: NamedTempFile,
     _server_handle: JoinHandle<()>,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
@@ -101,10 +107,14 @@ impl TestApp {
                 .build()?,
         );
 
+        // Initialize the knowledge graph for the test application state.
+        let knowledge_graph = Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory()));
+
         // Build the application state, using mocks for external services.
         let app_state = main::state::AppState {
             prompt_client,
             sqlite_provider,
+            knowledge_graph: knowledge_graph.clone(),
             embeddings_api_url: Some(mock_server.url("/v1/embeddings")),
             embeddings_model: Some("mock-embedding-model".to_string()),
             ..Default::default()
@@ -133,6 +143,7 @@ impl TestApp {
             client: Client::new(),
             mock_server,
             db_path,
+            knowledge_graph,
             _db_file: db_file,
             _server_handle: server_handle,
             shutdown_tx: Some(shutdown_tx),
@@ -174,6 +185,7 @@ impl Default for main::state::AppState {
             sqlite_provider: Arc::new(
                 futures::executor::block_on(SqliteProvider::new(":memory:")).unwrap(),
             ),
+            knowledge_graph: Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory())),
             embeddings_api_url: None,
             embeddings_model: None,
             query_system_prompt_template: None,

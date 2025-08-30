@@ -34,10 +34,12 @@ futures = { workspace = true }
 dotenvy = { workspace = true }
 anyhow = { workspace = true }
 reqwest = { workspace = true, features = ["json", "multipart"] }
+chrono.workspace = true
 
 [features]
-default = ["bigquery"]
+default = ["bigquery", "graph_db"]
 bigquery = ["anyrag/bigquery"]
+graph_db = ["anyrag/graph_db"]
 
 [dev-dependencies]
 async-trait = { workspace = true }

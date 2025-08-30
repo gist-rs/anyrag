@@ -29,6 +29,10 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/search/knowledge", post(knowledge_search_handler))
         .route("/knowledge/ingest", post(knowledge_ingest_handler))
         .route("/knowledge/export", get(knowledge_export_handler))
+        .route(
+            "/search/knowledge_graph",
+            post(knowledge_graph_search_handler),
+        )
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
 }
