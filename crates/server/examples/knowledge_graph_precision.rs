@@ -1,27 +1,25 @@
-//! Example: Demonstrating Knowledge Graph Precision
+//! Example: Demonstrating Knowledge Graph Precision (Harry Potter Edition)
 //!
-//! This example showcases how the Knowledge Graph can override or augment
-//! information from the general knowledge base to provide more precise,
-//! definitive answers.
+//! This example showcases how the Knowledge Graph can provide precise, time-sensitive
+//! answers that override more generic information from the standard knowledge base.
 //!
 //! # Workflow:
-//! 1.  A generic, less-specific answer is seeded into the main `faq_kb` database table.
-//! 2.  A precise, time-sensitive, and correct answer is seeded into the in-memory Knowledge Graph.
-//! 3.  The same question is asked twice to the RAG endpoint (`/search/knowledge`):
+//! 1.  A generic, always-true fact about Harry Potter is seeded into the main database.
+//! 2.  A timeline of Harry's roles (past, present, and future) is seeded into the in-memory Knowledge Graph.
+//! 3.  The same question, "What is Harry Potter's current role?", is asked twice:
 //!     a. First, with `use_knowledge_graph: false`.
 //!     b. Second, with `use_knowledge_graph: true`.
-//! 4.  The results are printed, demonstrating how the Knowledge Graph provides a more accurate answer.
+//! 4.  The results are printed, clearly showing that the Knowledge Graph provides the correct, time-aware answer.
 //!
 //! # Prerequisites
 //!
-//! - A valid `.env` file in the `crates/server` directory with credentials for a running AI provider.
+//! - A valid `.env` file in `crates/server` with credentials for a running AI provider.
 //!
 //! # Usage
 //!
 //! From the workspace root (`anyrag/`):
 //! `RUST_LOG=info cargo run -p anyrag-server --example knowledge_graph_precision`
 
-// Include the binary's main source file to access its components.
 #[path = "../src/main.rs"]
 mod main;
 
@@ -48,7 +46,7 @@ async fn cleanup_db(db_path: &str) -> Result<()> {
     Ok(())
 }
 
-/// A helper function to call the knowledge search RAG endpoint.
+/// A helper to call the RAG endpoint.
 async fn ask_question(app_state: AppState, query: &str, use_kg: bool) -> Result<String> {
     info!(
         "--- Asking Question: '{}' (using Knowledge Graph: {}) ---",
@@ -59,7 +57,7 @@ async fn ask_question(app_state: AppState, query: &str, use_kg: bool) -> Result<
         query: query.to_string(),
         instruction: None,
         limit: Some(5),
-        mode: anyrag::SearchMode::LlmReRank, // Not critical for this example
+        mode: anyrag::SearchMode::LlmReRank,
         use_knowledge_graph: Some(use_kg),
     };
 
@@ -85,7 +83,7 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     info!("Environment variables loaded.");
 
-    let db_path = "db/anyrag_kg_precision.db";
+    let db_path = "db/anyrag_kg_harry_potter.db";
     cleanup_db(db_path).await?;
     std::env::set_var("DB_URL", db_path);
 
@@ -95,14 +93,18 @@ async fn main() -> Result<()> {
     info!("Application state built successfully.");
     sleep(StdDuration::from_millis(100)).await;
 
-    // --- 2. Seed Conflicting Information ---
-    let subject = "SuperWidget X500";
-    let question = "What is the power source for the SuperWidget X500?";
-    let generic_answer = "The SuperWidget X500 is powered by a standard rechargeable battery pack.";
-    let precise_answer = "The primary power source is the TX-300 Solar Array.";
+    // --- 2. Define Scenario Data ---
+    let subject = "Harry_Potter";
+    let question = "What is Harry Potter's current role?";
 
-    // A. Seed the regular KB with the generic answer.
-    info!("Seeding regular knowledge base with generic answer...");
+    let generic_answer = "Harry Potter is a famous wizard known for defeating Voldemort.";
+    let past_role = "Student at Hogwarts";
+    let present_role = "Head of Magical Law Enforcement";
+    let future_role = "Retired Auror";
+
+    // --- 3. Seed Databases with Conflicting Information ---
+    // A. Seed the regular KB with the generic, non-time-sensitive answer.
+    info!("Seeding regular KB with generic fact...");
     let conn = app_state.sqlite_provider.db.connect()?;
     anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
     conn.execute(
@@ -110,7 +112,7 @@ async fn main() -> Result<()> {
         turso::params![
             question,
             generic_answer,
-            "generic_manual.txt",
+            "wizarding_world.txt",
             true,
             "hash_generic",
             Utc::now().to_rfc3339()
@@ -118,43 +120,63 @@ async fn main() -> Result<()> {
     ).await?;
     info!("Regular KB seeded.");
 
-    // B. Seed the Knowledge Graph with the precise, correct answer.
-    info!("Seeding Knowledge Graph with precise answer...");
+    // B. Seed the Knowledge Graph with the precise, time-sensitive roles.
+    info!("Seeding Knowledge Graph with time-sensitive facts...");
+    let now = Utc::now();
     {
         let mut kg = app_state
             .knowledge_graph
             .write()
             .expect("Failed to get write lock on KG");
+        // Past fact: Ended yesterday
         kg.add_fact(
             subject,
-            "role", // Using a consistent predicate for this example set
-            precise_answer,
-            Utc::now() - Duration::days(1),
-            Utc::now() + Duration::days(1),
+            "role",
+            past_role,
+            now - Duration::days(365 * 7), // ~7 years ago
+            now - Duration::days(1),
+        )?;
+        // Present fact: Active now
+        kg.add_fact(
+            subject,
+            "role",
+            present_role,
+            now - Duration::days(1),
+            now + Duration::days(365),
+        )?;
+        // Future fact: Starts next year
+        kg.add_fact(
+            subject,
+            "role",
+            future_role,
+            now + Duration::days(365),
+            now + Duration::days(365 * 10),
         )?;
     }
     info!("Knowledge Graph seeded.");
 
-    // --- 3. Ask Questions and Compare ---
-
-    // A. Ask WITHOUT using the Knowledge Graph
-    // For the query, we use the full question to find the entry in the faq_kb.
+    // --- 4. Ask Questions ---
+    // The regular KB only has one entry, so we don't need to run embeddings for this demo.
     let answer_without_kg = ask_question(app_state.clone(), question, false).await?;
-
-    // B. Ask WITH using the Knowledge Graph
-    // For this query, we use the clean "subject" to ensure we get a direct hit from the KG.
     let answer_with_kg = ask_question(app_state.clone(), subject, true).await?;
 
-    // --- 4. Print Final Results ---
+    // --- 5. Print Final Results ---
     println!("\n\n✅ Knowledge Graph Precision Demo Complete!");
     println!("======================================================");
-    println!("Scenario: The database contains a generic answer, but the Knowledge Graph holds a precise, definitive fact.");
-    println!("\n---");
-    println!("❓ Question: {question}");
+    println!("Scenario: We have two sources of information about Harry Potter.");
+    println!("- The General KB: `{generic_answer}` (Always true, but not specific)");
+    println!("- The Knowledge Graph holds a timeline of his roles:");
+    println!("  - Past: {past_role}");
+    println!("  - Present: {present_role}");
+    println!("  - Future: {future_role}");
+    println!("---");
+    println!("\n❓ Question: {question}");
     println!("---");
     println!("\n💡 Answer (Without Knowledge Graph):");
+    println!("   -> The AI uses the generic fact from the database.");
     println!("   -> {answer_without_kg}");
     println!("\n💡 Answer (WITH Knowledge Graph):");
+    println!("   -> The AI is given the definitive, time-sensitive fact and prioritizes it.");
     println!("   -> {answer_with_kg}");
     println!("\n======================================================");
 

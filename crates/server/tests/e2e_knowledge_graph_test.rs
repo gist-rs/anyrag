@@ -1,7 +1,8 @@
 //! # Knowledge Graph E2E Test
 //!
-//! This test verifies that the `POST /search/knowledge_graph` endpoint correctly
-//! queries the in-memory knowledge graph and returns time-sensitive facts.
+//! This file contains end-to-end tests for the Knowledge Graph integration,
+//! verifying both the dedicated endpoint and its integration into the main
+//! hybrid search RAG pipeline.
 
 mod common;
 
@@ -29,7 +30,6 @@ async fn test_knowledge_graph_endpoint_e2e() -> Result<()> {
 
     // Seed the knowledge graph with time-sensitive data
     {
-        // The lock is scoped to ensure it's released before the API call
         let mut kg = app
             .knowledge_graph
             .write()
@@ -79,8 +79,6 @@ async fn test_knowledge_graph_endpoint_e2e() -> Result<()> {
 async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
-
-    // The knowledge search handler queries the `faq_kb` table. We must ensure it exists.
     let db = turso::Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
@@ -89,10 +87,7 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
 
     // Define a unique fact to seed the knowledge graph.
     let now = Utc::now();
-    let start_time = now - Duration::days(1);
-    let end_time = now + Duration::days(1);
-    let unique_subject = "SuperWidget X500";
-    let unique_predicate = "role";
+    let unique_subject = "SuperWidget_X500";
     let unique_object = "The primary power source";
 
     {
@@ -102,14 +97,14 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
             .expect("Failed to get write lock on KG");
         kg.add_fact(
             unique_subject,
-            unique_predicate,
+            "role",
             unique_object,
-            start_time,
-            end_time,
+            now - Duration::days(1),
+            now + Duration::days(1),
         )?;
     }
 
-    // Mock the embedding service for the initial search query.
+    // Mock services
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/embeddings")
@@ -118,14 +113,10 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
 
-    // Mock the final RAG synthesis LLM call.
-    // The key assertion is that the request body MUST contain our unique fact.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            // Distinguish this from other AI calls by checking for the RAG system prompt.
             .body_contains("strict, factual AI")
-            // Check that the context contains the prepended fact from the KG.
             .body_matches(
                 regex::Regex::new(&format!(
                     "(?s)Definitive Answer from Knowledge Graph: {}\\.",
@@ -139,7 +130,6 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     });
 
     // --- 2. Act ---
-    // Call the main RAG endpoint with the special flag enabled.
     let response = app
         .client
         .post(format!("{}/search/knowledge", app.address))
@@ -152,10 +142,6 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
 
     // --- 3. Assert ---
     assert!(response.status().is_success(), "The API call failed.");
-
-    // This is the most important assertion. It verifies that the LLM was called
-    // with the correctly augmented context. If it wasn't, the mock would not
-    // have been hit, and this would panic.
     embedding_mock.assert();
     rag_synthesis_mock.assert();
 
@@ -164,118 +150,128 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
 
 #[tokio::test]
 #[cfg(feature = "graph_db")]
-async fn test_kg_provides_more_precise_answer() -> Result<()> {
+async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
 
-    // Helper to seed the regular KB with a plausible but less precise answer
-    async fn seed_regular_kb(app: &TestApp, answer: &str) -> Result<()> {
-        let db = turso::Builder::new_local(app.db_path.to_str().unwrap())
-            .build()
-            .await?;
-        let conn = db.connect()?;
-        anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
-        conn.execute(
-            "INSERT INTO faq_kb (question, answer, source_url, is_explicit, content_hash, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
-            turso::params![
-                "What is the power source for the SuperWidget X500?",
-                answer,
-                "manual_seed",
-                true,
-                "generic_hash",
-                chrono::Utc::now().to_rfc3339()
-            ],
-        ).await?;
-        Ok(())
-    }
+    // --- 2. Define Scenario Data ---
+    // Use consistent, simple strings without punctuation for mock matching.
+    let subject = "Harry_Potter";
+    let question = "What is Harry Potter's current role?";
+    let generic_answer_seed = "Harry Potter is a famous wizard known for defeating Voldemort";
+    let past_role_seed = "Student at Hogwarts";
+    let present_role_seed = "Head of Magical Law Enforcement";
+    let future_role_seed = "Retired Auror";
 
-    let subject = "SuperWidget_X500";
-    let query_full_question = "What is the power source for the SuperWidget X500?";
-    let generic_answer = "It uses a standard rechargeable battery pack";
-    let precise_kg_answer = "The primary power source is the TX300 Solar Array";
+    // Define the exact final answers the mock AI will return.
     let final_answer_without_kg =
-        "The SuperWidget X500 is powered by a standard rechargeable battery pack.";
-    let final_answer_with_kg = "The primary power source is the TX300 Solar Array.";
+        "Based on the generic info, Harry Potter is a famous wizard known for defeating Voldemort.";
+    let final_answer_with_kg = "According to the Knowledge Graph, Harry Potter's current role is Head of Magical Law Enforcement.";
 
-    // Seed the regular KB with the generic answer.
-    seed_regular_kb(&app, generic_answer).await?;
+    // --- 3. Seed Databases ---
+    let db = turso::Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
+    let conn = db.connect()?;
+    anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
+    conn.execute(
+        "INSERT INTO faq_kb (question, answer, source_url, is_explicit, content_hash, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
+        turso::params![
+            question,
+            generic_answer_seed,
+            "wizarding_world.txt",
+            true,
+            "hash_generic",
+            Utc::now().to_rfc3339()
+        ],
+    ).await?;
 
-    // Seed the Knowledge Graph with the precise, correct answer.
+    let now = Utc::now();
     {
         let mut kg = app.knowledge_graph.write().unwrap();
         kg.add_fact(
             subject,
-            "role", // Using "role" as the predicate for consistency
-            precise_kg_answer,
-            Utc::now() - Duration::days(1),
-            Utc::now() + Duration::days(1),
+            "role",
+            past_role_seed,
+            now - Duration::days(365),
+            now - Duration::days(1),
+        )?;
+        kg.add_fact(
+            subject,
+            "role",
+            present_role_seed,
+            now - Duration::days(1),
+            now + Duration::days(365),
+        )?;
+        kg.add_fact(
+            subject,
+            "role",
+            future_role_seed,
+            now + Duration::days(365),
+            now + Duration::days(730),
         )?;
     }
 
-    // --- 2. Mock Services ---
+    // --- 4. Mock External Services ---
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
     });
 
-    // Mock for the RAG call WITHOUT the KG context.
+    // Mock for the call WITHOUT KG. It should only see the generic answer.
     let rag_without_kg_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("strict, factual AI")
-            .body_contains(generic_answer)
-            .matches(|req| !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default()).contains("Definitive Answer"));
+            .body_contains(generic_answer_seed)
+            .matches(|req| !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default()).contains("Head of Magical Law Enforcement"));
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_answer_without_kg}}]}),
         );
     });
 
-    // Mock for the RAG call WITH the KG context.
+    // Mock for the call WITH KG. It should see both answers in the context.
     let rag_with_kg_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("strict, factual AI")
-            .body_contains(precise_kg_answer)
-            .body_contains(generic_answer); // It should see both contexts
+            .body_contains(present_role_seed)
+            .body_contains(generic_answer_seed);
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_answer_with_kg}}]}),
         );
     });
 
-    // --- 3. Act & Assert (Without Knowledge Graph) ---
+    // --- 5. Act & Assert ---
+    // A. Call WITHOUT the Knowledge Graph
     let response_without_kg = app
         .client
         .post(format!("{}/search/knowledge", app.address))
-        .json(&json!({
-            "query": query_full_question, // Use the full question here
-            "use_knowledge_graph": false
-        }))
+        .json(&json!({ "query": question, "use_knowledge_graph": false }))
         .send()
         .await?;
-
-    assert!(response_without_kg.status().is_success());
+    assert!(
+        response_without_kg.status().is_success(),
+        "Call without KG failed"
+    );
     let body_without_kg: ApiResponse<Value> = response_without_kg.json().await?;
     assert_eq!(body_without_kg.result["text"], final_answer_without_kg);
     rag_without_kg_mock.assert();
 
-    // --- 4. Act & Assert (With Knowledge Graph) ---
+    // B. Call WITH the Knowledge Graph
     let response_with_kg = app
         .client
         .post(format!("{}/search/knowledge", app.address))
-        .json(&json!({
-            "query": subject, // Use the clean subject here to match the KG
-            "use_knowledge_graph": true
-        }))
+        .json(&json!({ "query": subject, "use_knowledge_graph": true }))
         .send()
         .await?;
-
-    assert!(response_with_kg.status().is_success());
+    assert!(
+        response_with_kg.status().is_success(),
+        "Call with KG failed"
+    );
     let body_with_kg: ApiResponse<Value> = response_with_kg.json().await?;
     assert_eq!(body_with_kg.result["text"], final_answer_with_kg);
     rag_with_kg_mock.assert();
 
-    // Embedding mock should be hit twice, once for each search.
     embedding_mock.assert_hits(2);
 
     Ok(())
