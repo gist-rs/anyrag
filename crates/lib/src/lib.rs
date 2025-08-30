@@ -169,12 +169,17 @@ impl PromptClient {
         let (system_prompt, user_prompt) = if let Some(content_type) = &options.content_type {
             // --- Logic for ContentType-based prompts ---
             info!("[get_query_from_prompt] Using ContentType-based prompt generation: {content_type:?}");
-            // For content-type prompts, the context is a combination of the base context (date)
-            // and the specific content provided in the options.
-            let mut final_context = context;
-            if let Some(content) = &options.context {
-                final_context.push_str(content);
-            }
+            // Always start with the base context (date) and append specific content if available.
+            let final_context = if let Some(content) = &options.context {
+                if content.is_empty() {
+                    context.clone()
+                } else {
+                    // The base context already ends with \n\n, so we just append.
+                    format!("{context}{content}")
+                }
+            } else {
+                context.clone()
+            };
 
             let (system_template, user_template) = content_type.get_prompt_templates();
 
@@ -253,7 +258,8 @@ impl PromptClient {
             } else {
                 // For a direct question, the prompt is just context + question.
                 format!(
-                    "# Context\n{context}\n\n# User question\n{}",
+                    "# Context\n{}\n\n# User question\n{}",
+                    context.trim_end(),
                     options.prompt
                 )
             };

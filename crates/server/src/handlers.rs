@@ -80,6 +80,8 @@ pub struct SearchRequest {
     pub instruction: Option<String>,
     #[serde(default)]
     pub mode: SearchMode,
+    #[serde(default)]
+    pub use_knowledge_graph: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -729,7 +731,47 @@ pub async fn knowledge_search_handler(
     });
     search_results.truncate(limit as usize);
 
-    if search_results.is_empty() {
+    let kg_fact = if payload.use_knowledge_graph.unwrap_or(false) {
+        info!("Knowledge graph search is enabled for this request.");
+        let kg = app_state
+            .knowledge_graph
+            .read()
+            .map_err(|_| AppError::Internal(anyhow::anyhow!("Failed to acquire KG read lock")))?;
+
+        let predicate = "role";
+        kg.get_fact_as_of(&payload.query, predicate, Utc::now())
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+
+    let mut context_parts = Vec::new();
+
+    if let Some(fact) = kg_fact {
+        info!("Found definitive fact in Knowledge Graph: {}", fact);
+        context_parts.push(format!("Definitive Answer from Knowledge Graph: {fact}."));
+    }
+
+    if !search_results.is_empty() {
+        let articles_context = search_results
+            .iter()
+            .map(|result| format!("- {}", result.answer))
+            .collect::<Vec<String>>()
+            .join("\n\n");
+
+        if !context_parts.is_empty() {
+            context_parts.push(format!(
+                "Additional Context from Articles:\n{articles_context}"
+            ));
+        } else {
+            context_parts.push(articles_context);
+        }
+    }
+
+    let context = context_parts.join("\n\n");
+
+    if context.is_empty() {
         let text = "I could not find any relevant information to answer your question.".to_string();
         let debug_info =
             json!({ "query": payload.query, "limit": limit, "status": "No results found" });
@@ -739,11 +781,7 @@ pub async fn knowledge_search_handler(
             Some(debug_info),
         ));
     }
-    let context = search_results
-        .iter()
-        .map(|result| format!("- {}", result.answer))
-        .collect::<Vec<String>>()
-        .join("\n\n");
+
     info!("--> Synthesizing answer with context:\n{}", context);
 
     let options = ExecutePromptOptions {

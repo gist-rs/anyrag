@@ -119,6 +119,7 @@ async fn main() -> Result<()> {
         instruction: None,
         limit: Some(3),
         mode: anyrag::SearchMode::LlmReRank,
+        use_knowledge_graph: Some(false),
     };
 
     let final_answer = match handlers::knowledge_search_handler(
