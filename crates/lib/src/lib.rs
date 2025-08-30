@@ -270,22 +270,27 @@ impl PromptClient {
 
         info!("<-- Raw response from AI: {}", &raw_response);
 
-        // --- CORRECTED LOGIC ---
-        // 1. First, try to extract a query from a markdown code block.
-        let re = Regex::new(r"```(?:sql|query)?\n?([\s\S]*?)```")?;
-        let query_candidate = re
+        // --- REVISED LOGIC ---
+        // First, try to extract a query from a markdown code block. This is the most common case.
+        let re = Regex::new(r"```(?:sql|sqlite|query)?\n?([\s\S]*?)```")?;
+        let query_candidate_from_block = re
             .captures(&raw_response)
             .and_then(|caps| caps.get(1))
-            .map(|m| m.as_str().trim())
-            .unwrap_or_else(|| raw_response.trim());
+            .map(|m| m.as_str().trim());
 
-        // 2. Now, check if the cleaned and processed string looks like a query.
+        let query_candidate = match query_candidate_from_block {
+            Some(query) => query,
+            // If no code block was found, maybe the AI just returned the raw SQL.
+            None => raw_response.trim(),
+        };
+
+        // Now, check if the candidate (either from a block or the raw response) looks like a query.
         if !query_candidate.to_uppercase().starts_with("SELECT")
             && !query_candidate.to_uppercase().starts_with("WITH")
         {
-            // If not, it's a direct answer. The answer is the *original* raw response.
+            // If not, it's a direct answer. The answer is the *original* raw response, not the trimmed one.
             info!("[get_query_from_prompt] Response is a direct answer, not a query.");
-            return Ok(QueryOrAnswer::Answer(raw_response));
+            return Ok(QueryOrAnswer::Answer(raw_response.to_string()));
         }
 
         info!("[get_query_from_prompt] Successfully generated query.");

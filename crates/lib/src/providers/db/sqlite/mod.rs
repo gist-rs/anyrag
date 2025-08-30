@@ -253,17 +253,17 @@ impl Storage for SqliteProvider {
     /// Retrieves the schema for a given SQLite table.
     async fn get_table_schema(&self, table_name: &str) -> Result<Arc<TableSchema>, PromptError> {
         if let Some(schema) = self.schema_cache.read().await.get(table_name) {
+            debug!(table_name = %table_name, "Returning cached schema.");
             return Ok(schema.clone());
         }
+        debug!(table_name = %table_name, "Schema not in cache. Fetching from DB.");
 
-        // Get a new connection for this query.
         let conn = self
             .db
             .connect()
             .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
 
         let query = format!("PRAGMA table_info({table_name});");
-
         let mut rows = conn
             .query(&query, ())
             .await
@@ -275,46 +275,31 @@ impl Storage for SqliteProvider {
             .await
             .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
         {
-            let name = match row.get_value(1) {
-                Ok(TursoValue::Text(s)) => s,
-                _ => continue,
-            };
-            let type_str = match row.get_value(2) {
-                Ok(TursoValue::Text(s)) => s,
-                _ => continue,
-            };
-
-            let type_str_upper = type_str.to_uppercase();
-            let (base_type_str, format_hint) =
-                if let Some((base, rest)) = type_str_upper.split_once('(') {
-                    // This will parse "DATETIME ('m/d/Y H:M:S')" into:
-                    // base: "DATETIME"
-                    // format_hint: "Format: m/d/Y H:M:S"
-                    let format = rest.trim_end_matches(')').trim().trim_matches('\'');
-                    (base.trim(), Some(format!("Format: {format}")))
-                } else {
-                    (type_str_upper.as_str(), None)
+            // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
+            if let (Ok(TursoValue::Text(name)), Ok(TursoValue::Text(type_str))) =
+                (row.get_value(1), row.get_value(2))
+            {
+                let bq_type = match type_str.to_uppercase().as_str() {
+                    "INTEGER" => FieldType::Integer,
+                    "TEXT" => FieldType::String,
+                    "REAL" => FieldType::Float,
+                    "BLOB" => FieldType::Bytes,
+                    "DATETIME" | "TIMESTAMP" => FieldType::Timestamp,
+                    "DATE" => FieldType::Date,
+                    // NUMERIC and other types default to String for simplicity
+                    _ => FieldType::String,
                 };
 
-            let bq_type = match base_type_str {
-                "INTEGER" => FieldType::Integer,
-                "TEXT" => FieldType::String,
-                "REAL" => FieldType::Float,
-                "BLOB" => FieldType::Bytes,
-                "DATETIME" | "TIMESTAMP" => FieldType::Timestamp,
-                "DATE" => FieldType::Date,
-                _ => FieldType::String, // Default fallback
-            };
-
-            fields.push(TableFieldSchema {
-                name,
-                r#type: bq_type,
-                mode: Some("NULLABLE".to_string()),
-                fields: None,
-                description: format_hint,
-                categories: None,
-                policy_tags: None,
-            });
+                fields.push(TableFieldSchema {
+                    name,
+                    r#type: bq_type,
+                    mode: Some("NULLABLE".to_string()),
+                    fields: None,
+                    description: None, // Keep it simple, no format hints.
+                    categories: None,
+                    policy_tags: None,
+                });
+            }
         }
 
         if fields.is_empty() {
@@ -323,16 +308,18 @@ impl Storage for SqliteProvider {
             )));
         }
 
-        let schema = TableSchema {
+        info!(table_name = %table_name, "Successfully fetched schema with {} columns.", fields.len());
+
+        let schema = Arc::new(TableSchema {
             fields: Some(fields),
-        };
-        let schema_arc = Arc::new(schema);
+        });
+
         self.schema_cache
             .write()
             .await
-            .insert(table_name.to_string(), schema_arc.clone());
+            .insert(table_name.to_string(), schema.clone());
 
-        Ok(schema_arc)
+        Ok(schema)
     }
 }
 
