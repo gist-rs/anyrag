@@ -44,26 +44,18 @@ Use the provided table schema to ensure the query is correct. Do not use placeho
 ///
 /// This is similar to the default prompt but provides rules tailored to SQLite's SQL dialect,
 /// especially concerning date functions.
-pub const SQLITE_QUERY_USER_PROMPT: &str = r#"Follow these rules to create production-grade SQLite SQL:
+pub const SQLITE_QUERY_USER_PROMPT: &str = r#"Your task is to write a single, read-only SQLite query based on the provided schema and question.
 
-1. For questions about "who", "what", or "list", use DISTINCT to avoid duplicate results.
-2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).
-3. For questions about "today", you MUST use one of the formats provided in the # TODAY context. Choose the format that matches the data in the relevant date column. If the column is a DATETIME type, use `date(your_column) = 'YYYY-MM-DD'`. If it is TEXT, you may need to use string matching (e.g., `your_column LIKE 'YYYY-MM-DD%'`). Do not use `date('now')` for this purpose.
-4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).
-5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
-6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
-7. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
-
+# Primary Goal
 {select_instruction}
 {alias_instruction}
 
-Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
+# User Question
+{prompt}
 
 # Context
 {context}
-
-# User question
-{prompt}"#;
+"#;
 
 // --- Response Formatting Prompts ---
 
