@@ -9,61 +9,19 @@
 //! 6. A final RAG query (`/search/knowledge`) is made, which uses a mock LLM to synthesize an answer from the retrieved Q&A pair.
 //! 7. The final answer is verified to prove the entire pipeline worked.
 
+mod common;
+
 use anyhow::Result;
-use httpmock::prelude::*;
+use common::TestApp;
+use httpmock::Method;
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str};
-use reqwest::Client;
 use serde_json::{json, Value};
-use std::path::PathBuf;
-use tempfile::NamedTempFile;
-use tokio::net::TcpListener;
-use tokio::time::{sleep, Duration};
 
 // Include the binary's main source file to access its components.
 #[path = "../src/main.rs"]
 mod main;
 
 use main::types::ApiResponse;
-
-/// Spawns the application in the background for testing, configured with mocks.
-async fn spawn_app_with_mocks(
-    db_path: PathBuf,
-    ai_api_url: String,
-    embeddings_api_url: String,
-) -> Result<String> {
-    dotenvy::dotenv().ok();
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .compact()
-        .try_init();
-
-    // Set environment variables for the test instance before loading config.
-    std::env::set_var("AI_API_URL", ai_api_url);
-    std::env::set_var("EMBEDDINGS_API_URL", embeddings_api_url);
-    std::env::set_var("EMBEDDINGS_MODEL", "mock-embedding-model");
-    std::env::set_var("AI_PROVIDER", "local"); // Use the mockable provider
-
-    let mut config = main::config::get_config().expect("Failed to load test configuration");
-    config.db_url = db_path
-        .to_str()
-        .expect("Failed to convert temp db path to string")
-        .to_string();
-
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("Failed to bind random port");
-    let port = listener.local_addr().unwrap().port();
-    let address = format!("http://127.0.0.1:{port}");
-
-    tokio::spawn(async move {
-        if let Err(e) = main::run(listener, config).await {
-            eprintln!("Server error during test: {e}");
-        }
-    });
-
-    sleep(Duration::from_millis(200)).await;
-    Ok(address)
-}
 
 /// Generates a simple PDF with a specific messy sentence.
 fn generate_test_pdf(text: &str) -> Result<Vec<u8>> {
@@ -101,10 +59,7 @@ fn generate_test_pdf(text: &str) -> Result<Vec<u8>> {
 #[tokio::test]
 async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let temp_db_file = NamedTempFile::new()?;
-    let db_path = temp_db_file.path().to_path_buf();
-    let mock_server = MockServer::start();
-    let client = Client::new();
+    let app = TestApp::spawn().await?;
 
     // Define the magic sentence and the expected transformations
     let messy_sentence = "The URL PDF test number is 42.42.";
@@ -117,24 +72,21 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     let pdf_data = generate_test_pdf(messy_sentence)?;
 
     // --- 3. Mock External Services ---
-    let ai_api_url = mock_server.url("/v1/chat/completions");
-    let embeddings_api_url = mock_server.url("/v1/embeddings");
-
     // A. Mock the PDF Hosting and Redirect
-    let redirect_mock = mock_server.mock(|when, then| {
-        when.method(GET).path("/redirect-to-pdf");
+    let redirect_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::GET).path("/redirect-to-pdf");
         then.status(302).header("Location", "/actual-document.pdf");
     });
-    let pdf_serve_mock = mock_server.mock(|when, then| {
-        when.method(GET).path("/actual-document.pdf");
+    let pdf_serve_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::GET).path("/actual-document.pdf");
         then.status(200)
             .header("Content-Type", "application/pdf")
             .body(&pdf_data);
     });
 
     // B. Mock LLM Refinement call
-    let refinement_mock = mock_server.mock(|when, then| {
-        when.method(POST)
+    let refinement_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("expert technical analyst");
         then.status(200).json_body(
@@ -143,8 +95,8 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     });
 
     // C. Mock Knowledge Distillation call
-    let distillation_mock = mock_server.mock(|when, then| {
-        when.method(POST)
+    let distillation_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("reconciliation agent");
         then.status(200)
@@ -155,15 +107,15 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     });
 
     // D. Mock Embedding API call
-    let embedding_mock = mock_server.mock(|when, then| {
-        when.method(POST).path("/v1/embeddings");
+    let embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.4, 0.5, 0.6] }] }));
     });
 
     // E. Mock final RAG synthesis call
-    let rag_synthesis_mock = mock_server.mock(|when, then| {
-        when.method(POST)
+    let rag_synthesis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("strict, factual AI");
         then.status(200).json_body(
@@ -171,13 +123,11 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
         );
     });
 
-    // --- 4. Spawn App ---
-    let app_address = spawn_app_with_mocks(db_path, ai_api_url, embeddings_api_url).await?;
-
-    // --- 5. Execute Ingestion from URL ---
-    let ingest_res = client
-        .post(format!("{app_address}/ingest/pdf_url"))
-        .json(&json!({ "url": mock_server.url("/redirect-to-pdf") }))
+    // --- 4. Execute Ingestion from URL ---
+    let ingest_res = app
+        .client
+        .post(format!("{}/ingest/pdf_url", app.address))
+        .json(&json!({ "url": app.mock_server.url("/redirect-to-pdf") }))
         .send()
         .await?
         .error_for_status()?;
@@ -185,17 +135,18 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     let ingest_body: ApiResponse<Value> = ingest_res.json().await?;
     assert_eq!(ingest_body.result["ingested_faqs"], 1);
 
-    // --- 6. Execute Embedding ---
-    client
-        .post(format!("{app_address}/embed/faqs/new"))
+    // --- 5. Execute Embedding ---
+    app.client
+        .post(format!("{}/embed/faqs/new", app.address))
         .json(&json!({ "limit": 10 }))
         .send()
         .await?
         .error_for_status()?;
 
-    // --- 7. Execute RAG Search and Verify ---
-    let search_res = client
-        .post(format!("{app_address}/search/knowledge"))
+    // --- 6. Execute RAG Search and Verify ---
+    let search_res = app
+        .client
+        .post(format!("{}/search/knowledge", app.address))
         .json(&json!({ "query": "what is the test number?" }))
         .send()
         .await?
@@ -204,7 +155,7 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     let search_body: ApiResponse<Value> = search_res.json().await?;
     assert_eq!(search_body.result["text"], final_rag_answer);
 
-    // --- 8. Assert Mock Calls ---
+    // --- 7. Assert Mock Calls ---
     redirect_mock.assert();
     pdf_serve_mock.assert();
     refinement_mock.assert();

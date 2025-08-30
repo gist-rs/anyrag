@@ -4,69 +4,25 @@
 //! LLM-based re-ranking and the optional RRF re-ranking modes. It uses mocks
 //! for all external services to ensure deterministic and reliable results.
 
+mod common;
+
 use anyhow::Result;
-use httpmock::prelude::*;
-use reqwest::Client;
+use common::TestApp;
+use httpmock::Method;
 use serde_json::{json, Value};
-use std::path::PathBuf;
-use tempfile::NamedTempFile;
-use tokio::net::TcpListener;
-use tokio::time::{sleep, Duration};
+use tracing::info;
 
 // Include the binary's main source file to access its components.
+// This is necessary because integration tests cannot directly access `main.rs`.
 #[path = "../src/main.rs"]
 mod main;
 
 use main::types::ApiResponse;
 
-/// Spawns the application in the background for testing, configured with a temporary DB
-/// and mock URLs for all external services.
-async fn spawn_app_with_mocks(
-    db_path: PathBuf,
-    ai_api_url: String,
-    embeddings_api_url: String,
-) -> Result<String> {
-    dotenvy::dotenv().ok();
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .compact()
-        .try_init();
-
-    // Set environment variables for the test instance before loading config.
-    std::env::set_var("AI_API_URL", ai_api_url);
-    std::env::set_var("EMBEDDINGS_API_URL", embeddings_api_url);
-    std::env::set_var("EMBEDDINGS_MODEL", "mock-embedding-model");
-    std::env::set_var("AI_PROVIDER", "local"); // Ensure we use the mockable provider
-
-    let mut config = main::config::get_config().expect("Failed to load test configuration");
-    config.db_url = db_path
-        .to_str()
-        .expect("Failed to convert temp db path to string")
-        .to_string();
-
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("Failed to bind random port");
-    let port = listener.local_addr().unwrap().port();
-    let address = format!("http://127.0.0.1:{port}");
-
-    tokio::spawn(async move {
-        if let Err(e) = main::run(listener, config).await {
-            eprintln!("Server error during test: {e}");
-        }
-    });
-
-    sleep(Duration::from_millis(200)).await;
-    Ok(address)
-}
-
 #[tokio::test]
 async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     // --- 1. Arrange ---
-    let temp_db_file = NamedTempFile::new()?;
-    let db_path = temp_db_file.path().to_path_buf();
-    let server = MockServer::start();
-    let client = Client::new();
+    let app = TestApp::spawn().await?;
 
     // --- 2. Mock External Services ---
 
@@ -94,15 +50,15 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
         </channel>
         </rss>
     "#;
-    server.mock(|when, then| {
-        when.method(GET).path("/rss");
+    app.mock_server.mock(|when, then| {
+        when.method(Method::GET).path("/rss");
         then.status(200).body(mock_rss_content);
     });
 
     // B. Mock the Embeddings API to return a generic, non-null vector for any input.
     // This ensures vector search always returns all documents, guaranteeing candidates for re-ranking.
-    let embeddings_mock = server.mock(|when, then| {
-        when.method(POST).path("/v1/embeddings");
+    let embeddings_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
@@ -115,8 +71,8 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     ])
     .to_string();
 
-    let reranker_mock = server.mock(|when, then| {
-        when.method(POST).path("/v1/chat/completions");
+    let reranker_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/chat/completions");
         then.status(200).json_body(json!({
             "choices": [{
                 "message": {
@@ -128,33 +84,27 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     });
 
     // --- 3. Spawn App, Ingest, and Embed ---
-    let app_address = spawn_app_with_mocks(
-        db_path,
-        server.url("/v1/chat/completions"),
-        server.url("/v1/embeddings"),
-    )
-    .await?;
-
-    client
-        .post(format!("{app_address}/ingest"))
-        .json(&json!({ "url": server.url("/rss") }))
+    app.client
+        .post(format!("{}/ingest", app.address))
+        .json(&json!({ "url": app.mock_server.url("/rss") }))
         .send()
         .await?
         .error_for_status()?;
 
-    client
-        .post(format!("{app_address}/embed/new"))
+    app.client
+        .post(format!("{}/embed/new", app.address))
         .json(&json!({ "limit": 2 }))
         .send()
         .await?
         .error_for_status()?;
-    println!("-> Ingest & Embed Complete.");
+    info!("-> Ingest & Embed Complete.");
 
     // --- 4. Test LLM Re-ranking (Default Mode) ---
-    println!("\n--- Testing Hybrid Search with LLM Re-ranking (Default) ---");
+    info!("\n--- Testing Hybrid Search with LLM Re-ranking (Default) ---");
     // This query ensures both articles are candidates, letting us test the re-ranker.
-    let llm_res = client
-        .post(format!("{app_address}/search/hybrid"))
+    let llm_res = app
+        .client
+        .post(format!("{}/search/hybrid", app.address))
         .json(&json!({ "query": "database" })) // Use a query that will match via keyword
         .send()
         .await?
@@ -162,7 +112,7 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
 
     let llm_response: ApiResponse<Vec<Value>> = llm_res.json().await?;
     let llm_results = llm_response.result;
-    println!("LLM Re-ranked Results: {llm_results:?}");
+    info!("LLM Re-ranked Results: {:?}", llm_results);
 
     assert_eq!(
         llm_results.len(),
@@ -179,9 +129,10 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     );
 
     // --- 5. Test RRF Re-ranking (Optional Mode) ---
-    println!("\n--- Testing Hybrid Search with RRF Re-ranking (Optional) ---");
-    let rrf_res = client
-        .post(format!("{app_address}/search/hybrid"))
+    info!("\n--- Testing Hybrid Search with RRF Re-ranking (Optional) ---");
+    let rrf_res = app
+        .client
+        .post(format!("{}/search/hybrid", app.address))
         .json(&json!({
             "query": "PostgreSQL", // This query strongly favors the keyword match
             "mode": "rrf"
@@ -192,7 +143,7 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
 
     let rrf_response: ApiResponse<Vec<Value>> = rrf_res.json().await?;
     let rrf_results = rrf_response.result;
-    println!("RRF Results: {rrf_results:?}");
+    info!("RRF Results: {:?}", rrf_results);
     // Since the vector search is generic and returns both, and the keyword search returns one,
     // the RRF should correctly combine and boost the keyword match to the top.
     assert_eq!(rrf_results.len(), 2, "Expected RRF to rank two candidates.");

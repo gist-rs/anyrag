@@ -3,14 +3,13 @@
 //! This test verifies that the `POST /search/knowledge` endpoint correctly uses
 //! a hybrid search strategy (vector + keyword) to retrieve context for the RAG pipeline.
 
+mod common;
+
 use anyhow::Result;
-use httpmock::prelude::*;
-use reqwest::Client;
+use common::TestApp;
+use httpmock::Method;
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
-use tokio::net::TcpListener;
-use tokio::time::{sleep, Duration};
+use std::path::Path;
 use turso::{params, Builder};
 
 // Include the binary's main source file to access its components.
@@ -18,46 +17,6 @@ use turso::{params, Builder};
 mod main;
 
 use main::types::ApiResponse;
-
-/// Spawns the application in the background for testing, configured with mocks.
-async fn spawn_app_with_mocks(
-    db_path: PathBuf,
-    ai_api_url: String,
-    embeddings_api_url: String,
-) -> Result<String> {
-    dotenvy::dotenv().ok();
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .compact()
-        .try_init();
-
-    // Set environment variables for the test instance before loading config.
-    std::env::set_var("AI_API_URL", ai_api_url);
-    std::env::set_var("EMBEDDINGS_API_URL", embeddings_api_url);
-    std::env::set_var("EMBEDDINGS_MODEL", "mock-embedding-model");
-    std::env::set_var("AI_PROVIDER", "local"); // Use the mockable provider
-
-    let mut config = main::config::get_config().expect("Failed to load test configuration");
-    config.db_url = db_path
-        .to_str()
-        .expect("Failed to convert temp db path to string")
-        .to_string();
-
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("Failed to bind random port");
-    let port = listener.local_addr().unwrap().port();
-    let address = format!("http://127.0.0.1:{port}");
-
-    tokio::spawn(async move {
-        if let Err(e) = main::run(listener, config).await {
-            eprintln!("Server error during test: {e}");
-        }
-    });
-
-    sleep(Duration::from_millis(200)).await;
-    Ok(address)
-}
 
 /// A helper to manually insert and embed a FAQ into the database.
 async fn seed_faq(db_path: &Path, question: &str, answer: &str, vector: Vec<f32>) -> Result<()> {
@@ -92,10 +51,8 @@ async fn seed_faq(db_path: &Path, question: &str, answer: &str, vector: Vec<f32>
 #[tokio::test]
 async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let temp_db_file = NamedTempFile::new()?;
-    let db_path = temp_db_file.path().to_path_buf();
-    let mock_server = MockServer::start();
-    let client = Client::new();
+    let app = TestApp::spawn().await?;
+    let db_path = app.db_path.clone();
 
     // --- 2. Define Test Data and Vectors ---
     // This FAQ is designed to be found by KEYWORD search for "Quantum Widget".
@@ -130,12 +87,9 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     .await?;
 
     // --- 4. Mock External Services ---
-    let ai_api_url = mock_server.url("/v1/chat/completions");
-    let embeddings_api_url = mock_server.url("/v1/embeddings");
-
     // A. Mock the Embedding API call for the search query.
-    let embedding_mock = mock_server.mock(|when, then| {
-        when.method(POST)
+    let embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
             .path("/v1/embeddings")
             .body_contains("complex Quantum Widget information"); // Check for the query text
         then.status(200)
@@ -144,8 +98,8 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
 
     // B. Mock the final RAG synthesis call. This is the most important assertion.
     // We will verify that the context it receives contains BOTH answers.
-    let rag_synthesis_mock = mock_server.mock(|when, then| {
-        when.method(POST)
+    let rag_synthesis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
             .path("/v1/chat/completions")
             // Check that the context contains key phrases from BOTH documents.
             .body_contains("multi-layered abstraction") // From the vector search result
@@ -155,12 +109,10 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
         );
     });
 
-    // --- 5. Spawn App ---
-    let app_address = spawn_app_with_mocks(db_path, ai_api_url, embeddings_api_url).await?;
-
-    // --- 6. Execute Hybrid RAG Search and Verify ---
-    let search_res = client
-        .post(format!("{app_address}/search/knowledge"))
+    // --- 5. Execute Hybrid RAG Search and Verify ---
+    let search_res = app
+        .client
+        .post(format!("{}/search/knowledge", app.address))
         .json(&json!({ "query": "how to handle complex Quantum Widget information" }))
         .send()
         .await?

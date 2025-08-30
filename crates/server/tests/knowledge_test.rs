@@ -4,6 +4,8 @@
 //! to exporting, by bypassing the initial web fetch. It mocks the LLM responses
 //! and verifies data transformations and database state.
 
+mod common;
+
 use anyhow::Result;
 use anyrag::{
     ingest::knowledge::{
@@ -11,17 +13,17 @@ use anyrag::{
     },
     providers::ai::local::LocalAiProvider,
 };
-use httpmock::prelude::*;
+use common::TestApp;
+use httpmock::Method;
 use serde_json::{json, Value};
-use tempfile::NamedTempFile;
+use tracing::info;
 use turso::{Builder, Value as TursoValue};
 
 #[tokio::test]
 async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     // --- 1. Arrange ---
-    let temp_db_file = NamedTempFile::new()?;
-    let db_path = temp_db_file.path();
-    let mock_server = MockServer::start();
+    let app = TestApp::spawn().await?;
+    let db_path = app.db_path.clone();
 
     // The test starts with pre-existing raw content.
     let page_url = "http://mock.com/page";
@@ -33,15 +35,16 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     };
 
     // --- 2. Mock LLM Services ---
-    let ai_provider = LocalAiProvider::new(mock_server.url("/v1/chat/completions"), None, None)?;
+    let ai_provider =
+        LocalAiProvider::new(app.mock_server.url("/v1/chat/completions"), None, None)?;
 
     // A. Mock the LLM Extraction call (Pass 1).
     let extraction_response = json!({
         "faqs": [{ "question": "What is this?", "answer": "It is a test.", "is_explicit": true }],
         "content_chunks": [{ "topic": "Important Details", "content": "This section contains important details." }]
     });
-    let extraction_mock = mock_server.mock(|when, then| {
-        when.method(POST)
+    let extraction_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("## FAQ Section");
         then.status(200)
@@ -53,8 +56,8 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     let augmentation_response = json!({
         "augmented_faqs": [{ "id": 0, "question": "What is mentioned in the details section?" }]
     });
-    let augmentation_mock = mock_server.mock(|when, then| {
-        when.method(POST)
+    let augmentation_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
             .path("/v1/chat/completions")
             // Match based on content unique to the augmentation prompt.
             .body_contains("Content Chunks to Analyze");
@@ -66,7 +69,7 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     // Manually run the pipeline stages, skipping the initial fetch.
     let faq_items = distill_and_augment(&ai_provider, &raw_content).await?;
     assert_eq!(faq_items.len(), 2);
-    println!("-> Distillation successful. Found 2 FAQs.");
+    info!("-> Distillation successful. Found 2 FAQs.");
 
     let db = Builder::new_local(db_path.to_str().unwrap())
         .build()
@@ -77,7 +80,7 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
         store_structured_knowledge(&db, &raw_content.url, &raw_content.content_hash, faq_items)
             .await?;
     assert_eq!(stored_count, 2);
-    println!("-> Storage successful. Stored 2 FAQs.");
+    info!("-> Storage successful. Stored 2 FAQs.");
 
     // --- 4. Assert Database State ---
     extraction_mock.assert();
@@ -126,7 +129,7 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     assert_eq!(q2, "What is mentioned in the details section?");
     assert_eq!(a2, "This section contains important details.");
     assert_eq!(e2, 0);
-    println!("-> Database state verified successfully.");
+    info!("-> Database state verified successfully.");
 
     // --- 5. Act & Assert: Export for Fine-Tuning ---
     let export_body = export_for_finetuning(&db).await?;
@@ -137,7 +140,7 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     assert_eq!(line1["messages"][1]["content"], "What is this?");
     assert_eq!(line1["messages"][2]["content"], "It is a test.");
 
-    println!("-> Fine-tuning export verified successfully.");
+    info!("-> Fine-tuning export verified successfully.");
 
     Ok(())
 }
