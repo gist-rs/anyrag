@@ -14,7 +14,7 @@ use anyrag::prompts::core::{get_alias_instruction, get_select_instruction};
 fn test_get_select_with_valid_instruction() {
     let instruction = "Show me the names and ages of all users.";
     let expected = format!(
-        "Based on the user's #OUTPUT instruction, you MUST select only the necessary columns to fulfill the request. The instruction is: \"{instruction}\". Do not use `SELECT *`."
+        "The user's ultimate goal is to receive an answer that follows this #OUTPUT instruction: \"{instruction}\". You MUST select all columns from the schema that are necessary to fulfill this final request. For example, if the instruction is to 'summarize the body', you MUST select the 'body' column. Do not use `SELECT *`."
     );
     assert_eq!(get_select_instruction(Some(instruction)), expected);
 }
