@@ -16,7 +16,7 @@
 // By including `main.rs`, we make the binary's modules (like `state` and `router`)
 // available to the test suite under the `main` namespace. This is a standard
 // pattern for testing Rust binaries.
-#[path = "../../src/main.rs"]
+#[path = "../src/main.rs"]
 mod main;
 
 use anyhow::Result;
