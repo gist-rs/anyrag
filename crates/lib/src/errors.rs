@@ -1,3 +1,4 @@
+#[cfg(feature = "bigquery")]
 use gcp_bigquery_client::error::BQError;
 use thiserror::Error;
 
@@ -16,6 +17,8 @@ pub enum PromptError {
     StorageConnection(String),
     #[error("Storage operation failed: {0}")]
     StorageOperationFailed(String),
+    #[error("The 'bigquery' feature is not enabled.")]
+    BigQueryFeatureNotEnabled,
     #[error("AI provider is missing")]
     MissingAiProvider,
     #[error("Storage provider is missing")]
@@ -26,6 +29,7 @@ pub enum PromptError {
     JsonSerialization(#[from] serde_json::Error),
 }
 
+#[cfg(feature = "bigquery")]
 impl From<BQError> for PromptError {
     fn from(err: BQError) -> Self {
         PromptError::StorageOperationFailed(err.to_string())

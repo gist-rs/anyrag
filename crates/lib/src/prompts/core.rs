@@ -27,6 +27,7 @@ pub const DEFAULT_QUERY_USER_PROMPT: &str = r#"Follow these rules to create prod
 4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).
 5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
 6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
+7. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
 
 {select_instruction}
 {alias_instruction}
@@ -51,6 +52,7 @@ pub const SQLITE_QUERY_USER_PROMPT: &str = r#"Follow these rules to create produ
 4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).
 5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
 6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
+7. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
 
 {select_instruction}
 {alias_instruction}

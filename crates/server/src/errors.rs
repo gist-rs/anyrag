@@ -230,6 +230,10 @@ impl IntoResponse for AppError {
                         StatusCode::INTERNAL_SERVER_ERROR,
                         format!("Failed to build HTTP client: {e}"),
                     ),
+                    PromptError::BigQueryFeatureNotEnabled => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "The server is not configured for BigQuery. The 'bigquery' feature is not enabled.".to_string()
+                    ),
                 }
             }
             AppError::Internal(err) => {

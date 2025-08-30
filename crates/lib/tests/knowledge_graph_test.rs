@@ -1,3 +1,4 @@
+#[cfg(feature = "graph_db")]
 use anyrag::graph::types::{MemoryKnowledgeGraph, RocksdbKnowledgeGraph};
 use chrono::{DateTime, Duration, Utc};
 use tempfile::{tempdir, TempDir};

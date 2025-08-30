@@ -1,6 +1,7 @@
 use crate::{errors::PromptError, search::SearchError, types::SearchResult};
 use async_trait::async_trait;
 use dyn_clone::DynClone;
+#[cfg(feature = "bigquery")]
 use gcp_bigquery_client::model::table_schema::TableSchema;
 use std::fmt::Debug;
 use std::sync::Arc;

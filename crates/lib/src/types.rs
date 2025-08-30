@@ -1,3 +1,5 @@
+#[cfg(feature = "bigquery")]
+use crate::providers::db::bigquery::BigQueryProvider;
 use crate::{
     errors::PromptError,
     prompts::{
@@ -5,7 +7,7 @@ use crate::{
         knowledge::{KNOWLEDGE_RAG_SYSTEM_PROMPT, KNOWLEDGE_RAG_USER_PROMPT},
         rss::{RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT},
     },
-    providers::{ai::AiProvider, db::bigquery::BigQueryProvider, db::storage::Storage},
+    providers::{ai::AiProvider, db::storage::Storage},
     rerank::Rerankable,
 };
 use serde::{Deserialize, Serialize};
@@ -137,10 +139,17 @@ impl PromptClientBuilder {
     }
 
     /// A helper to build and set a `BigQueryProvider` as the storage provider.
+    #[cfg(feature = "bigquery")]
     pub async fn bigquery_storage(mut self, project_id: String) -> Result<Self, PromptError> {
         let provider = BigQueryProvider::new(project_id).await?;
         self.storage_provider = Some(Box::new(provider));
         Ok(self)
+    }
+
+    /// A helper to build and set a `BigQueryProvider` as the storage provider.
+    #[cfg(not(feature = "bigquery"))]
+    pub async fn bigquery_storage(self, _project_id: String) -> Result<Self, PromptError> {
+        Err(PromptError::BigQueryFeatureNotEnabled)
     }
 
     /// A helper to build and set a `SqliteProvider` as the storage provider.
