@@ -161,3 +161,122 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+#[cfg(feature = "graph_db")]
+async fn test_kg_provides_more_precise_answer() -> Result<()> {
+    // --- 1. Arrange ---
+    let app = TestApp::spawn().await?;
+
+    // Helper to seed the regular KB with a plausible but less precise answer
+    async fn seed_regular_kb(app: &TestApp, answer: &str) -> Result<()> {
+        let db = turso::Builder::new_local(app.db_path.to_str().unwrap())
+            .build()
+            .await?;
+        let conn = db.connect()?;
+        anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
+        conn.execute(
+            "INSERT INTO faq_kb (question, answer, source_url, is_explicit, content_hash, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
+            turso::params![
+                "What is the power source for the SuperWidget X500?",
+                answer,
+                "manual_seed",
+                true,
+                "generic_hash",
+                chrono::Utc::now().to_rfc3339()
+            ],
+        ).await?;
+        Ok(())
+    }
+
+    let subject = "SuperWidget X500";
+    let query_full_question = "What is the power source for the SuperWidget X500?";
+    let generic_answer = "It uses a standard rechargeable battery pack";
+    let precise_kg_answer = "The primary power source is the TX300 Solar Array";
+    let final_answer_without_kg =
+        "The SuperWidget X500 is powered by a standard rechargeable battery pack.";
+    let final_answer_with_kg = "The primary power source is the TX300 Solar Array.";
+
+    // Seed the regular KB with the generic answer.
+    seed_regular_kb(&app, generic_answer).await?;
+
+    // Seed the Knowledge Graph with the precise, correct answer.
+    {
+        let mut kg = app.knowledge_graph.write().unwrap();
+        kg.add_fact(
+            subject,
+            "role", // Using "role" as the predicate for consistency
+            precise_kg_answer,
+            Utc::now() - Duration::days(1),
+            Utc::now() + Duration::days(1),
+        )?;
+    }
+
+    // --- 2. Mock Services ---
+    let embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
+        then.status(200)
+            .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
+    });
+
+    // Mock for the RAG call WITHOUT the KG context.
+    let rag_without_kg_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("strict, factual AI")
+            .body_contains(generic_answer)
+            .matches(|req| !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default()).contains("Definitive Answer"));
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": final_answer_without_kg}}]}),
+        );
+    });
+
+    // Mock for the RAG call WITH the KG context.
+    let rag_with_kg_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("strict, factual AI")
+            .body_contains(precise_kg_answer)
+            .body_contains(generic_answer); // It should see both contexts
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": final_answer_with_kg}}]}),
+        );
+    });
+
+    // --- 3. Act & Assert (Without Knowledge Graph) ---
+    let response_without_kg = app
+        .client
+        .post(format!("{}/search/knowledge", app.address))
+        .json(&json!({
+            "query": query_full_question, // Use the full question here
+            "use_knowledge_graph": false
+        }))
+        .send()
+        .await?;
+
+    assert!(response_without_kg.status().is_success());
+    let body_without_kg: ApiResponse<Value> = response_without_kg.json().await?;
+    assert_eq!(body_without_kg.result["text"], final_answer_without_kg);
+    rag_without_kg_mock.assert();
+
+    // --- 4. Act & Assert (With Knowledge Graph) ---
+    let response_with_kg = app
+        .client
+        .post(format!("{}/search/knowledge", app.address))
+        .json(&json!({
+            "query": subject, // Use the clean subject here to match the KG
+            "use_knowledge_graph": true
+        }))
+        .send()
+        .await?;
+
+    assert!(response_with_kg.status().is_success());
+    let body_with_kg: ApiResponse<Value> = response_with_kg.json().await?;
+    assert_eq!(body_with_kg.result["text"], final_answer_with_kg);
+    rag_with_kg_mock.assert();
+
+    // Embedding mock should be hit twice, once for each search.
+    embedding_mock.assert_hits(2);
+
+    Ok(())
+}
