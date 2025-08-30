@@ -27,22 +27,25 @@ pub struct Article {
 
 /// Creates the `articles` table in the database if it does not already exist.
 /// This function is idempotent and can be called safely on every ingestion.
-pub async fn create_articles_table_if_not_exists(conn: &Connection) -> Result<(), turso::Error> {
-    let table_sql = "
-        CREATE TABLE IF NOT EXISTS articles (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            link TEXT NOT NULL UNIQUE,
-            description TEXT,
-            embedding BLOB,
-            content TEXT,
-            pub_date TEXT,
-            source_url TEXT,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
-    ";
-    conn.execute(table_sql, ()).await?;
+/// The SQL statement to create the `articles` table.
+pub const CREATE_ARTICLES_TABLE_SQL: &str = "
+    CREATE TABLE IF NOT EXISTS articles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        link TEXT NOT NULL UNIQUE,
+        description TEXT,
+        embedding BLOB,
+        content TEXT,
+        pub_date TEXT,
+        source_url TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+";
 
+/// Creates the `articles` table in the database if it does not already exist.
+/// This function is idempotent and can be called safely on every ingestion.
+pub async fn create_articles_table_if_not_exists(conn: &Connection) -> Result<(), turso::Error> {
+    conn.execute(CREATE_ARTICLES_TABLE_SQL, ()).await?;
     Ok(())
 }
 

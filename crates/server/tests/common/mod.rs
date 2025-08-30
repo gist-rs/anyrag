@@ -21,6 +21,7 @@ mod main;
 
 use anyhow::Result;
 use anyrag::{
+    ingest::articles::CREATE_ARTICLES_TABLE_SQL,
     providers::{
         ai::local::LocalAiProvider,
         db::{sqlite::SqliteProvider, storage::Storage},
@@ -86,6 +87,12 @@ impl TestApp {
             .execute_query("INSERT INTO test_table (id, name, value) VALUES (1, 'test', 1.0)")
             .await
             .expect("Failed to insert data into test table in TestApp");
+
+        // Also ensure the `articles` table exists, as it's needed for search endpoints.
+        sqlite_provider
+            .execute_query(CREATE_ARTICLES_TABLE_SQL)
+            .await
+            .expect("Failed to create articles table in TestApp");
 
         let prompt_client = Arc::new(
             PromptClientBuilder::new()
