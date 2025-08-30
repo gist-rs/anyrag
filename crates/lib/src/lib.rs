@@ -28,7 +28,6 @@ use crate::prompts::core::{
 };
 use chrono::Utc;
 use gcp_bigquery_client::model::table_schema::TableSchema;
-use regex::Regex;
 use serde_json::Value;
 use tracing::{error, info};
 
@@ -270,32 +269,42 @@ impl PromptClient {
 
         info!("<-- Raw response from AI: {}", &raw_response);
 
-        // --- REVISED LOGIC ---
-        // First, try to extract a query from a markdown code block. This is the most common case.
-        let re = Regex::new(r"```(?:sql|sqlite|query)?\n?([\s\S]*?)```")?;
-        let query_candidate_from_block = re
-            .captures(&raw_response)
-            .and_then(|caps| caps.get(1))
-            .map(|m| m.as_str().trim());
+        // --- FINAL, ROBUST LOGIC ---
+        // This logic robustly handles AI responses that are either raw SQL
+        // or SQL inside a markdown code block.
+        let trimmed_response = raw_response.trim();
+        let query_candidate =
+            if trimmed_response.starts_with("```") && trimmed_response.ends_with("```") {
+                // It's a markdown block. Slice to get the content inside.
+                let mut inner_content = &trimmed_response[3..trimmed_response.len() - 3];
 
-        let query_candidate = match query_candidate_from_block {
-            Some(query) => query,
-            // If no code block was found, maybe the AI just returned the raw SQL.
-            None => raw_response.trim(),
-        };
+                // The first line might be the language specifier (e.g., "sql\n").
+                // If so, trim it off.
+                if let Some(newline_pos) = inner_content.find('\n') {
+                    let first_line = &inner_content[..newline_pos].trim();
+                    if !first_line.contains(' ') {
+                        // A simple language specifier won't have spaces.
+                        inner_content = &inner_content[newline_pos + 1..];
+                    }
+                }
+                inner_content.trim()
+            } else {
+                // Not a markdown block, treat the whole response as the candidate.
+                trimmed_response
+            };
 
-        // Now, check if the candidate (either from a block or the raw response) looks like a query.
+        // Now, check if the candidate (which is now clean SQL) looks like a query.
         if !query_candidate.to_uppercase().starts_with("SELECT")
             && !query_candidate.to_uppercase().starts_with("WITH")
         {
-            // If not, it's a direct answer. The answer is the *original* raw response, not the trimmed one.
+            // If not, it's a direct answer. The answer is the *original* raw response.
             info!("[get_query_from_prompt] Response is a direct answer, not a query.");
             return Ok(QueryOrAnswer::Answer(raw_response.to_string()));
         }
 
         info!("[get_query_from_prompt] Successfully generated query.");
 
-        // 3. It is a query, so perform table name replacements on the cleaned candidate.
+        // It is a query, so perform table name replacements on the cleaned candidate.
         let mut query = query_candidate.to_string();
         if let Some(table) = &options.table_name {
             query = query.replace("`your_table_name`", &format!("`{table}`"));

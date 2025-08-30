@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
 # Internal Crate
-anyrag = { path = "../lib", features = ["bigquery"] }
+anyrag = { path = "../lib" }
 
 # Web Framework
 axum = { workspace = true }
@@ -34,6 +34,10 @@ futures = { workspace = true }
 dotenvy = { workspace = true }
 anyhow = { workspace = true }
 reqwest = { workspace = true, features = ["json", "multipart"] }
+
+[features]
+default = ["bigquery"]
+bigquery = ["anyrag/bigquery"]
 
 [dev-dependencies]
 async-trait = { workspace = true }
@@ -86,9 +90,4 @@ harness = true
 [[test]]
 name = "pdf_url_ingest_test"
 path = "tests/pdf_url_ingest_test.rs"
-harness = true
-
-[[test]]
-name = "knowledge_hybrid_search_test"
-path = "tests/knowledge_hybrid_search_test.rs"
 harness = true

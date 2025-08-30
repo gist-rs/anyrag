@@ -48,12 +48,35 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
     // The provider for local ingestion, embedding, and searching.
     let sqlite_provider = SqliteProvider::new(&config.db_url).await?;
 
-    // The main prompt client for NL-to-SQL is configured for BigQuery.
-    let prompt_client = PromptClientBuilder::new()
-        .ai_provider(ai_provider)
-        .bigquery_storage(config.project_id)
-        .await?
-        .build()?;
+    // Conditionally build the prompt client.
+    let prompt_client = {
+        let builder = PromptClientBuilder::new().ai_provider(ai_provider);
+
+        #[cfg(feature = "bigquery")]
+        if let Some(project_id) = config.project_id {
+            tracing::info!(
+                "BIGQUERY_PROJECT_ID found, building prompt client with BigQuery storage."
+            );
+            builder.bigquery_storage(project_id).await?.build()?
+        } else {
+            tracing::info!(
+                "No BIGQUERY_PROJECT_ID found, building prompt client with SQLite storage."
+            );
+            builder
+                .storage_provider(Box::new(sqlite_provider.clone()))
+                .build()?
+        }
+
+        #[cfg(not(feature = "bigquery"))]
+        {
+            tracing::info!(
+                "'bigquery' feature not enabled, building prompt client with SQLite storage."
+            );
+            builder
+                .storage_provider(Box::new(sqlite_provider.clone()))
+                .build()?
+        }
+    };
 
     Ok(AppState {
         prompt_client: Arc::new(prompt_client),

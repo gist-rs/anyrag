@@ -57,7 +57,7 @@ fn test_get_config_success_all_vars() {
     // Assert that all values were parsed correctly
     assert_eq!(config.ai_provider, "local");
     assert_eq!(config.ai_api_url, "http://localhost:1234");
-    assert_eq!(config.project_id, "test-project");
+    assert_eq!(config.project_id, Some("test-project".to_string()));
     assert_eq!(config.ai_api_key, Some("test-api-key".to_string()));
     assert_eq!(config.ai_model, Some("test-model".to_string()));
     assert_eq!(config.port, 9999);
@@ -116,21 +116,17 @@ fn test_get_config_missing_required_url() {
 }
 
 #[test]
-fn test_get_config_missing_required_project_id() {
+fn test_get_config_no_project_id() {
     let _lock = ENV_LOCK.lock().unwrap();
     clear_env_vars();
 
-    // Miss the BIGQUERY_PROJECT_ID
+    // Do not set BIGQUERY_PROJECT_ID
     env::set_var("AI_API_URL", "http://test.url");
 
-    let result = get_config();
+    let config = get_config().expect("Config should load without project ID");
 
-    // Assert that the correct error is returned
-    assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        ConfigError::Missing(key) if key == "BIGQUERY_PROJECT_ID"
-    ));
+    // Assert that project_id is None
+    assert!(config.project_id.is_none());
     clear_env_vars();
 }
 
