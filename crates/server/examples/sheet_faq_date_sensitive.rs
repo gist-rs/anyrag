@@ -15,7 +15,7 @@
 //! # Usage
 //!
 //! From the workspace root (`anyrag/`):
-//! `cargo run -p anyrag-server --example sheet_faq_date_sensitive`
+//! `RUST_LOG=info cargo run -p anyrag-server --example sheet_faq_date_sensitive`
 
 // Include the binary's main source file to access its components.
 #[path = "../src/main.rs"]
