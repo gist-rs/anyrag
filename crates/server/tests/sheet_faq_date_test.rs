@@ -47,7 +47,20 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
 
-    // C. Mock the final RAG synthesis call.
+    // C. Mock the Query Analysis call for the RAG search.
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert query analyst");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!({
+                "entities": [],
+                "keyphrases": ["hobby"]
+            }).to_string()}}]}),
+        );
+    });
+
+    // D. Mock the final RAG synthesis call.
     // This is the most critical assertion. We check that the LLM receives the correct date context.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
@@ -95,6 +108,7 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
 
     // --- 8. Assert Mock Calls ---
     sheet_download_mock.assert();
+    query_analysis_mock.assert();
     embedding_mock.assert_hits(2); // 1 for the ingested document, 1 for the search query.
     rag_synthesis_mock.assert(); // This confirms the core logic of the test.
 

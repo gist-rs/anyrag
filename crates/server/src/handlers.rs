@@ -16,7 +16,8 @@ use anyrag::{
         ai::generate_embedding,
         db::storage::{KeywordSearch, VectorSearch},
     },
-    search::hybrid_search,
+    rerank::{llm_rerank, reciprocal_rank_fusion},
+    search::{hybrid_search, SearchMode},
     types::ContentType,
     ExecutePromptOptions, PromptClientBuilder, SearchResult,
 };
@@ -28,7 +29,7 @@ use axum_extra::extract::Multipart;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-
+use std::collections::HashMap;
 use tracing::{error, info};
 use turso::params;
 
@@ -72,6 +73,9 @@ pub struct SearchRequest {
     pub query: String,
     pub limit: Option<u32>,
     pub instruction: Option<String>,
+    #[allow(dead_code)]
+    #[serde(default)]
+    pub mode: SearchMode,
 
     #[serde(default)]
     pub use_knowledge_graph: Option<bool>,
@@ -556,6 +560,78 @@ pub async fn keyword_search_handler(
         .await?;
     let debug_info = json!({ "query": payload.query, "limit": limit });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
+}
+
+pub async fn hybrid_search_handler(
+    State(app_state): State<AppState>,
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<SearchRequest>,
+) -> Result<Json<ApiResponse<Vec<SearchResult>>>, AppError> {
+    info!(
+        "Received hybrid search for query: '{}' with mode {:?}",
+        payload.query, payload.mode
+    );
+    let limit = payload.limit.unwrap_or(10);
+    let api_url = app_state
+        .embeddings_api_url
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
+    let model = app_state
+        .embeddings_model
+        .as_ref()
+        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
+    let query_vector = generate_embedding(api_url, model, &payload.query).await?;
+
+    // --- Stage 1: Fetch Candidates Concurrently ---
+    let (vector_results, keyword_results) = tokio::join!(
+        app_state
+            .sqlite_provider
+            .vector_search(query_vector.clone(), limit * 2, None),
+        app_state
+            .sqlite_provider
+            .keyword_search(&payload.query, limit * 2)
+    );
+
+    let vector_results = vector_results?;
+    let keyword_results = keyword_results?;
+
+    // --- Stage 2: Re-rank using the specified mode ---
+    let mut ranked_results = match payload.mode {
+        SearchMode::LlmReRank => {
+            // Combine and deduplicate candidates from both search methods.
+            let mut all_candidates: HashMap<String, SearchResult> = HashMap::new();
+            for result in vector_results
+                .into_iter()
+                .chain(keyword_results.into_iter())
+            {
+                all_candidates.entry(result.link.clone()).or_insert(result);
+            }
+            let candidates: Vec<SearchResult> = all_candidates.into_values().collect();
+
+            if candidates.is_empty() {
+                vec![]
+            } else {
+                llm_rerank(
+                    app_state.prompt_client.ai_provider.as_ref(),
+                    &payload.query,
+                    candidates,
+                )
+                .await
+                .map_err(|e| AppError::Internal(anyhow::anyhow!("LLM Reranking failed: {e}")))?
+            }
+        }
+        SearchMode::Rrf => reciprocal_rank_fusion(vector_results, keyword_results),
+    };
+
+    ranked_results.truncate(limit as usize);
+
+    let debug_info = json!({ "query": payload.query, "limit": limit, "mode": payload.mode });
+    Ok(wrap_response(
+        ranked_results,
+        debug_params,
+        Some(debug_info),
+    ))
 }
 
 pub async fn knowledge_ingest_handler(

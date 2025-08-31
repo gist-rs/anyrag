@@ -118,6 +118,7 @@ async fn main() -> Result<()> {
         query: question.to_string(),
         instruction: None,
         limit: Some(3),
+        mode: Default::default(),
         use_knowledge_graph: Some(false),
     };
 

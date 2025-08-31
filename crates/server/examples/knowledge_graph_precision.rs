@@ -57,6 +57,7 @@ async fn ask_question(app_state: AppState, query: &str, use_kg: bool) -> Result<
         query: query.to_string(),
         instruction: None,
         limit: Some(5),
+        mode: Default::default(),
         use_knowledge_graph: Some(use_kg),
     };
 

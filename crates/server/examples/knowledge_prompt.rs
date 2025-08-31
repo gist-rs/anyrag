@@ -56,7 +56,7 @@ async fn ask_question(
         query: query.to_string(),
         instruction: instruction.map(String::from),
         limit: Some(5), // How many KB entries to use for context
-
+        mode: Default::default(),
         use_knowledge_graph: Some(true),
     };
 
