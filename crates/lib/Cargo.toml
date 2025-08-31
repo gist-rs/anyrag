@@ -51,3 +51,7 @@ path = "tests/prompts.rs"
 [[test]]
 name = "ingest_test"
 path = "tests/ingest_test.rs"
+
+[[example]]
+name = "knowledge"
+path = "examples/knowledge.rs"

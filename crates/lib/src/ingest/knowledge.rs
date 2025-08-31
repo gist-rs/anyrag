@@ -65,20 +65,25 @@ pub struct ExtractedKnowledge {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FaqItem {
+    #[serde(default)]
     pub question: String,
+    #[serde(default)]
     pub answer: String,
     pub is_explicit: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContentChunk {
+    #[serde(default)]
     topic: String,
+    #[serde(default)]
     content: String,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct AugmentedFaq {
     id: usize,
+    #[serde(default)]
     question: String,
 }
 
@@ -90,8 +95,11 @@ pub struct AugmentationResponse {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContentMetadata {
     #[serde(rename = "type")]
+    #[serde(default)]
     pub metadata_type: String,
+    #[serde(default)]
     pub subtype: String,
+    #[serde(default)]
     pub value: String,
 }
 
