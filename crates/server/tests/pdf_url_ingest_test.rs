@@ -109,7 +109,20 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": [0.4, 0.5, 0.6] }] }));
     });
 
-    // E. Mock final RAG synthesis call
+    // E. Mock the Query Analysis call for the RAG search.
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert query analyst");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!({
+                "entities": [],
+                "keyphrases": ["test number"]
+            }).to_string()}}]}),
+        );
+    });
+
+    // F. Mock final RAG synthesis call
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -156,6 +169,7 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     pdf_serve_mock.assert();
     refinement_mock.assert();
     distillation_mock.assert();
+    query_analysis_mock.assert();
     embedding_mock.assert_hits(2); // Once for new FAQ, once for search query
     rag_synthesis_mock.assert();
 

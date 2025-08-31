@@ -107,6 +107,57 @@ CONTENT:
 Please provide only the JSON object in your response. Do not add any extra text or explanations.
 "#;
 
+// --- Metadata Extraction ---
+
+/// System prompt for extracting structured metadata (Entities and Keyphrases) from content.
+pub const METADATA_EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an expert document analyst. Your task is to analyze the following text and extract two types of metadata: **Entities** and **Keyphrases**.
+
+# Instructions:
+1.  **Entities**: Identify specific, proper nouns. These are unique, identifiable items like people, products, organizations, locations, or specific dates.
+2.  **Keyphrases**: Identify the 5-10 most important thematic concepts or topics in the text. These should be broader than entities and capture the main ideas.
+3.  **Language Rule**: You **MUST** generate the metadata in the same language as the original text. For example, if the content is in Thai, the metadata must be in Thai.
+4.  Return a single JSON array of objects. Do not include any other text or explanations.
+
+# JSON Object Schema:
+Each object in the array must have the following keys:
+- `type`: Must be either 'ENTITY' or 'KEYPHRASE'.
+- `subtype`: For 'ENTITY', specify what it is (e.g., 'PERSON', 'PRODUCT', 'ORGANIZATION', 'CONCEPT'). For 'KEYPHRASE', use 'CONCEPT'.
+- `value`: The extracted string value of the entity or keyphrase.
+
+# Example:
+## INPUT TEXT:
+The True App Mega Campaign offers a chance to win a Tesla. To be eligible, customers must pay their bills via the True App between July 1 and August 31, 2024. This promotion is managed by True Corporation.
+
+## EXPECTED JSON OUTPUT:
+[
+  {
+    "type": "ENTITY",
+    "subtype": "PRODUCT",
+    "value": "True App"
+  },
+  {
+    "type": "ENTITY",
+    "subtype": "PRODUCT",
+    "value": "Tesla"
+  },
+  {
+    "type": "ENTITY",
+    "subtype": "ORGANIZATION",
+    "value": "True Corporation"
+  },
+  {
+    "type": "KEYPHRASE",
+    "subtype": "CONCEPT",
+    "value": "bill payment campaign"
+  },
+  {
+    "type": "KEYPHRASE",
+    "subtype": "CONCEPT",
+    "value": "Tesla giveaway"
+  }
+]
+"#;
+
 // --- RAG (Retrieval-Augmented Generation) Prompts ---
 
 /// The system prompt for synthesizing an answer from retrieved knowledge base context.

@@ -1,7 +1,7 @@
 use crate::types::{FieldType, TableField, TableSchema};
 use crate::{
     errors::PromptError,
-    providers::db::storage::{KeywordSearch, Storage, VectorSearch},
+    providers::db::storage::{KeywordSearch, MetadataSearch, Storage, VectorSearch},
     search::SearchError,
     types::SearchResult,
 };
@@ -101,88 +101,6 @@ impl SqliteProvider {
                 .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
         }
         Ok(())
-    }
-
-    /// Performs a vector similarity search on the `faq_items` table.
-    pub async fn vector_search_faqs(
-        &self,
-        query_vector: Vec<f32>,
-        limit: u32,
-    ) -> Result<Vec<FaqSearchResult>, SearchError> {
-        info!("Executing SQLite vector search on faq_items.");
-        let conn = self.db.connect()?;
-
-        let vector_str = format!(
-            "vector('[{}]')",
-            query_vector
-                .iter()
-                .map(|f| f.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-
-        // A similarity score of 0.65 means we are looking for vectors that are reasonably close.
-        // This corresponds to a cosine distance of 0.7. (1.0 - (0.7 / 2.0) = 0.65)
-        let similarity_threshold = 0.65;
-        let distance_calculation =
-            format!("(1.0 - (vector_distance_cos(de.embedding, {vector_str}) / 2.0))");
-        let sql = format!(
-            "SELECT fi.answer, {distance_calculation} AS similarity
-             FROM faq_items fi
-             JOIN document_embeddings de ON de.document_id = fi.document_id
-             WHERE de.embedding IS NOT NULL AND {distance_calculation} > {similarity_threshold}
-             ORDER BY similarity DESC
-             LIMIT {limit};"
-        );
-
-        let mut results = conn.query(&sql, ()).await?;
-        let mut search_results = Vec::new();
-
-        while let Some(row) = results.next().await? {
-            let answer = match row.get_value(0)? {
-                TursoValue::Text(s) => s,
-                _ => String::new(),
-            };
-            let score = match row.get_value(1)? {
-                TursoValue::Real(f) => f,
-                _ => 0.0,
-            };
-            search_results.push(FaqSearchResult { answer, score });
-        }
-
-        Ok(search_results)
-    }
-
-    /// Performs a keyword search on the `faq_items` table.
-    pub async fn keyword_search_faqs(
-        &self,
-        query: &str,
-        limit: u32,
-    ) -> Result<Vec<FaqSearchResult>, SearchError> {
-        info!("Executing keyword search on faq_items for: {}", query);
-        let conn = self.db.connect()?;
-        let pattern = format!("%{}%", query.to_lowercase());
-
-        let sql = format!(
-            "SELECT answer, 0.5 AS score FROM faq_items WHERE question LIKE ? OR answer LIKE ? LIMIT {limit}"
-        );
-
-        let mut results = conn.query(&sql, params![pattern.clone(), pattern]).await?;
-        let mut search_results = Vec::new();
-
-        while let Some(row) = results.next().await? {
-            let answer = match row.get_value(0)? {
-                TursoValue::Text(s) => s,
-                _ => String::new(),
-            };
-            let score = match row.get_value(1)? {
-                TursoValue::Real(f) => f,
-                _ => 0.0,
-            };
-            search_results.push(FaqSearchResult { answer, score });
-        }
-
-        Ok(search_results)
     }
 }
 
@@ -341,6 +259,7 @@ impl VectorSearch for SqliteProvider {
         &self,
         query_vector: Vec<f32>,
         limit: u32,
+        document_ids: Option<&[String]>,
     ) -> Result<Vec<SearchResult>, SearchError> {
         info!("Executing SQLite vector search on documents.");
         let conn = self.db.connect()?;
@@ -354,20 +273,39 @@ impl VectorSearch for SqliteProvider {
                 .join(", ")
         );
 
-        let similarity_threshold = 0.65;
         let distance_calculation =
             format!("(1.0 - (vector_distance_cos(de.embedding, {vector_str}) / 2.0))");
 
-        let sql = format!(
+        let mut sql = format!(
             "SELECT d.title, d.source_url, d.content, {distance_calculation} AS similarity
              FROM document_embeddings de
              JOIN documents d ON d.id = de.document_id
-             WHERE de.embedding IS NOT NULL AND {distance_calculation} > {similarity_threshold}
-             ORDER BY similarity DESC
-             LIMIT {limit};"
+             WHERE de.embedding IS NOT NULL"
         );
 
-        let mut results = conn.query(&sql, ()).await?;
+        let mut query_params: Vec<TursoValue> = Vec::new();
+        if let Some(ids) = document_ids {
+            if !ids.is_empty() {
+                let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+                sql.push_str(&format!(" AND de.document_id IN ({placeholders})"));
+                for id in ids {
+                    query_params.push(id.clone().into());
+                }
+            } else {
+                // If an empty list of IDs is provided, no results should match.
+                return Ok(Vec::new());
+            }
+        }
+
+        sql.push_str(&format!(" ORDER BY similarity DESC LIMIT {limit};"));
+
+        info!(sql = %sql, params = ?query_params, "Executing vector search SQL");
+
+        let mut results = if query_params.is_empty() {
+            conn.query(&sql, ()).await?
+        } else {
+            conn.query(&sql, query_params).await?
+        };
         let mut search_results = Vec::new();
 
         while let Some(row) = results.next().await? {
@@ -437,5 +375,84 @@ impl KeywordSearch for SqliteProvider {
         }
 
         Ok(search_results)
+    }
+}
+
+#[async_trait]
+impl MetadataSearch for SqliteProvider {
+    async fn metadata_search(
+        &self,
+        entities: &[String],
+        keyphrases: &[String],
+        owner_id: Option<&str>,
+        limit: u32,
+    ) -> Result<Vec<String>, SearchError> {
+        info!("Executing metadata search for entities: {entities:?}, keyphrases: {keyphrases:?}");
+        let conn = self.db.connect()?;
+
+        let mut conditions = Vec::new();
+        let mut params: Vec<turso::Value> = Vec::new();
+
+        if let Some(owner) = owner_id {
+            conditions.push("owner_id = ?".to_string());
+            params.push(owner.to_string().into());
+        }
+
+        let mut metadata_conditions = Vec::new();
+        if !entities.is_empty() {
+            let placeholders = entities.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            metadata_conditions.push(format!(
+                "(metadata_type = 'ENTITY' AND metadata_value IN ({placeholders}))"
+            ));
+            for entity in entities {
+                params.push(entity.clone().into());
+            }
+        }
+        if !keyphrases.is_empty() {
+            let placeholders = keyphrases
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ");
+            metadata_conditions.push(format!(
+                "(metadata_type = 'KEYPHRASE' AND metadata_value IN ({placeholders}))"
+            ));
+            for keyphrase in keyphrases {
+                params.push(keyphrase.clone().into());
+            }
+        }
+
+        if !metadata_conditions.is_empty() {
+            conditions.push(format!("({})", metadata_conditions.join(" OR ")));
+        } else {
+            // No metadata to search for, return empty
+            return Ok(Vec::new());
+        }
+
+        let where_clause = if conditions.is_empty() {
+            "".to_string()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
+        };
+
+        let sql = format!(
+            "SELECT document_id, COUNT(document_id) as relevance_score
+             FROM content_metadata
+             {where_clause}
+             GROUP BY document_id
+             ORDER BY relevance_score DESC
+             LIMIT {limit}"
+        );
+
+        let mut results = conn.query(&sql, params).await?;
+        let mut doc_ids = Vec::new();
+
+        while let Some(row) = results.next().await? {
+            if let Ok(TursoValue::Text(id)) = row.get_value(0) {
+                doc_ids.push(id);
+            }
+        }
+
+        Ok(doc_ids)
     }
 }

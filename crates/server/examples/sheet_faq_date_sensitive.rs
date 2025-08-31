@@ -118,7 +118,6 @@ async fn main() -> Result<()> {
         query: question.to_string(),
         instruction: None,
         limit: Some(3),
-        mode: anyrag::SearchMode::LlmReRank,
         use_knowledge_graph: Some(false),
     };
 

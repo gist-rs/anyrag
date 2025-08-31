@@ -1,8 +1,7 @@
-//! # End-to-End Hybrid Search Workflow Tests
+//! # End-to-End Knowledge Search Workflow Tests
 //!
-//! This file tests the hybrid search endpoint, verifying both the default
-//! LLM-based re-ranking and the optional RRF re-ranking modes. It uses mocks
-//! for all external services to ensure deterministic and reliable results.
+//! This file tests the `/search/knowledge` endpoint, which uses the new
+//! multi-stage hybrid search pipeline.
 
 mod common;
 
@@ -10,150 +9,137 @@ use anyhow::Result;
 use common::TestApp;
 use httpmock::Method;
 use serde_json::{json, Value};
-use tracing::info;
+use turso::{params, Builder};
 
 use common::main::types::ApiResponse;
 
+/// Seeds the database with two distinct documents for testing the search pipeline.
+async fn seed_search_data(app: &TestApp) -> Result<()> {
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
+    let conn = db.connect()?;
+
+    // Doc 1: PostgreSQL - Will be found via metadata
+    let doc1_id = "doc_postgres";
+    let doc1_content = "PostgreSQL is a powerful, open source object-relational database system.";
+    let doc1_vector = [0.1, 0.1, 0.9, 0.0]; // Vector leans towards "database"
+    conn.execute(
+        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
+        params![
+            doc1_id,
+            "http://m.com/postgres",
+            "PostgreSQL Info",
+            doc1_content
+        ],
+    )
+    .await?;
+    conn.execute(
+        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
+        params![doc1_id, "ENTITY", "PRODUCT", "PostgreSQL"],
+    ).await?;
+    let doc1_vector_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(doc1_vector.as_ptr() as *const u8, doc1_vector.len() * 4)
+    };
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        params![doc1_id, "mock-model", doc1_vector_bytes],
+    )
+    .await?;
+
+    // Doc 2: Qwen3 - Should not be returned
+    let doc2_id = "doc_qwen3";
+    let doc2_content = "Qwen3 is a large language model.";
+    let doc2_vector = [0.9, 0.1, 0.1, 0.0]; // Vector leans towards "LLM"
+    conn.execute(
+        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
+        params![doc2_id, "http://m.com/qwen3", "Qwen3 Info", doc2_content],
+    )
+    .await?;
+    conn.execute(
+        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
+        params![doc2_id, "ENTITY", "PRODUCT", "Qwen3"],
+    ).await?;
+    let doc2_vector_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(doc2_vector.as_ptr() as *const u8, doc2_vector.len() * 4)
+    };
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        params![doc2_id, "mock-model", doc2_vector_bytes],
+    )
+    .await?;
+
+    Ok(())
+}
+
 #[tokio::test]
-async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
+async fn test_knowledge_search_pipeline() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
+    seed_search_data(&app).await?;
+
+    let user_query = "Tell me about PostgreSQL";
+    let final_rag_answer = "Based on the context, PostgreSQL is a powerful, open source object-relational database system.";
 
     // --- 2. Mock External Services ---
 
-    // A. Mock the RSS feed with two distinct articles.
-    // The descriptions are crafted to ensure keyword search finds both.
-    let mock_rss_content = r#"
-        <?xml version="1.0" encoding="UTF-8"?>
-        <rss version="2.0">
-        <channel>
-            <title>Mock Feed</title>
-            <link>http://m.com</link>
-            <description>A mock feed for testing.</description>
-            <item>
-                <title>The Rise of Qwen3</title>
-                <link>http://m.com/qwen3</link>
-                <description>An article about a database and large language models.</description>
-                <pubDate>Mon, 01 Jan 2024 12:00:00 GMT</pubDate>
-            </item>
-            <item>
-                <title>PostgreSQL Performance</title>
-                <link>http://m.com/postgres</link>
-                <description>An article about database tuning.</description>
-                <pubDate>Tue, 02 Jan 2024 12:00:00 GMT</pubDate>
-            </item>
-        </channel>
-        </rss>
-    "#;
-    app.mock_server.mock(|when, then| {
-        when.method(Method::GET).path("/rss");
-        then.status(200).body(mock_rss_content);
-    });
-
-    // B. Mock the Embeddings API to return a generic, non-null vector for any input.
-    // This ensures vector search always returns all documents, guaranteeing candidates for re-ranking.
-    let embeddings_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
-        then.status(200)
-            .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
-    });
-
-    // C. Mock the LLM Re-ranking API.
-    // It will be queried with "database" and is programmed to prefer the PostgreSQL article.
-    let rerank_response_content = json!([
-        "http://m.com/postgres", // The LLM's top choice
-        "http://m.com/qwen3"
-    ])
-    .to_string();
-
-    let reranker_mock = app.mock_server.mock(|when, then| {
+    // A. Mock the Query Analysis call to extract the "PostgreSQL" entity.
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert search result re-ranker"); // Differentiate from other AI calls
+            .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{
                 "message": {
                     "role": "assistant",
-                    "content": rerank_response_content
+                    "content": json!({
+                        "entities": ["PostgreSQL"],
+                        "keyphrases": ["database"]
+                    }).to_string()
                 }
             }]
         }));
     });
 
-    // --- 3. Spawn App, Ingest, and Embed ---
-    app.client
-        .post(format!("{}/ingest", app.address))
-        .json(&json!({ "url": app.mock_server.url("/rss") }))
-        .send()
-        .await?
-        .error_for_status()?;
+    // B. Mock the Embedding API for the user query's vector.
+    let query_vector = vec![0.1, 0.2, 0.8, 0.0]; // A vector that is semantically close to PostgreSQL doc
+    let embeddings_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
+        then.status(200)
+            .json_body(json!({ "data": [{ "embedding": query_vector }] }));
+    });
 
-    app.client
-        .post(format!("{}/embed/new", app.address))
-        .json(&json!({ "limit": 2 }))
-        .send()
-        .await?
-        .error_for_status()?;
-    info!("-> Ingest & Embed Complete.");
+    // C. Mock the final RAG synthesis.
+    // Assert that it ONLY receives the PostgreSQL content.
+    let rag_synthesis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("strict, factual AI")
+            .body_contains("PostgreSQL is a powerful")
+            .matches(|req| {
+                !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default()).contains("Qwen3")
+            });
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
+        );
+    });
 
-    // --- 4. Test LLM Re-ranking (Default Mode) ---
-    info!("\n--- Testing Hybrid Search with LLM Re-ranking (Default) ---");
-    // This query ensures both articles are candidates, letting us test the re-ranker.
-    let llm_res = app
+    // --- 3. Act ---
+    let response = app
         .client
-        .post(format!("{}/search/hybrid", app.address))
-        .json(&json!({ "query": "database" })) // Use a query that will match via keyword
+        .post(format!("{}/search/knowledge", app.address))
+        .json(&json!({ "query": user_query }))
         .send()
         .await?
         .error_for_status()?;
 
-    let llm_response: ApiResponse<Vec<Value>> = llm_res.json().await?;
-    let llm_results = llm_response.result;
-    info!("LLM Re-ranked Results: {:?}", llm_results);
+    // --- 4. Assert ---
+    let response_body: ApiResponse<Value> = response.json().await?;
+    assert_eq!(response_body.result["text"], final_rag_answer);
 
-    assert_eq!(
-        llm_results.len(),
-        2,
-        "Expected LLM to re-rank two candidates."
-    );
-    assert_eq!(
-        llm_results[0]["title"], "PostgreSQL Performance",
-        "LLM re-ranking did not place the PostgreSQL article first."
-    );
-    assert_eq!(
-        llm_results[1]["title"], "The Rise of Qwen3",
-        "LLM re-ranking did not place the Qwen3 article second."
-    );
-
-    // --- 5. Test RRF Re-ranking (Optional Mode) ---
-    info!("\n--- Testing Hybrid Search with RRF Re-ranking (Optional) ---");
-    let rrf_res = app
-        .client
-        .post(format!("{}/search/hybrid", app.address))
-        .json(&json!({
-            "query": "PostgreSQL", // This query strongly favors the keyword match
-            "mode": "rrf"
-        }))
-        .send()
-        .await?
-        .error_for_status()?;
-
-    let rrf_response: ApiResponse<Vec<Value>> = rrf_res.json().await?;
-    let rrf_results = rrf_response.result;
-    info!("RRF Results: {:?}", rrf_results);
-    // Since the vector search is generic and returns both, and the keyword search returns one,
-    // the RRF should correctly combine and boost the keyword match to the top.
-    assert_eq!(rrf_results.len(), 2, "Expected RRF to rank two candidates.");
-    assert_eq!(
-        rrf_results[0]["title"], "PostgreSQL Performance",
-        "RRF did not prioritize the strong keyword match for PostgreSQL."
-    );
-
-    // --- 6. Assert Mock Calls ---
-    // Embeddings: 2 for ingest, 1 for LLM search, 1 for RRF search = 4
-    embeddings_mock.assert_hits(4);
-    // Re-ranker: Only called once for the default (LLM) mode search
-    reranker_mock.assert_hits(1);
+    query_analysis_mock.assert();
+    embeddings_mock.assert();
+    rag_synthesis_mock.assert();
 
     Ok(())
 }

@@ -11,7 +11,7 @@ use crate::{
     errors::PromptError,
     prompts::knowledge::{
         AUGMENTATION_SYSTEM_PROMPT, KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
-        KNOWLEDGE_EXTRACTION_USER_PROMPT,
+        KNOWLEDGE_EXTRACTION_USER_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
     },
     providers::ai::AiProvider,
 };
@@ -87,6 +87,14 @@ pub struct AugmentationResponse {
     augmented_faqs: Vec<AugmentedFaq>,
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ContentMetadata {
+    #[serde(rename = "type")]
+    pub metadata_type: String,
+    pub subtype: String,
+    pub value: String,
+}
+
 // --- Pipeline Orchestration ---
 
 /// Orchestrates the full ingestion pipeline (Stages 1-3) for a given URL.
@@ -96,7 +104,8 @@ pub async fn run_ingestion_pipeline(
     url: &str,
 ) -> Result<usize, KnowledgeError> {
     // TODO: Pass owner_id when auth is implemented
-    let (document_id, ingested_document) = match ingest_and_cache_url(db, url, None).await {
+    let owner_id: Option<&str> = None;
+    let (document_id, ingested_document) = match ingest_and_cache_url(db, url, owner_id).await {
         Ok(content) => content,
         Err(KnowledgeError::ContentUnchanged(url)) => {
             info!("Content for {} is unchanged, pipeline finished.", url);
@@ -105,9 +114,23 @@ pub async fn run_ingestion_pipeline(
         Err(e) => return Err(e),
     };
 
-    let faq_items = distill_and_augment(ai_provider, &ingested_document).await?;
-    // TODO: Pass owner_id when auth is implemented
-    store_structured_knowledge(db, &document_id, None, faq_items).await
+    // Run FAQ generation and metadata extraction concurrently.
+    let (faq_result, metadata_result) = tokio::join!(
+        distill_and_augment(ai_provider, &ingested_document),
+        extract_and_store_metadata(
+            db,
+            ai_provider,
+            &document_id,
+            owner_id,
+            &ingested_document.content
+        )
+    );
+
+    // Handle results
+    let faq_items = faq_result?;
+    metadata_result?; // Propagate metadata errors
+
+    store_structured_knowledge(db, &document_id, owner_id, faq_items).await
 }
 
 // --- Stage 1: Ingestion & Caching ---
@@ -344,6 +367,91 @@ pub async fn store_structured_knowledge(
         faq_items.len()
     );
     Ok(faq_items.len())
+}
+
+// --- Stage 2.5: Hybrid Metadata Extraction ---
+
+pub async fn extract_and_store_metadata(
+    db: &Database,
+    ai_provider: &dyn AiProvider,
+    document_id: &str,
+    owner_id: Option<&str>,
+    content: &str,
+) -> Result<(), KnowledgeError> {
+    info!(
+        "Starting metadata extraction for document ID: {}",
+        document_id
+    );
+
+    let user_prompt = content;
+    let llm_response = ai_provider
+        .generate(METADATA_EXTRACTION_SYSTEM_PROMPT, user_prompt)
+        .await?;
+
+    debug!("LLM metadata response: {}", llm_response);
+    let cleaned_response = llm_response
+        .trim()
+        .strip_prefix("```json")
+        .unwrap_or(&llm_response)
+        .strip_suffix("```")
+        .unwrap_or(&llm_response)
+        .trim();
+
+    let metadata_items: Vec<ContentMetadata> = match serde_json::from_str(cleaned_response) {
+        Ok(items) => items,
+        Err(e) => {
+            warn!(
+                "Failed to parse metadata response, skipping metadata storage. Error: {}",
+                e
+            );
+            return Ok(()); // Don't fail the whole pipeline if metadata fails
+        }
+    };
+
+    if metadata_items.is_empty() {
+        info!("No metadata extracted for document: {document_id}");
+        return Ok(());
+    }
+
+    let conn = db.connect()?;
+    info!(
+        "Storing {} metadata items for document: {}",
+        metadata_items.len(),
+        document_id
+    );
+
+    // Clear old metadata for this document before inserting new items.
+    conn.execute(
+        "DELETE FROM content_metadata WHERE document_id = ?",
+        params![document_id],
+    )
+    .await?;
+
+    conn.execute("BEGIN TRANSACTION", ()).await?;
+    let mut stmt = conn
+        .prepare(
+            r#"INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value)
+               VALUES (?, ?, ?, ?, ?)"#,
+        )
+        .await?;
+
+    for item in &metadata_items {
+        stmt.execute(params![
+            document_id,
+            owner_id,
+            item.metadata_type.to_uppercase(),
+            item.subtype.clone(),
+            item.value.clone(),
+        ])
+        .await?;
+    }
+    conn.execute("COMMIT", ()).await?;
+    info!(
+        "Successfully stored {} metadata items for document: {document_id}",
+        metadata_items.len()
+    );
+
+    Ok(())
 }
 
 // --- Stage 5: Fine-Tuning Export ---

@@ -101,7 +101,20 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
 
-    // D. Mock the final RAG synthesis call (receives context, returns final answer)
+    // D. Mock the Query Analysis call for the RAG search.
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert query analyst");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!({
+                "entities": [],
+                "keyphrases": ["magic number"]
+            }).to_string()}}]}),
+        );
+    });
+
+    // E. Mock the final RAG synthesis call (receives context, returns final answer)
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -153,6 +166,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     // --- 7. Assert Mock Calls ---
     refinement_mock.assert();
     distillation_mock.assert();
+    query_analysis_mock.assert();
     // Embedding is called twice: once for the new FAQ, once for the search query.
     embedding_mock.assert_hits(2);
     rag_synthesis_mock.assert();

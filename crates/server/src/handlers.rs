@@ -16,7 +16,7 @@ use anyrag::{
         ai::generate_embedding,
         db::storage::{KeywordSearch, VectorSearch},
     },
-    search::{hybrid_search, SearchMode},
+    search::hybrid_search,
     types::ContentType,
     ExecutePromptOptions, PromptClientBuilder, SearchResult,
 };
@@ -72,9 +72,7 @@ pub struct SearchRequest {
     pub query: String,
     pub limit: Option<u32>,
     pub instruction: Option<String>,
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub mode: SearchMode,
+
     #[serde(default)]
     pub use_knowledge_graph: Option<bool>,
 }
@@ -538,7 +536,7 @@ pub async fn vector_search_handler(
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = app_state
         .sqlite_provider
-        .vector_search(query_vector, limit)
+        .vector_search(query_vector, limit, None)
         .await?;
 
     let debug_info = json!({ "query": payload.query, "limit": limit });
@@ -557,40 +555,6 @@ pub async fn keyword_search_handler(
         .keyword_search(&payload.query, limit)
         .await?;
     let debug_info = json!({ "query": payload.query, "limit": limit });
-    Ok(wrap_response(results, debug_params, Some(debug_info)))
-}
-
-pub async fn hybrid_search_handler(
-    State(app_state): State<AppState>,
-    debug_params: Query<DebugParams>,
-    Json(payload): Json<SearchRequest>,
-) -> Result<Json<ApiResponse<Vec<SearchResult>>>, AppError> {
-    info!(
-        "Received hybrid search for query: '{}' with mode {:?}",
-        payload.query, payload.mode
-    );
-    let limit = payload.limit.unwrap_or(10);
-    let api_url = app_state
-        .embeddings_api_url
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
-    let model = app_state
-        .embeddings_model
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
-
-    let query_vector = generate_embedding(api_url, model, &payload.query).await?;
-    let results = hybrid_search(
-        app_state.sqlite_provider.as_ref(),
-        app_state.prompt_client.ai_provider.as_ref(),
-        query_vector,
-        &payload.query,
-        limit,
-        payload.mode,
-    )
-    .await?;
-
-    let debug_info = json!({ "query": payload.query, "limit": limit, "mode": payload.mode });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
 
@@ -635,6 +599,8 @@ pub async fn knowledge_search_handler(
         "Received knowledge RAG search for query: '{}', limit: {}",
         payload.query, limit
     );
+    // TODO: Add owner_id from JWT once auth is implemented.
+
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -643,45 +609,23 @@ pub async fn knowledge_search_handler(
         .embeddings_model
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
+    // --- Stage 1: Get Query Embedding ---
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
-    // --- Stage 1: Fetch Candidates Concurrently ---
-    let (vector_results, keyword_results) = tokio::join!(
-        app_state
-            .sqlite_provider
-            .vector_search_faqs(query_vector, limit * 2), // Fetch more for better re-ranking
-        app_state
-            .sqlite_provider
-            .keyword_search_faqs(&payload.query, limit * 2)
-    );
-    let vector_results = vector_results?;
-    let keyword_results = keyword_results?;
 
-    // --- Stage 2: Combine and Deduplicate Results ---
-    // Use a HashMap to handle deduplication and score boosting.
-    let mut candidates = std::collections::HashMap::new();
+    // --- Stage 2 & 3: Hybrid Search (Metadata -> Vector) ---
+    let search_results = hybrid_search(
+        app_state.sqlite_provider.as_ref(),
+        app_state.prompt_client.ai_provider.as_ref(),
+        query_vector,
+        &payload.query,
+        None, // owner_id
+        limit,
+    )
+    .await?;
 
-    // Insert vector results first.
-    for res in vector_results {
-        candidates.insert(res.answer.clone(), res);
-    }
-
-    // Insert keyword results, boosting the score of existing entries if they also appeared in the vector search.
-    for res in keyword_results {
-        candidates
-            .entry(res.answer.clone())
-            .and_modify(|existing| existing.score += res.score) // Boost score
-            .or_insert(res);
-    }
-    let mut search_results: Vec<_> = candidates.into_values().collect();
-
-    // Simple score-based sort as a basic re-ranking mechanism. Higher score is better.
-    search_results.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    search_results.truncate(limit as usize);
-
+    // --- Stage 4: Context Aggregation ---
+    // --- Stage 4: Context Aggregation ---
     let kg_fact = if payload.use_knowledge_graph.unwrap_or(false) {
         info!("Knowledge graph search is enabled for this request.");
         let kg = app_state
@@ -689,6 +633,8 @@ pub async fn knowledge_search_handler(
             .read()
             .map_err(|_| AppError::Internal(anyhow::anyhow!("Failed to acquire KG read lock")))?;
 
+        // For now, let's assume the predicate is 'role' if not specified.
+        // A more advanced implementation might extract this from the query.
         let predicate = "role";
         kg.get_fact_as_of(&payload.query, predicate, Utc::now())
             .ok()
@@ -705,15 +651,16 @@ pub async fn knowledge_search_handler(
     }
 
     if !search_results.is_empty() {
+        // Use the `description` which contains the full document content.
         let articles_context = search_results
             .iter()
-            .map(|result| format!("- {}", result.answer))
+            .map(|result| result.description.clone())
             .collect::<Vec<String>>()
-            .join("\n\n");
+            .join("\n\n---\n\n");
 
         if !context_parts.is_empty() {
             context_parts.push(format!(
-                "Additional Context from Articles:\n{articles_context}"
+                "Additional Context from Documents:\n{articles_context}"
             ));
         } else {
             context_parts.push(articles_context);
@@ -735,6 +682,7 @@ pub async fn knowledge_search_handler(
 
     info!("--> Synthesizing answer with context:\n{}", context);
 
+    // --- Stage 5: LLM Synthesis ---
     let options = ExecutePromptOptions {
         prompt: payload.query.clone(),
         content_type: Some(ContentType::Knowledge),

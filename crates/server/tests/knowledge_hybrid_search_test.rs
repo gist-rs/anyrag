@@ -21,6 +21,7 @@ async fn seed_faq(
     question: &str,
     answer: &str,
     vector: Vec<f32>,
+    metadata: Vec<(&str, &str, &str)>, // type, subtype, value
 ) -> Result<()> {
     let db = Builder::new_local(db_path.to_str().unwrap())
         .build()
@@ -41,6 +42,15 @@ async fn seed_faq(
         params![doc_id, question, answer],
     )
     .await?;
+
+    // Insert metadata for the document.
+    for (m_type, m_subtype, m_value) in metadata {
+        conn.execute(
+            "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
+            params![doc_id, m_type, m_subtype, m_value],
+        )
+        .await?;
+    }
 
     // Convert Vec<f32> to &[u8] for BLOB storage and insert embedding for the document.
     let vector_bytes: &[u8] =
@@ -84,6 +94,7 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
         faq_keyword_question,
         faq_keyword_answer,
         faq_keyword_vector,
+        vec![("ENTITY", "PRODUCT", "Quantum Widget")],
     )
     .await?;
     seed_faq(
@@ -92,11 +103,30 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
         faq_vector_question,
         faq_vector_answer,
         faq_vector_vector,
+        vec![("KEYPHRASE", "CONCEPT", "advanced data processing")],
     )
     .await?;
 
     // --- 4. Mock External Services ---
-    // A. Mock the Embedding API call for the search query.
+    // A. Mock the Query Analysis LLM call.
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert query analyst");
+        then.status(200).json_body(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": json!({
+                        "entities": ["Quantum Widget"],
+                        "keyphrases": ["complex information"]
+                    }).to_string()
+                }
+            }]
+        }));
+    });
+
+    // B. Mock the Embedding API call for the search query.
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/embeddings")
@@ -105,14 +135,17 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": search_query_vector }] }));
     });
 
-    // B. Mock the final RAG synthesis call. This is the most important assertion.
-    // We will verify that the context it receives contains BOTH answers.
+    // C. Mock the final RAG synthesis call. This is the most important assertion.
+    // We will verify that the context it receives contains ONLY the relevant document's content.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            // Check that the context contains key phrases from BOTH documents.
-            .body_contains("multi-layered abstraction") // From the vector search result
-            .body_contains("quantum entanglement"); // From the keyword search result
+            // Check that the context contains ONLY the relevant document's content.
+            .body_contains("quantum entanglement") // From the metadata search result
+            .matches(|req| {
+                !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default())
+                    .contains("multi-layered abstraction")
+            }); // MUST NOT contain the other doc
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
@@ -131,6 +164,7 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     assert_eq!(search_body.result["text"], final_rag_answer);
 
     // --- 7. Assert Mock Calls ---
+    query_analysis_mock.assert();
     embedding_mock.assert();
     rag_synthesis_mock.assert(); // This confirms the core logic of the test.
 

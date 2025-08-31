@@ -55,8 +55,8 @@ async fn ask_question(
     let payload = SearchRequest {
         query: query.to_string(),
         instruction: instruction.map(String::from),
-        limit: Some(5),                      // How many KB entries to use for context
-        mode: anyrag::SearchMode::LlmReRank, // Mode is not used in knowledge search
+        limit: Some(5), // How many KB entries to use for context
+
         use_knowledge_graph: Some(true),
     };
 

@@ -104,6 +104,40 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     )
     .await?;
 
+    // Seed metadata and embedding for the SuperWidget document.
+    conn.execute(
+        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
+        turso::params![document_id, "ENTITY", "PRODUCT", "SuperWidget_X500"],
+    )
+    .await?;
+
+    let widget_vector: Vec<f32> = vec![0.3, 0.2, 0.1, 0.0];
+    let widget_vector_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(widget_vector.as_ptr() as *const u8, widget_vector.len() * 4)
+    };
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        turso::params![document_id, "mock-model", widget_vector_bytes],
+    )
+    .await?;
+
+    // Seed metadata and embedding for the SuperWidget document.
+    conn.execute(
+        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
+        turso::params![document_id, "ENTITY", "PRODUCT", "SuperWidget_X500"],
+    )
+    .await?;
+
+    let widget_vector: Vec<f32> = vec![0.3, 0.2, 0.1, 0.0];
+    let widget_vector_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(widget_vector.as_ptr() as *const u8, widget_vector.len() * 4)
+    };
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        turso::params![document_id, "mock-model", widget_vector_bytes],
+    )
+    .await?;
+
     // Define a unique fact to seed the knowledge graph.
     let now = Utc::now();
     let unique_subject = "SuperWidget_X500";
@@ -124,12 +158,29 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     }
 
     // Mock services
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert query analyst");
+        then.status(200).json_body(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": json!({
+                        "entities": ["SuperWidget_X500"],
+                        "keyphrases": []
+                    }).to_string()
+                }
+            }]
+        }));
+    });
+
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/embeddings")
             .body_contains(unique_subject);
         then.status(200)
-            .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
+            .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3, 0.0] }] }));
     });
 
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
@@ -161,6 +212,7 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
 
     // --- 3. Assert ---
     assert!(response.status().is_success(), "The API call failed.");
+    query_analysis_mock.assert();
     embedding_mock.assert();
     rag_synthesis_mock.assert();
 
@@ -209,6 +261,46 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     )
     .await?;
 
+    // Also seed the metadata and embedding for the generic document so hybrid search can find it.
+    conn.execute(
+        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
+        turso::params![document_id, "ENTITY", "PERSON", "Harry Potter"],
+    )
+    .await?;
+
+    let generic_vector: Vec<f32> = vec![0.0, 0.0, 1.0, 0.0];
+    let generic_vector_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            generic_vector.as_ptr() as *const u8,
+            generic_vector.len() * 4,
+        )
+    };
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        turso::params![document_id, "mock-model", generic_vector_bytes],
+    )
+    .await?;
+
+    // Also seed the metadata and embedding for the generic document so hybrid search can find it.
+    conn.execute(
+        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
+        turso::params![document_id, "ENTITY", "PERSON", "Harry Potter"],
+    )
+    .await?;
+
+    let generic_vector: Vec<f32> = vec![0.0, 0.0, 1.0, 0.0];
+    let generic_vector_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            generic_vector.as_ptr() as *const u8,
+            generic_vector.len() * 4,
+        )
+    };
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        turso::params![document_id, "mock-model", generic_vector_bytes],
+    )
+    .await?;
+
     let now = Utc::now();
     {
         let mut kg = app.knowledge_graph.write().unwrap();
@@ -236,10 +328,27 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     }
 
     // --- 4. Mock External Services ---
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert query analyst");
+        then.status(200).json_body(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": json!({
+                        "entities": ["Harry Potter"],
+                        "keyphrases": ["current role"]
+                    }).to_string()
+                }
+            }]
+        }));
+    });
+
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
-            .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
+            .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5, 0.0] }] }));
     });
 
     // Mock for the call WITHOUT KG. It should only see the generic answer.
@@ -295,6 +404,7 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     assert_eq!(body_with_kg.result["text"], final_answer_with_kg);
     rag_with_kg_mock.assert();
 
+    query_analysis_mock.assert_hits(2);
     embedding_mock.assert_hits(2);
 
     Ok(())
