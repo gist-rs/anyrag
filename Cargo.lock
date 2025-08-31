@@ -750,6 +750,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "core-access"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyrag",
+ "chrono",
+ "serde",
+ "thiserror 2.0.16",
+ "tokio",
+ "turso",
+ "uuid",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

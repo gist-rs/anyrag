@@ -1,0 +1,16 @@
+[package]
+name = "core-access"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+serde = { workspace = true }
+thiserror = { workspace = true }
+turso = { workspace = true }
+uuid = { workspace = true }
+
+[dev-dependencies]
+anyrag = { path = "../lib" }
+tokio = { workspace = true, features = ["full"] }
