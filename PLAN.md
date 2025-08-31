@@ -19,16 +19,17 @@ To cleanly separate security and access control logic from the main application 
     -   `src/authz/`: Handles **Authorization** (AuthZ) - determining what a user can do (the "gate").
     -   `src/models/`: Defines core data structures like `User`, `Group`, etc.
 
-## 3. Authentication & User Identity
+## 3. User Identity, State & Authentication
 
--   **Mechanism**: A JSON Web Token (JWT) based system will be used.
--   **User Pseudonymization**: To avoid storing raw emails, a user's primary identifier (`user_id`) will be a **HMAC-SHA256** hash of their email, using a secret server-side key ("pepper").
+-   **Mechanism**: JWT-based system.
+-   **User Pseudonymization**: User IDs (`user_id`) will be a **HMAC-SHA256** hash of their email, using a secret server-side key ("pepper").
+-   **Data Store for State**: The primary Turso/SQLite database will be the single source of truth for all user and application state. This includes the `users` table, `groups`, `group_memberships`, and `resource_shares`. Centralizing state in the database ensures data integrity and consistency.
 
 ## 4. Data Ownership & Access Control Model
 
 This model is designed to support public content, private user-owned content, and collaborative sharing, with efficiency as a key goal.
 
-### 4.1. Public vs. Private Content
+### 4.1. Public (Guest) vs. Private (User) Content
 
 -   **Configuration**: A new server configuration option, `ALLOW_GUEST_INGESTION` (boolean, default: `false`), will be added. If `false`, all ingest endpoints will require a valid JWT.
 -   **Database Schema**: The `owner_id` column in all content tables (`raw_content`, `faq_kb`, etc.) will be **nullable**.
