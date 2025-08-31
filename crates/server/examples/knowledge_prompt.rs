@@ -120,8 +120,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    // --- 3. Embed New FAQs ---
-    info!("--- Starting Embedding for New FAQs ---");
     // --- 3. Embed New Documents ---
     info!("--- Starting Embedding for New Documents ---");
     // This will find all documents without an embedding and process them.
