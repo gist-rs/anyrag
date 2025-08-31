@@ -394,8 +394,12 @@ impl MetadataSearch for SqliteProvider {
         let mut params: Vec<turso::Value> = Vec::new();
 
         if let Some(owner) = owner_id {
-            conditions.push("owner_id = ?".to_string());
+            // Authenticated user can see their own documents and public documents.
+            conditions.push("(owner_id = ? OR owner_id IS NULL)".to_string());
             params.push(owner.to_string().into());
+        } else {
+            // Unauthenticated user can only see public documents.
+            conditions.push("owner_id IS NULL".to_string());
         }
 
         let mut metadata_conditions = Vec::new();

@@ -20,7 +20,7 @@
 //! # Usage
 //!
 //! From the workspace root (`anyrag/`):
-//! `RUST_LOG=info cargo run -p anyrag --example knowledge`
+//! `UST_LOG=info cargo run -p anyrag --example knowledge --features="core-access"`
 
 use anyhow::Result;
 use anyrag::{
@@ -33,6 +33,7 @@ use anyrag::{
     types::{ContentType, ExecutePromptOptions},
     PromptClientBuilder,
 };
+use core_access::get_or_create_user;
 use dotenvy::dotenv;
 use std::{env, fs};
 use tokio::time::{sleep, Duration};
@@ -93,10 +94,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     sleep(Duration::from_millis(100)).await;
 
-    // --- 2. Ingest Knowledge ---
+    // --- 2. Ingest Knowledge (with Ownership) ---
     info!("--- Starting Knowledge Ingestion ---");
     let ingest_url = "https://www.true.th/betterliv/support/true-app-mega-campaign";
-    match run_ingestion_pipeline(&sqlite_provider.db, ai_provider.as_ref(), ingest_url).await {
+    // Create a user to own the ingested content.
+    let user = get_or_create_user(&sqlite_provider.db, "default-user@example.com").await?;
+    info!("Content will be ingested for owner_id: {}", user.id);
+    match run_ingestion_pipeline(
+        &sqlite_provider.db,
+        ai_provider.as_ref(),
+        ingest_url,
+        Some(&user.id),
+    )
+    .await
+    {
         Ok(count) => {
             info!("Ingestion successful. Stored {} new FAQs.", count);
             if count == 0 {

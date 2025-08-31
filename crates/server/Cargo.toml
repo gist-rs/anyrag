@@ -11,6 +11,7 @@ path = "src/main.rs"
 openssl = { version = "0.10", features = ["vendored"] }
 # Internal Crate
 anyrag = { path = "../lib" }
+core-access = { path = "../core-access" }
 
 # Web Framework
 axum = { workspace = true }
@@ -92,4 +93,9 @@ harness = true
 [[test]]
 name = "pdf_url_ingest_test"
 path = "tests/pdf_url_ingest_test.rs"
+harness = true
+
+[[test]]
+name = "ownership_test"
+path = "tests/ownership_test.rs"
 harness = true

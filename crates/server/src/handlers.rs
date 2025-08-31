@@ -27,6 +27,7 @@ use axum::{
 };
 use axum_extra::extract::Multipart;
 use chrono::Utc;
+use core_access::get_or_create_user;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -640,10 +641,17 @@ pub async fn knowledge_ingest_handler(
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
     info!("Received knowledge ingest request for URL: {}", payload.url);
+    // TODO: This user identifier should come from a JWT claim in the future.
+    let user_identifier = "default_user@example.com";
+    let user = get_or_create_user(&app_state.sqlite_provider.db, user_identifier)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to get or create user: {e}")))?;
+
     let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
         &*app_state.prompt_client.ai_provider,
         &payload.url,
+        Some(&user.id),
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
@@ -651,7 +659,7 @@ pub async fn knowledge_ingest_handler(
         message: "Knowledge ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,
     };
-    let debug_info = json!({ "url": payload.url });
+    let debug_info = json!({ "url": payload.url, "owner_id": user.id });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
@@ -675,7 +683,11 @@ pub async fn knowledge_search_handler(
         "Received knowledge RAG search for query: '{}', limit: {}",
         payload.query, limit
     );
-    // TODO: Add owner_id from JWT once auth is implemented.
+    // TODO: This user identifier should come from a JWT claim in the future.
+    let user_identifier = "default_user@example.com";
+    let user = get_or_create_user(&app_state.sqlite_provider.db, user_identifier)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to get or create user: {e}")))?;
 
     let api_url = app_state
         .embeddings_api_url
@@ -695,7 +707,7 @@ pub async fn knowledge_search_handler(
         app_state.prompt_client.ai_provider.as_ref(),
         query_vector,
         &payload.query,
-        None, // owner_id
+        Some(&user.id), // owner_id
         limit,
     )
     .await?;

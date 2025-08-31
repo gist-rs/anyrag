@@ -110,9 +110,8 @@ pub async fn run_ingestion_pipeline(
     db: &Database,
     ai_provider: &dyn AiProvider,
     url: &str,
+    owner_id: Option<&str>,
 ) -> Result<usize, KnowledgeError> {
-    // TODO: Pass owner_id when auth is implemented
-    let owner_id: Option<&str> = None;
     let (document_id, ingested_document) = match ingest_and_cache_url(db, url, owner_id).await {
         Ok(content) => content,
         Err(KnowledgeError::ContentUnchanged(url)) => {
