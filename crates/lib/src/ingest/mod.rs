@@ -4,7 +4,6 @@
 //! such as RSS feeds, text, and knowledge bases, and storing it in a local
 //! database for later use in RAG.
 
-pub mod articles;
 pub mod embedding;
 pub mod knowledge;
 pub mod pdf;
@@ -14,8 +13,7 @@ pub mod sheet_faq;
 pub mod sheets;
 pub mod text;
 
-pub use articles::{create_articles_table_if_not_exists, insert_articles, Article, ArticleError};
-pub use embedding::{embed_article, embed_faq, EmbeddingError};
+pub use embedding::{embed_article, EmbeddingError};
 pub use knowledge::{export_for_finetuning, run_ingestion_pipeline, KnowledgeError};
 pub use pdf::{run_pdf_ingestion_pipeline, PdfSyncExtractor};
 pub use rss::{ingest_from_url, IngestError as RssIngestError};

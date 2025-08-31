@@ -82,7 +82,7 @@ async fn test_ingest_endpoint_success() -> Result<()> {
 
     // Check the total count of articles.
     let mut result_set = conn
-        .query("SELECT COUNT(*) FROM articles", ())
+        .query("SELECT COUNT(*) FROM documents", ())
         .await
         .expect("Failed to query db for count");
     let row = result_set
@@ -95,21 +95,21 @@ async fn test_ingest_endpoint_success() -> Result<()> {
         TursoValue::Integer(i) => i,
         other => panic!("Expected Integer, got {other:?}"),
     };
-    assert_eq!(count, 2, "The number of articles in the DB is incorrect.");
+    assert_eq!(count, 2, "The number of documents in the DB is incorrect.");
 
-    // Check the content of one of the articles to be sure.
+    // Check the content of one of the documents to be sure.
     let mut result_set = conn
         .query(
-            "SELECT title FROM articles WHERE link = 'http://mock.com/article1'",
+            "SELECT title FROM documents WHERE source_url = 'http://mock.com/article1'",
             (),
         )
         .await
-        .expect("Failed to query db for specific article");
+        .expect("Failed to query db for specific document");
     let row = result_set
         .next()
         .await
-        .expect("Failed to get row for article 1")
-        .expect("Row for article 1 is None");
+        .expect("Failed to get row for document 1")
+        .expect("Row for document 1 is None");
     let title: String = match row.get_value(0).unwrap() {
         TursoValue::Text(s) => s,
         other => panic!("Expected Text for title, got {other:?}"),

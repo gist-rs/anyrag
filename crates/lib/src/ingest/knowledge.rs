@@ -19,7 +19,8 @@ use md5;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, info, warn};
-use turso::{params, Connection, Database};
+use turso::{params, Database};
+use uuid::Uuid;
 
 // --- Error Definitions ---
 
@@ -45,10 +46,12 @@ pub enum KnowledgeError {
 
 // --- Data Structures ---
 
+/// Represents the essential data of a newly ingested or updated document.
 #[derive(Debug, Clone)]
-pub struct RawContent {
-    pub url: String,
-    pub markdown_content: String,
+pub struct IngestedDocument {
+    pub id: String,
+    pub source_url: String,
+    pub content: String,
     pub content_hash: String,
 }
 
@@ -92,7 +95,8 @@ pub async fn run_ingestion_pipeline(
     ai_provider: &dyn AiProvider,
     url: &str,
 ) -> Result<usize, KnowledgeError> {
-    let raw_content = match ingest_and_cache_url(db, url).await {
+    // TODO: Pass owner_id when auth is implemented
+    let (document_id, ingested_document) = match ingest_and_cache_url(db, url, None).await {
         Ok(content) => content,
         Err(KnowledgeError::ContentUnchanged(url)) => {
             info!("Content for {} is unchanged, pipeline finished.", url);
@@ -101,51 +105,12 @@ pub async fn run_ingestion_pipeline(
         Err(e) => return Err(e),
     };
 
-    let faq_items = distill_and_augment(ai_provider, &raw_content).await?;
-    store_structured_knowledge(db, &raw_content.url, &raw_content.content_hash, faq_items).await
+    let faq_items = distill_and_augment(ai_provider, &ingested_document).await?;
+    // TODO: Pass owner_id when auth is implemented
+    store_structured_knowledge(db, &document_id, None, faq_items).await
 }
 
 // --- Stage 1: Ingestion & Caching ---
-
-pub async fn create_kb_tables_if_not_exists(conn: &Connection) -> Result<(), turso::Error> {
-    conn.execute(
-        r#"CREATE TABLE IF NOT EXISTS raw_content (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT UNIQUE NOT NULL, markdown_content TEXT NOT NULL,
-            content_hash TEXT NOT NULL, last_fetched TEXT NOT NULL
-        );"#,
-        (),
-    ).await?;
-    conn.execute(
-        r#"CREATE TABLE IF NOT EXISTS faq_kb (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, question TEXT NOT NULL, answer TEXT NOT NULL,
-            source_url TEXT NOT NULL, is_explicit BOOLEAN NOT NULL, content_hash TEXT NOT NULL,
-            last_modified TEXT NOT NULL, embedding BLOB
-        );"#,
-        (),
-    )
-    .await?;
-    conn.execute(
-        r#"CREATE TABLE IF NOT EXISTS refined_content (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            source_identifier TEXT NOT NULL,
-            refined_markdown TEXT NOT NULL,
-            raw_content_hash TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );"#,
-        (),
-    )
-    .await?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_refined_content_source_identifier ON refined_content(source_identifier);",
-        (),
-    ).await?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_faq_kb_source_url ON faq_kb(source_url);",
-        (),
-    )
-    .await?;
-    Ok(())
-}
 
 pub async fn fetch_markdown_from_url(url: &str) -> Result<String, KnowledgeError> {
     let jina_url = format!("https://r.jina.ai/{url}");
@@ -159,54 +124,89 @@ pub async fn fetch_markdown_from_url(url: &str) -> Result<String, KnowledgeError
     response.text().await.map_err(KnowledgeError::Fetch)
 }
 
-pub async fn ingest_and_cache_url(db: &Database, url: &str) -> Result<RawContent, KnowledgeError> {
+pub async fn ingest_and_cache_url(
+    db: &Database,
+    url: &str,
+    owner_id: Option<&str>,
+) -> Result<(String, IngestedDocument), KnowledgeError> {
     let conn = db.connect()?;
-    create_kb_tables_if_not_exists(&conn).await?;
 
     let markdown_content = fetch_markdown_from_url(url).await?;
-    let content_hash = format!("{:x}", md5::compute(markdown_content.as_bytes()));
-    let now = chrono::Utc::now().to_rfc3339();
+    let new_content_hash = format!("{:x}", md5::compute(markdown_content.as_bytes()));
 
+    // Check for existing document by source_url
     if let Some(row) = conn
         .query(
-            "SELECT content_hash FROM raw_content WHERE url = ?",
+            "SELECT id, content FROM documents WHERE source_url = ?",
             params![url],
         )
         .await?
         .next()
         .await?
     {
-        if let Ok(turso::Value::Text(existing_hash)) = row.get_value(0) {
-            if existing_hash == content_hash {
-                return Err(KnowledgeError::ContentUnchanged(url.to_string()));
-            }
+        let doc_id: String = row.get(0)?;
+        let existing_content: String = row.get(1)?;
+        let existing_hash = format!("{:x}", md5::compute(existing_content.as_bytes()));
+
+        if existing_hash == new_content_hash {
+            return Err(KnowledgeError::ContentUnchanged(url.to_string()));
         }
+
+        // Content has changed, so we update it.
+        conn.execute(
+            "UPDATE documents SET content = ? WHERE id = ?",
+            params![markdown_content.clone(), doc_id.clone()],
+        )
+        .await?;
+
+        info!("Successfully updated document for URL: {url}");
+        let ingested_document = IngestedDocument {
+            id: doc_id.clone(),
+            source_url: url.to_string(),
+            content: markdown_content,
+            content_hash: new_content_hash,
+        };
+        return Ok((doc_id, ingested_document));
     }
 
-    conn.execute("DELETE FROM raw_content WHERE url = ?", params![url])
-        .await?;
-    conn.execute(
-        "INSERT INTO raw_content (url, markdown_content, content_hash, last_fetched) VALUES (?, ?, ?, ?)",
-        params![url, markdown_content.clone(), content_hash.clone(), now],
-    ).await?;
+    // No existing document, so create a new one.
+    let document_id = Uuid::new_v4().to_string();
+    let title: String = markdown_content.chars().take(80).collect();
 
-    info!("Successfully stored new/updated raw content for URL: {url}");
-    Ok(RawContent {
-        url: url.to_string(),
-        markdown_content,
-        content_hash,
-    })
+    conn.execute(
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+        params![
+            document_id.clone(),
+            owner_id,
+            url,
+            title,
+            markdown_content.clone()
+        ],
+    )
+    .await?;
+
+    info!("Successfully stored new document for URL: {url}");
+    let ingested_document = IngestedDocument {
+        id: document_id.clone(),
+        source_url: url.to_string(),
+        content: markdown_content,
+        content_hash: new_content_hash,
+    };
+    Ok((document_id, ingested_document))
 }
 
 // --- Stage 2: Distillation & Augmentation (Batched) ---
 
 pub async fn distill_and_augment(
     ai_provider: &dyn AiProvider,
-    raw_content: &RawContent,
+    ingested_doc: &IngestedDocument,
 ) -> Result<Vec<FaqItem>, KnowledgeError> {
-    info!("Starting Pass 1: Extraction for URL: {}", raw_content.url);
-    let user_prompt = KNOWLEDGE_EXTRACTION_USER_PROMPT
-        .replace("{markdown_content}", &raw_content.markdown_content);
+    info!(
+        "Starting Pass 1: Extraction for document ID: {}",
+        ingested_doc.id
+    );
+    let user_prompt =
+        KNOWLEDGE_EXTRACTION_USER_PROMPT.replace("{markdown_content}", &ingested_doc.content);
     let llm_response = ai_provider
         .generate(KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT, &user_prompt)
         .await?;
@@ -300,40 +300,47 @@ pub async fn distill_and_augment(
 
 pub async fn store_structured_knowledge(
     db: &Database,
-    url: &str,
-    content_hash: &str,
+    document_id: &str,
+    owner_id: Option<&str>,
     faq_items: Vec<FaqItem>,
 ) -> Result<usize, KnowledgeError> {
     if faq_items.is_empty() {
-        info!("No structured knowledge to store for URL: {url}");
+        info!("No structured knowledge to store for document: {document_id}");
         return Ok(0);
     }
     let conn = db.connect()?;
-    let now = chrono::Utc::now().to_rfc3339();
-    info!("Storing {} FAQ items for URL: {}", faq_items.len(), url);
+    info!(
+        "Storing {} FAQ items for document: {}",
+        faq_items.len(),
+        document_id
+    );
 
-    conn.execute("DELETE FROM faq_kb WHERE source_url = ?", params![url])
-        .await?;
+    // We should delete old FAQs for this document before inserting new ones.
+    conn.execute(
+        "DELETE FROM faq_items WHERE document_id = ?",
+        params![document_id],
+    )
+    .await?;
     conn.execute("BEGIN TRANSACTION", ()).await?;
-    let mut stmt = conn.prepare(
-        r#"INSERT INTO faq_kb (question, answer, source_url, is_explicit, content_hash, last_modified) VALUES (?, ?, ?, ?, ?, ?)"#,
-    ).await?;
+    let mut stmt = conn
+        .prepare(
+            r#"INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)"#,
+        )
+        .await?;
 
     for faq in &faq_items {
         stmt.execute(params![
+            document_id,
+            owner_id,
             faq.question.clone(),
             faq.answer.clone(),
-            url,
-            faq.is_explicit,
-            content_hash,
-            now.clone()
         ])
         .await?;
     }
 
     conn.execute("COMMIT", ()).await?;
     info!(
-        "Successfully stored {} new FAQs for URL: {url}",
+        "Successfully stored {} new FAQs for document: {document_id}",
         faq_items.len()
     );
     Ok(faq_items.len())
@@ -355,7 +362,9 @@ struct FinetuningMessage<'a> {
 pub async fn export_for_finetuning(db: &Database) -> Result<String, KnowledgeError> {
     info!("Exporting knowledge base for fine-tuning.");
     let conn = db.connect()?;
-    let mut stmt = conn.prepare("SELECT question, answer FROM faq_kb").await?;
+    let mut stmt = conn
+        .prepare("SELECT question, answer FROM faq_items")
+        .await?;
     let mut rows = stmt.query(()).await?;
     let system_prompt = "You are a helpful assistant. Provide clear, accurate answers based on the retrieved context.";
     let mut jsonl_output = String::new();

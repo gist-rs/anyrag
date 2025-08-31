@@ -15,31 +15,42 @@ use turso::{params, Builder};
 use common::main::types::ApiResponse;
 
 /// A helper to manually insert and embed a FAQ into the database.
-async fn seed_faq(db_path: &Path, question: &str, answer: &str, vector: Vec<f32>) -> Result<()> {
+async fn seed_faq(
+    db_path: &Path,
+    doc_id: &str,
+    question: &str,
+    answer: &str,
+    vector: Vec<f32>,
+) -> Result<()> {
     let db = Builder::new_local(db_path.to_str().unwrap())
         .build()
         .await?;
     let conn = db.connect()?;
 
-    // This might fail on subsequent calls if the tables already exist, which is expected.
-    let _ = anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await;
+    // The TestApp harness initializes the schema, so no need for table creation here.
+    // Insert a parent document.
+    conn.execute(
+        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
+        params![doc_id, format!("manual_seed/{doc_id}"), question, answer],
+    )
+    .await?;
 
-    // Convert Vec<f32> to &[u8] for BLOB storage.
+    // Insert the FAQ item.
+    conn.execute(
+        "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
+        params![doc_id, question, answer],
+    )
+    .await?;
+
+    // Convert Vec<f32> to &[u8] for BLOB storage and insert embedding for the document.
     let vector_bytes: &[u8] =
         unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
 
     conn.execute(
-        "INSERT INTO faq_kb (question, answer, source_url, is_explicit, content_hash, last_modified, embedding) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        params![
-            question,
-            answer,
-            "manual_seed",
-            false,
-            "hash123",
-            chrono::Utc::now().to_rfc3339(),
-            vector_bytes
-        ],
-    ).await?;
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        params![doc_id, "mock-model", vector_bytes],
+    )
+    .await?;
 
     Ok(())
 }
@@ -69,6 +80,7 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     // --- 3. Seed the Database ---
     seed_faq(
         &db_path,
+        "doc_keyword",
         faq_keyword_question,
         faq_keyword_answer,
         faq_keyword_vector,
@@ -76,6 +88,7 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     .await?;
     seed_faq(
         &db_path,
+        "doc_vector",
         faq_vector_question,
         faq_vector_answer,
         faq_vector_vector,

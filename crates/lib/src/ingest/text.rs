@@ -6,6 +6,8 @@
 
 use thiserror::Error;
 use tracing::warn;
+use turso::{params, Connection};
+use uuid::Uuid;
 
 /// The target maximum size for a single text chunk in characters.
 /// This is set conservatively to leave room for prompt formatting and to
@@ -16,10 +18,12 @@ const CHUNK_SIZE_LIMIT: usize = 4096;
 /// This helps maintain semantic context across chunk boundaries.
 const CHUNK_OVERLAP: usize = 200;
 
-#[derive(Error, Debug, PartialEq)]
+#[derive(Error, Debug)]
 pub enum IngestError {
     #[error("Text content is empty or only whitespace")]
     EmptyContent,
+    #[error("Database error: {0}")]
+    Database(#[from] turso::Error),
 }
 
 /// Chunks a given text into smaller pieces based on paragraphs and size limits.
@@ -73,6 +77,49 @@ pub fn chunk_text(text: &str) -> Result<Vec<String>, IngestError> {
     }
 
     Ok(chunks)
+}
+
+/// Takes a vector of text chunks and ingests them into the `documents` table.
+/// Each chunk becomes a separate document.
+///
+/// # Returns
+///
+/// A `Result` containing a vector of the UUIDs of the newly created documents.
+pub async fn ingest_chunks_as_documents(
+    conn: &mut Connection,
+    chunks: Vec<String>,
+    source_identifier: &str,
+    owner_id: Option<&str>,
+) -> Result<Vec<String>, IngestError> {
+    if chunks.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let tx = conn.transaction().await?;
+    let mut new_document_ids = Vec::new();
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        let document_id = Uuid::new_v4().to_string();
+        // Create a unique source URL for each chunk to avoid collisions.
+        let source_url = format!("{source_identifier}#chunk_{i}");
+        let title: String = chunk.chars().take(80).collect();
+
+        tx.execute(
+            "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+            params![
+                document_id.clone(),
+                owner_id,
+                source_url,
+                title,
+                chunk.clone()
+            ],
+        ).await?;
+        new_document_ids.push(document_id);
+    }
+
+    tx.commit().await?;
+
+    Ok(new_document_ids)
 }
 
 /// Splits a long string into chunks that are at most `CHUNK_SIZE_LIMIT` characters long,

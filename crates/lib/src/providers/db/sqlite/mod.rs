@@ -87,13 +87,29 @@ impl SqliteProvider {
         Ok(())
     }
 
-    /// Performs a vector similarity search on the `faq_kb` table.
+    /// Ensures that all required application tables and indexes exist.
+    /// This function is idempotent and safe to call on every application startup.
+    pub async fn initialize_schema(&self) -> Result<(), PromptError> {
+        let conn = self
+            .db
+            .connect()
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+
+        for statement in sql::ALL_TABLE_CREATION_SQL {
+            conn.execute(statement, ())
+                .await
+                .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+        }
+        Ok(())
+    }
+
+    /// Performs a vector similarity search on the `faq_items` table.
     pub async fn vector_search_faqs(
         &self,
         query_vector: Vec<f32>,
         limit: u32,
     ) -> Result<Vec<FaqSearchResult>, SearchError> {
-        info!("Executing SQLite vector search on faq_kb.");
+        info!("Executing SQLite vector search on faq_items.");
         let conn = self.db.connect()?;
 
         let vector_str = format!(
@@ -109,11 +125,12 @@ impl SqliteProvider {
         // This corresponds to a cosine distance of 0.7. (1.0 - (0.7 / 2.0) = 0.65)
         let similarity_threshold = 0.65;
         let distance_calculation =
-            format!("(1.0 - (vector_distance_cos(embedding, {vector_str}) / 2.0))");
+            format!("(1.0 - (vector_distance_cos(de.embedding, {vector_str}) / 2.0))");
         let sql = format!(
-            "SELECT answer, {distance_calculation} AS similarity
-             FROM faq_kb
-             WHERE embedding IS NOT NULL AND {distance_calculation} > {similarity_threshold}
+            "SELECT fi.answer, {distance_calculation} AS similarity
+             FROM faq_items fi
+             JOIN document_embeddings de ON de.document_id = fi.document_id
+             WHERE de.embedding IS NOT NULL AND {distance_calculation} > {similarity_threshold}
              ORDER BY similarity DESC
              LIMIT {limit};"
         );
@@ -136,19 +153,21 @@ impl SqliteProvider {
         Ok(search_results)
     }
 
-    /// Performs a keyword search on the `faq_kb` table.
+    /// Performs a keyword search on the `faq_items` table.
     pub async fn keyword_search_faqs(
         &self,
         query: &str,
         limit: u32,
     ) -> Result<Vec<FaqSearchResult>, SearchError> {
-        info!("Executing keyword search on faq_kb for: {}", query);
+        info!("Executing keyword search on faq_items for: {}", query);
         let conn = self.db.connect()?;
         let pattern = format!("%{}%", query.to_lowercase());
 
-        let sql = sql::keyword_search_faqs(limit);
+        let sql = format!(
+            "SELECT answer, 0.5 AS score FROM faq_items WHERE question LIKE ? OR answer LIKE ? LIMIT {limit}"
+        );
 
-        let mut results = conn.query(&sql, params![pattern]).await?;
+        let mut results = conn.query(&sql, params![pattern.clone(), pattern]).await?;
         let mut search_results = Vec::new();
 
         while let Some(row) = results.next().await? {
@@ -323,10 +342,9 @@ impl VectorSearch for SqliteProvider {
         query_vector: Vec<f32>,
         limit: u32,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        info!("Executing SQLite vector search query.");
+        info!("Executing SQLite vector search on documents.");
         let conn = self.db.connect()?;
 
-        // The vector is formatted into a string that the `vector` function in SQLite can parse.
         let vector_str = format!(
             "vector('[{}]')",
             query_vector
@@ -336,15 +354,15 @@ impl VectorSearch for SqliteProvider {
                 .join(", ")
         );
 
-        // A similarity score of 0.7 means we are looking for vectors that are reasonably close.
-        // This corresponds to a cosine distance of 0.6. (1.0 - (0.6 / 2.0) = 0.7)
-        let similarity_threshold = 0.7;
+        let similarity_threshold = 0.65;
         let distance_calculation =
-            format!("(1.0 - (vector_distance_cos(embedding, {vector_str}) / 2.0))");
+            format!("(1.0 - (vector_distance_cos(de.embedding, {vector_str}) / 2.0))");
+
         let sql = format!(
-            "SELECT title, link, description, {distance_calculation} AS similarity
-             FROM articles
-             WHERE embedding IS NOT NULL AND {distance_calculation} > {similarity_threshold}
+            "SELECT d.title, d.source_url, d.content, {distance_calculation} AS similarity
+             FROM document_embeddings de
+             JOIN documents d ON d.id = de.document_id
+             WHERE de.embedding IS NOT NULL AND {distance_calculation} > {similarity_threshold}
              ORDER BY similarity DESC
              LIMIT {limit};"
         );
@@ -361,7 +379,7 @@ impl VectorSearch for SqliteProvider {
                 TursoValue::Text(s) => s,
                 _ => String::new(),
             };
-            let description = match row.get_value(2)? {
+            let content = match row.get_value(2)? {
                 TursoValue::Text(s) => s,
                 _ => String::new(),
             };
@@ -372,7 +390,7 @@ impl VectorSearch for SqliteProvider {
             search_results.push(SearchResult {
                 title,
                 link,
-                description,
+                description: content,
                 score,
             });
         }
@@ -388,14 +406,13 @@ impl KeywordSearch for SqliteProvider {
         query: &str,
         limit: u32,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        info!("Executing LIKE keyword search query for: {}", query);
+        info!("Executing keyword search on documents for: {}", query);
         let conn = self.db.connect()?;
-        // Convert the query to lowercase for a case-insensitive search.
         let pattern = format!("%{}%", query.to_lowercase());
 
-        let sql = sql::keyword_search_articles(limit);
+        let sql = format!("SELECT title, source_url, content FROM documents WHERE lower(content) LIKE ? OR lower(title) LIKE ? LIMIT {limit}");
 
-        let mut results = conn.query(&sql, params![pattern]).await?;
+        let mut results = conn.query(&sql, params![pattern.clone(), pattern]).await?;
         let mut search_results = Vec::new();
 
         while let Some(row) = results.next().await? {
@@ -407,19 +424,15 @@ impl KeywordSearch for SqliteProvider {
                 TursoValue::Text(s) => s,
                 _ => String::new(),
             };
-            let description = match row.get_value(2)? {
+            let content = match row.get_value(2)? {
                 TursoValue::Text(s) => s,
                 _ => String::new(),
-            };
-            let score = match row.get_value(3)? {
-                TursoValue::Real(f) => f,
-                _ => 0.0,
             };
             search_results.push(SearchResult {
                 title,
                 link,
-                description,
-                score,
+                description: content,
+                score: 0.5, // Using a default score for keyword matches
             });
         }
 

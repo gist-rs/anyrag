@@ -270,15 +270,15 @@ curl -X POST http://localhost:9090/search/keyword \
 ```
 This will return the chunks of text that contain the word "macros", proving the ingestion was successful.
 
-#### `POST /embed/faqs/new`
+#### `POST /embed/new`
 
-Finds all FAQs in the knowledge base that have not yet been embedded and generates vector embeddings for them. This step is crucial for enabling semantic search.
+Finds all documents in the knowledge base that have not yet been embedded and generates vector embeddings for them. This step is crucial for enabling semantic search.
 
 **Request Body:** `{"limit": 100}` (Optional)
 
 **Example:**
 ```sh
-curl -X POST http://localhost:9090/embed/faqs/new \
+curl -X POST http://localhost:9090/embed/new \
   -H "Content-Type: application/json" \
   -d '{"limit": 50}'
 ```

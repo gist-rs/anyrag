@@ -4,13 +4,13 @@
 //! from a public Google Sheet into the `faq_kb` knowledge base table.
 
 use crate::ingest::{
-    knowledge::{create_kb_tables_if_not_exists, store_structured_knowledge, FaqItem},
+    knowledge::{store_structured_knowledge, FaqItem},
     shared::{construct_export_url_and_table_name, download_csv, SheetError},
 };
-use md5;
 use thiserror::Error;
 use tracing::{info, warn};
-use turso::Database;
+use turso::{params, Database};
+use uuid::Uuid;
 
 /// Custom error types for the Google Sheet FAQ ingestion process.
 #[derive(Error, Debug)]
@@ -23,8 +23,6 @@ pub enum IngestSheetFaqError {
     Parse(#[from] csv::Error),
     #[error("Sheet processing error: {0}")]
     Process(String),
-    #[error(transparent)]
-    Knowledge(#[from] crate::ingest::KnowledgeError),
 }
 
 /// Fetches a Google Sheet, parses it as a Q&A list, and ingests it into the `faq_kb` table.
@@ -45,12 +43,33 @@ pub async fn ingest_faq_from_google_sheet(
 ) -> Result<usize, IngestSheetFaqError> {
     info!("Starting FAQ ingestion from Google Sheet URL: {sheet_url}");
     let conn = db.connect()?;
-    create_kb_tables_if_not_exists(&conn).await?;
+
+    // TODO: Add owner_id when auth is implemented.
+    let owner_id: Option<&str> = None;
 
     let (export_url, _) = construct_export_url_and_table_name(sheet_url, gid)?;
-
     let csv_data = download_csv(&export_url).await?;
-    let content_hash = format!("{:x}", md5::compute(csv_data.as_bytes()));
+
+    // Create a single parent document for this sheet
+    let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, sheet_url.as_bytes()).to_string();
+    let document_title = format!("FAQs from sheet: {sheet_url}");
+
+    // Use INSERT ... ON CONFLICT DO NOTHING to avoid errors on re-ingestion.
+    // We only create the parent document if it doesn't exist. The FAQs themselves
+    // will be overwritten by the `store_faq_items` logic.
+    conn.execute(
+        "INSERT INTO documents (id, owner_id, source_url, title, content)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(source_url) DO NOTHING",
+        params![
+            document_id.clone(),
+            owner_id,
+            sheet_url,
+            document_title,
+            csv_data.clone() // Store the raw CSV as the document content
+        ],
+    )
+    .await?;
 
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(skip_header)
@@ -116,7 +135,7 @@ pub async fn ingest_faq_from_google_sheet(
         faq_items.push(FaqItem {
             question,
             answer,
-            is_explicit: true,
+            is_explicit: true, // FAQs from a sheet are always explicit
         });
     }
 
@@ -127,7 +146,9 @@ pub async fn ingest_faq_from_google_sheet(
 
     info!("Found {} FAQ items to ingest.", faq_items.len());
 
-    let stored_count = store_structured_knowledge(db, sheet_url, &content_hash, faq_items).await?;
+    let stored_count = store_structured_knowledge(db, &document_id, owner_id, faq_items)
+        .await
+        .map_err(|e| IngestSheetFaqError::Process(e.to_string()))?;
 
     Ok(stored_count)
 }

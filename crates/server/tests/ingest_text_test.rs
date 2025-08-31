@@ -58,9 +58,9 @@ async fn test_ingest_text_endpoint_success() -> Result<()> {
         .expect("Failed to connect to temp db");
     let conn = db.connect().expect("Failed to get connection from db");
 
-    // Check the total count of articles.
+    // Check the total count of documents.
     let mut result_set = conn
-        .query("SELECT COUNT(*) FROM articles", ())
+        .query("SELECT COUNT(*) FROM documents", ())
         .await
         .expect("Failed to query db for count");
     let row = result_set
@@ -73,26 +73,26 @@ async fn test_ingest_text_endpoint_success() -> Result<()> {
         TursoValue::Integer(i) => i,
         other => panic!("Expected Integer, got {other:?}"),
     };
-    assert_eq!(count, 3, "The number of articles in the DB should be 3.");
+    assert_eq!(count, 3, "The number of documents in the DB should be 3.");
 
     // Check the content of the first chunk (the short paragraph).
     let mut result_set = conn
         .query(
-            "SELECT description FROM articles WHERE source_url = 'manual_test' ORDER BY id ASC LIMIT 1",
+            "SELECT content FROM documents WHERE source_url = 'manual_test#chunk_0' ORDER BY id ASC LIMIT 1",
             (),
         )
         .await
-        .expect("Failed to query db for specific article");
+        .expect("Failed to query db for specific document");
     let row = result_set
         .next()
         .await
-        .expect("Failed to get row for article 1")
-        .expect("Row for article 1 is None");
-    let description: String = match row.get_value(0).unwrap() {
+        .expect("Failed to get row for document 1")
+        .expect("Row for document 1 is None");
+    let content: String = match row.get_value(0).unwrap() {
         TursoValue::Text(s) => s,
-        other => panic!("Expected Text for description, got {other:?}"),
+        other => panic!("Expected Text for content, got {other:?}"),
     };
-    assert_eq!(description, "This is the first paragraph.");
+    assert_eq!(content, "This is the first paragraph.");
 
     Ok(())
 }

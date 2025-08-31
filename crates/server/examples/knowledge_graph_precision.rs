@@ -106,18 +106,24 @@ async fn main() -> Result<()> {
     // A. Seed the regular KB with the generic, non-time-sensitive answer.
     info!("Seeding regular KB with generic fact...");
     let conn = app_state.sqlite_provider.db.connect()?;
-    anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
+    let document_id = "doc_wizarding_world";
+    // First, create the parent document.
     conn.execute(
-        "INSERT INTO faq_kb (question, answer, source_url, is_explicit, content_hash, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
         turso::params![
-            question,
-            generic_answer,
+            document_id,
             "wizarding_world.txt",
-            true,
-            "hash_generic",
-            Utc::now().to_rfc3339()
+            "Wizarding World Facts",
+            generic_answer
         ],
-    ).await?;
+    )
+    .await?;
+    // Now, insert the FAQ item associated with that document.
+    conn.execute(
+        "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
+        turso::params![document_id, question, generic_answer],
+    )
+    .await?;
     info!("Regular KB seeded.");
 
     // B. Seed the Knowledge Graph with the precise, time-sensitive roles.

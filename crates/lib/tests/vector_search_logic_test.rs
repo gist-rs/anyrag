@@ -13,8 +13,9 @@ use turso::params;
 /// A helper function to set up an in-memory database with manually inserted,
 /// distinct vectors. This removes any dependency on an embedding model.
 async fn setup_database_with_manual_vectors() -> Result<(SqliteProvider, Vec<f32>, Vec<f32>)> {
-    // 1. Create a new, isolated in-memory database.
+    // 1. Create a new, isolated in-memory database and initialize schema.
     let provider = SqliteProvider::new(":memory:").await?;
+    provider.initialize_schema().await?;
     let conn = provider
         .db
         .connect()
@@ -25,8 +26,6 @@ async fn setup_database_with_manual_vectors() -> Result<(SqliteProvider, Vec<f32
     let rust_vector: Vec<f32> = vec![0.0, 0.0, 1.0, 0.0];
 
     // 3. Convert vectors to byte slices for BLOB storage.
-    // This uses the same unsafe block as the real `embed_article` function
-    // to ensure the storage format is identical.
     let qwen3_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(qwen3_vector.as_ptr() as *const u8, qwen3_vector.len() * 4)
     };
@@ -34,33 +33,38 @@ async fn setup_database_with_manual_vectors() -> Result<(SqliteProvider, Vec<f32
         std::slice::from_raw_parts(rust_vector.as_ptr() as *const u8, rust_vector.len() * 4)
     };
 
-    // 4. Manually insert the data.
+    // 4. Manually insert the data into the new schema.
+    // Document 1
     conn.execute(
-        "CREATE TABLE articles (id INTEGER, title TEXT, link TEXT, description TEXT, embedding BLOB);",
-        (),
-    ).await?;
-
-    conn.execute(
-        "INSERT INTO articles (id, title, link, description, embedding) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
         params![
-            1,
-            "The Rise of Qwen3",
+            "doc_qwen3",
             "http://mock.com/qwen3",
-            "An article about Qwen3.",
-            qwen3_bytes
+            "The Rise of Qwen3",
+            "An article about Qwen3."
         ],
     )
     .await?;
-
     conn.execute(
-        "INSERT INTO articles (id, title, link, description, embedding) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        params!["doc_qwen3", "mock-model", qwen3_bytes],
+    )
+    .await?;
+
+    // Document 2
+    conn.execute(
+        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
         params![
-            2,
-            "Web Apps with Rust",
+            "doc_rust",
             "http://mock.com/rust",
-            "An article about Rust.",
-            rust_bytes
+            "Web Apps with Rust",
+            "An article about Rust."
         ],
+    )
+    .await?;
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        params!["doc_rust", "mock-model", rust_bytes],
     )
     .await?;
 

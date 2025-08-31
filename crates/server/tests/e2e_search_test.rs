@@ -67,7 +67,9 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     .to_string();
 
     let reranker_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions");
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert search result re-ranker"); // Differentiate from other AI calls
         then.status(200).json_body(json!({
             "choices": [{
                 "message": {

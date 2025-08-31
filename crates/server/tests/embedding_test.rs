@@ -10,7 +10,6 @@ use anyhow::Result;
 use common::TestApp;
 use httpmock::Method;
 use serde_json::json;
-use turso::Value as TursoValue;
 
 use common::main::types::ApiResponse;
 
@@ -18,7 +17,6 @@ use common::main::types::ApiResponse;
 async fn test_embed_and_search_flow() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
-    let db_path = app.db_path.clone();
 
     let rss_mock = app.mock_server.mock(|when, then| {
         when.method(Method::GET).path("/rss");
@@ -48,27 +46,10 @@ async fn test_embed_and_search_flow() -> Result<()> {
     rss_mock.assert();
 
     // --- 3. Act & Assert: Embed ---
-    let db = turso::Builder::new_local(db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let conn = db.connect()?;
-    let mut stmt = conn
-        .prepare("SELECT id FROM articles WHERE link = 'http://m.com/1'")
-        .await?;
-    let mut rows = stmt.query(()).await?;
-    let article_id: i64 = if let Some(row) = rows.next().await? {
-        match row.get_value(0)? {
-            TursoValue::Integer(i) => i,
-            _ => panic!("Expected integer for article ID"),
-        }
-    } else {
-        panic!("Article not found in database after ingest");
-    };
-
     let embed_res = app
         .client
-        .post(format!("{}/embed", app.address))
-        .json(&json!({ "article_id": article_id }))
+        .post(format!("{}/embed/new", app.address))
+        .json(&json!({ "limit": 10 }))
         .send()
         .await?;
     assert!(embed_res.status().is_success());

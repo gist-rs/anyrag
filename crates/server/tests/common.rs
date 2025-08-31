@@ -22,7 +22,6 @@ pub mod main;
 use anyhow::Result;
 use anyrag::{
     graph::types::MemoryKnowledgeGraph,
-    ingest::articles::CREATE_ARTICLES_TABLE_SQL,
     providers::{
         ai::local::LocalAiProvider,
         db::{sqlite::SqliteProvider, storage::Storage},
@@ -94,11 +93,11 @@ impl TestApp {
             .await
             .expect("Failed to insert data into test table in TestApp");
 
-        // Also ensure the `articles` table exists, as it's needed for search endpoints.
+        // Also ensure the application schema exists for tests.
         sqlite_provider
-            .execute_query(CREATE_ARTICLES_TABLE_SQL)
+            .initialize_schema()
             .await
-            .expect("Failed to create articles table in TestApp");
+            .expect("Failed to initialize schema in TestApp");
 
         let prompt_client = Arc::new(
             PromptClientBuilder::new()

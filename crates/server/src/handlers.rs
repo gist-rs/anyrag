@@ -6,11 +6,10 @@ use super::{
 use anyrag::providers::db::storage::Storage;
 use anyrag::{
     ingest::{
-        articles::{insert_articles, Article as IngestArticle},
-        create_articles_table_if_not_exists, embed_article, embed_faq, export_for_finetuning,
-        ingest_faq_from_google_sheet, ingest_from_google_sheet_url, ingest_from_url,
-        run_ingestion_pipeline, run_pdf_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
-        text::chunk_text,
+        export_for_finetuning, ingest_faq_from_google_sheet, ingest_from_google_sheet_url,
+        ingest_from_url, run_ingestion_pipeline, run_pdf_ingestion_pipeline,
+        sheet_url_to_export_url_and_table_name,
+        text::{chunk_text, ingest_chunks_as_documents},
         PdfSyncExtractor,
     },
     providers::{
@@ -29,9 +28,9 @@ use axum_extra::extract::Multipart;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::hash::{Hash, Hasher};
-use tracing::{error, info, warn};
-use turso::Value as TursoValue;
+
+use tracing::{error, info};
+use turso::params;
 
 // --- API Payloads ---
 
@@ -57,11 +56,6 @@ pub struct KnowledgeIngestResponse {
     pub ingested_faqs: usize,
 }
 
-#[derive(Deserialize)]
-pub struct EmbedRequest {
-    article_id: i64,
-}
-
 #[derive(Deserialize, Debug)]
 pub struct EmbedNewRequest {
     pub limit: Option<usize>,
@@ -78,6 +72,7 @@ pub struct SearchRequest {
     pub query: String,
     pub limit: Option<u32>,
     pub instruction: Option<String>,
+    #[allow(dead_code)]
     #[serde(default)]
     pub mode: SearchMode,
     #[serde(default)]
@@ -260,64 +255,20 @@ pub async fn ingest_text_handler(
     let chunks = chunk_text(&payload.text)?;
     let total_chunks = chunks.len();
 
-    let db = app_state.sqlite_provider.db.clone();
-    let mut conn = db.connect()?;
-    if let Err(e) = create_articles_table_if_not_exists(&conn).await {
-        if !e.to_string().contains("already exists") {
-            return Err(e.into());
-        }
-        warn!(
-            "Ignoring benign 'index already exists' error during table setup: {}",
-            e
-        );
-    }
+    let mut conn = app_state.sqlite_provider.db.connect()?;
 
-    let articles_to_insert: Vec<IngestArticle> = chunks
-        .into_iter()
-        .map(|chunk| {
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            chunk.hash(&mut hasher);
-            let hash = hasher.finish();
-            IngestArticle {
-                title: chunk.chars().take(80).collect(),
-                link: format!("{}_{:x}", payload.source, hash),
-                description: chunk,
-                source_url: payload.source.clone(),
-                pub_date: None,
-            }
-        })
-        .collect();
+    // TODO: Add owner_id from JWT once auth is implemented.
+    let new_document_ids =
+        ingest_chunks_as_documents(&mut conn, chunks, &payload.source, None).await?;
+    let ingested_count = new_document_ids.len();
 
-    let new_article_ids = insert_articles(&mut conn, articles_to_insert).await?;
-    let ingested_count = new_article_ids.len();
-
-    if !new_article_ids.is_empty() {
-        info!("Found {} new articles to embed.", new_article_ids.len());
-        let api_url = app_state.embeddings_api_url.clone().ok_or_else(|| {
-            anyhow::anyhow!("EMBEDDINGS_API_URL not set to auto-embed ingested text")
-        })?;
-        let model = app_state.embeddings_model.clone().ok_or_else(|| {
-            anyhow::anyhow!("EMBEDDINGS_MODEL not set to auto-embed ingested text")
-        })?;
-
-        for article_id in &new_article_ids {
-            let db_clone = db.clone();
-            let api_url_clone = api_url.clone();
-            let model_clone = model.clone();
-            match embed_article(&db_clone, &api_url_clone, &model_clone, *article_id).await {
-                Ok(_) => info!("Auto-embedded article ID: {}", article_id),
-                Err(e) => error!(
-                    "Failed to auto-embed article ID: {}. Error: {}",
-                    article_id, e
-                ),
-            }
-        }
-    }
+    // TODO: Re-implement auto-embedding for the new `documents` schema.
+    // This will likely involve a new `embed_document` function and a background job.
 
     let message = if ingested_count > 0 {
-        format!("Text ingestion successful. Stored and embedded {ingested_count} new chunks.",)
+        format!("Text ingestion successful. Stored {ingested_count} new document chunks.",)
     } else if total_chunks > 0 {
-        "All content already exists. No new chunks were ingested.".to_string()
+        "All content may already exist. No new chunks were ingested.".to_string()
     } else {
         "No text chunks found to ingest.".to_string()
     };
@@ -326,7 +277,12 @@ pub async fn ingest_text_handler(
         message,
         ingested_chunks: ingested_count,
     };
-    let debug_info = json!({ "source": payload.source, "chunks_processed": ingested_count, "original_text_length": payload.text.len() });
+    let debug_info = json!({
+        "source": payload.source,
+        "chunks_created": ingested_count,
+        "original_text_length": payload.text.len(),
+        "document_ids": new_document_ids,
+    });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
@@ -474,42 +430,13 @@ pub async fn ingest_pdf_url_handler(
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
-pub async fn embed_handler(
-    State(app_state): State<AppState>,
-    debug_params: Query<DebugParams>,
-    Json(payload): Json<EmbedRequest>,
-) -> Result<Json<ApiResponse<Value>>, AppError> {
-    let api_url = app_state
-        .embeddings_api_url
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
-    let model = app_state
-        .embeddings_model
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
-
-    embed_article(
-        &app_state.sqlite_provider.db,
-        api_url,
-        model,
-        payload.article_id,
-    )
-    .await?;
-    let response = json!({ "success": true });
-    let debug_info = json!({ "article_id": payload.article_id });
-    Ok(wrap_response(response, debug_params, Some(debug_info)))
-}
-
 pub async fn embed_new_handler(
     State(app_state): State<AppState>,
     debug_params: Query<DebugParams>,
     Json(payload): Json<EmbedNewRequest>,
 ) -> Result<Json<ApiResponse<EmbedNewResponse>>, AppError> {
-    let limit = payload.limit.unwrap_or(10);
-    info!(
-        "Received request to find and embed up to {} new articles.",
-        limit
-    );
+    let limit = payload.limit.unwrap_or(20);
+    info!("Received request to embed up to {limit} new documents.");
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -523,46 +450,72 @@ pub async fn embed_new_handler(
 
     let conn = app_state.sqlite_provider.db.connect()?;
     let sql = format!(
-        "SELECT id FROM articles WHERE embedding IS NULL ORDER BY created_at DESC LIMIT {limit}"
+        "
+        SELECT d.id, d.title, d.content
+        FROM documents d
+        LEFT JOIN document_embeddings de ON d.id = de.document_id
+        WHERE de.id IS NULL
+        LIMIT {limit}
+    "
     );
     let mut stmt = conn.prepare(&sql).await?;
     let mut rows = stmt.query(()).await?;
 
-    let mut articles_to_embed = Vec::new();
+    let mut docs_to_embed = Vec::new();
     while let Some(row) = rows.next().await? {
-        if let Ok(TursoValue::Integer(id)) = row.get_value(0) {
-            articles_to_embed.push(id);
-        }
+        let id: String = row.get(0)?;
+        let title: String = row.get(1)?;
+        let content: String = row.get(2)?;
+        docs_to_embed.push((id, title, content));
     }
-    let embed_count = articles_to_embed.len();
-    info!("Found {embed_count} articles to embed.");
 
-    if articles_to_embed.is_empty() {
+    let embed_count = docs_to_embed.len();
+    info!("Found {embed_count} documents to embed.");
+
+    if docs_to_embed.is_empty() {
         let response = EmbedNewResponse {
-            message: "No new articles to embed.".to_string(),
+            message: "No new documents to embed.".to_string(),
             embedded_articles: 0,
         };
         let debug_info = json!({ "limit": limit, "found": 0 });
         return Ok(wrap_response(response, debug_params, Some(debug_info)));
     }
 
-    let articles_to_embed_clone = articles_to_embed.clone();
-    for article_id in &articles_to_embed {
-        let db = app_state.sqlite_provider.db.clone();
-        let api_url = api_url.clone();
-        let model = model.clone();
-        match embed_article(&db, &api_url, &model, *article_id).await {
-            Ok(_) => info!("Successfully embedded article ID: {article_id}"),
-            Err(e) => error!("Failed to embed article ID: {article_id}. Error: {e}"),
+    let mut embedded_ids = Vec::new();
+    for (doc_id, title, content) in docs_to_embed {
+        let text_to_embed = format!("{title}. {content}");
+        match generate_embedding(&api_url, &model, &text_to_embed).await {
+            Ok(vector) => {
+                let vector_bytes: &[u8] = unsafe {
+                    std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4)
+                };
+                if let Err(e) = conn
+                    .execute(
+                        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+                        params![doc_id.clone(), model.clone(), vector_bytes],
+                    )
+                    .await
+                {
+                    error!("Failed to insert embedding for document ID: {doc_id}. Error: {e}");
+                } else {
+                    info!("Successfully embedded document ID: {}", doc_id);
+                    embedded_ids.push(doc_id);
+                }
+            }
+            Err(e) => {
+                error!("Failed to generate embedding for document ID: {doc_id}. Error: {e}");
+            }
         }
     }
 
+    let success_count = embedded_ids.len();
     let response = EmbedNewResponse {
-        message: format!("Successfully processed {embed_count} articles."),
-        embedded_articles: embed_count,
+        message: format!(
+            "Successfully processed embeddings for {success_count} of {embed_count} documents."
+        ),
+        embedded_articles: success_count,
     };
-    let debug_info =
-        json!({ "limit": limit, "found": embed_count, "embedded_ids": articles_to_embed_clone });
+    let debug_info = json!({ "limit": limit, "found": embed_count, "embedded_ids": embedded_ids });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
@@ -571,11 +524,8 @@ pub async fn vector_search_handler(
     debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<ApiResponse<Vec<SearchResult>>>, AppError> {
+    info!("Received vector search for query: '{}'", payload.query);
     let limit = payload.limit.unwrap_or(10);
-    info!(
-        "Received vector search request for query: '{}', limit: {}",
-        payload.query, limit
-    );
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -584,11 +534,13 @@ pub async fn vector_search_handler(
         .embeddings_model
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = app_state
         .sqlite_provider
         .vector_search(query_vector, limit)
         .await?;
+
     let debug_info = json!({ "query": payload.query, "limit": limit });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
@@ -598,11 +550,8 @@ pub async fn keyword_search_handler(
     debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<ApiResponse<Vec<SearchResult>>>, AppError> {
+    info!("Received keyword search for query: '{}'", payload.query);
     let limit = payload.limit.unwrap_or(10);
-    info!(
-        "Received keyword search request for query: '{}', limit: {}",
-        payload.query, limit
-    );
     let results = app_state
         .sqlite_provider
         .keyword_search(&payload.query, limit)
@@ -616,11 +565,11 @@ pub async fn hybrid_search_handler(
     debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<ApiResponse<Vec<SearchResult>>>, AppError> {
-    let limit = payload.limit.unwrap_or(10);
     info!(
-        "Received hybrid search request for query: '{}', limit: {}, mode: {:?}",
-        payload.query, limit, payload.mode
+        "Received hybrid search for query: '{}' with mode {:?}",
+        payload.query, payload.mode
     );
+    let limit = payload.limit.unwrap_or(10);
     let api_url = app_state
         .embeddings_api_url
         .as_ref()
@@ -629,16 +578,18 @@ pub async fn hybrid_search_handler(
         .embeddings_model
         .as_ref()
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = hybrid_search(
         app_state.sqlite_provider.as_ref(),
-        &*app_state.prompt_client.ai_provider,
+        app_state.prompt_client.ai_provider.as_ref(),
         query_vector,
         &payload.query,
         limit,
         payload.mode,
     )
     .await?;
+
     let debug_info = json!({ "query": payload.query, "limit": limit, "mode": payload.mode });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
@@ -812,70 +763,6 @@ pub async fn knowledge_search_handler(
         debug_params,
         debug_info,
     ))
-}
-
-pub async fn embed_faqs_new_handler(
-    State(app_state): State<AppState>,
-    debug_params: Query<DebugParams>,
-    Json(payload): Json<EmbedNewRequest>,
-) -> Result<Json<ApiResponse<EmbedNewResponse>>, AppError> {
-    let limit = payload.limit.unwrap_or(20);
-    info!("Received request to embed up to {limit} new FAQs.");
-    let api_url = app_state
-        .embeddings_api_url
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?
-        .clone();
-    let model = app_state
-        .embeddings_model
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?
-        .clone();
-
-    let conn = app_state.sqlite_provider.db.connect()?;
-    let sql = format!("SELECT id FROM faq_kb WHERE embedding IS NULL LIMIT {limit}");
-    let mut stmt = conn.prepare(&sql).await?;
-    let mut rows = stmt.query(()).await?;
-
-    let mut faqs_to_embed = Vec::new();
-    while let Some(row) = rows.next().await? {
-        if let Ok(TursoValue::Integer(id)) = row.get_value(0) {
-            faqs_to_embed.push(id);
-        }
-    }
-    let embed_count = faqs_to_embed.len();
-    info!("Found {embed_count} FAQs to embed.");
-
-    if faqs_to_embed.is_empty() {
-        let response = EmbedNewResponse {
-            message: "No new FAQs to embed.".to_string(),
-            embedded_articles: 0,
-        };
-        let debug_info = json!({ "limit": limit, "found": 0 });
-        return Ok(wrap_response(response, debug_params, Some(debug_info)));
-    }
-
-    let faqs_to_embed_clone = faqs_to_embed.clone();
-    for faq_id in &faqs_to_embed {
-        let db = app_state.sqlite_provider.db.clone();
-        let api_url = api_url.clone();
-        let model = model.clone();
-        match embed_faq(&db, &api_url, &model, *faq_id).await {
-            Ok(_) => info!("Successfully embedded FAQ ID: {faq_id}"),
-            Err(e) => {
-                // Log the error but continue processing other items.
-                error!("Failed to embed FAQ ID: {faq_id}. Error: {e}");
-            }
-        }
-    }
-
-    let response = EmbedNewResponse {
-        message: format!("Successfully processed {embed_count} FAQs."),
-        embedded_articles: embed_count,
-    };
-    let debug_info =
-        json!({ "limit": limit, "found": embed_count, "embedded_ids": faqs_to_embed_clone });
-    Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
 // --- Knowledge Graph Payloads ---

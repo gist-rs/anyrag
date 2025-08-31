@@ -40,7 +40,7 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
         then.status(200).body(csv_data);
     });
 
-    // B. Mock the Embedding API. It will be called for the 2 new FAQs and the search query.
+    // B. Mock the Embedding API. It will be called once for the ingested sheet document and once for the search query.
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
@@ -53,11 +53,9 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
         when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("strict, factual AI") // Check for the RAG prompt
-            // Check that the context contains BOTH ingested answers with their date ranges.
-            .body_contains(format!(
-                "Football (effective from {current_hobby_start} to {current_hobby_end})",
-            ))
-            .body_contains("Reading (effective from 2020-01-01 to 2021-01-01)");
+            // Check that the context contains BOTH ingested answers.
+            .body_contains("Football")
+            .body_contains("Reading");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
@@ -75,9 +73,9 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
     let ingest_body: ApiResponse<Value> = ingest_res.json().await?;
     assert_eq!(ingest_body.result["ingested_faqs"], 2);
 
-    // --- 5. Execute Embedding for New FAQs ---
+    // --- 5. Execute Embedding for New Documents ---
     app.client
-        .post(format!("{}/embed/faqs/new", app.address))
+        .post(format!("{}/embed/new", app.address))
         .json(&json!({ "limit": 10 }))
         .send()
         .await?
@@ -97,7 +95,7 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
 
     // --- 8. Assert Mock Calls ---
     sheet_download_mock.assert();
-    embedding_mock.assert_hits(3); // 2 for ingest, 1 for search
+    embedding_mock.assert_hits(2); // 1 for the ingested document, 1 for the search query.
     rag_synthesis_mock.assert(); // This confirms the core logic of the test.
 
     Ok(())

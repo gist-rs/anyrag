@@ -122,10 +122,12 @@ async fn main() -> Result<()> {
 
     // --- 3. Embed New FAQs ---
     info!("--- Starting Embedding for New FAQs ---");
-    // This will find all FAQs without an embedding and process them.
+    // --- 3. Embed New Documents ---
+    info!("--- Starting Embedding for New Documents ---");
+    // This will find all documents without an embedding and process them.
     let embed_payload = EmbedNewRequest { limit: Some(100) };
 
-    match handlers::embed_faqs_new_handler(
+    match handlers::embed_new_handler(
         axum::extract::State(app_state.clone()),
         Query(main::types::DebugParams::default()),
         Json(embed_payload),
@@ -136,7 +138,7 @@ async fn main() -> Result<()> {
             info!("Embedding request completed successfully.");
         }
         Err(e) => {
-            anyhow::bail!("FAQ embedding failed: {:?}", e);
+            anyhow::bail!("Document embedding failed: {:?}", e);
         }
     }
 

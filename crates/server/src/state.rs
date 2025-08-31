@@ -49,6 +49,8 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
 
     // The provider for local ingestion, embedding, and searching.
     let sqlite_provider = SqliteProvider::new(&config.db_url).await?;
+    // Ensure the database schema is up-to-date on startup.
+    sqlite_provider.initialize_schema().await?;
 
     // Conditionally build the prompt client.
     let prompt_client = {

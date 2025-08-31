@@ -15,7 +15,8 @@ use md5;
 use pdf::file::FileOptions;
 use serde::de::Error as _; // For the `custom` method on serde_json::Error
 use tracing::{info, instrument, warn};
-use turso::{params, Connection, Database};
+use turso::{params, Database};
+use uuid::Uuid;
 
 // --- Prompts ---
 
@@ -79,21 +80,42 @@ pub async fn run_pdf_ingestion_pipeline(
         }
     };
 
-    // --- Stage 3: Store Refined Content ---
+    // --- Stage 3: Store Refined Content as a Document ---
     let conn = db.connect()?;
-    crate::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
-    store_refined_content(&conn, source_identifier, &refined_markdown, &content_hash).await?;
+    let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, source_identifier.as_bytes()).to_string();
+    let title: String = refined_markdown.chars().take(80).collect();
+
+    // Use INSERT ... ON CONFLICT to either create a new document or update
+    // the content if the PDF is ingested again.
+    conn.execute(
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(source_url) DO UPDATE SET content=excluded.content, title=excluded.title",
+        params![
+            document_id.clone(),
+            None::<String>, // owner_id
+            source_identifier,
+            title,
+            refined_markdown.clone()
+        ],
+    )
+    .await?;
+    info!(
+        "Stored refined PDF content in documents table for source: {}",
+        source_identifier
+    );
 
     // --- Stage 4: Distill & Augment ---
-    let raw_content_for_distill = crate::ingest::knowledge::RawContent {
-        url: source_identifier.to_string(), // Use source_identifier as the unique key
-        markdown_content: refined_markdown,
-        content_hash: content_hash.clone(),
+    let ingested_document = crate::ingest::knowledge::IngestedDocument {
+        id: document_id.clone(),
+        source_url: source_identifier.to_string(),
+        content: refined_markdown,
+        content_hash,
     };
-    let faq_items = distill_and_augment(ai_provider, &raw_content_for_distill).await?;
+    let faq_items = distill_and_augment(ai_provider, &ingested_document).await?;
 
     // --- Stage 5: Store Structured Knowledge (Q&A) ---
-    store_structured_knowledge(db, source_identifier, &content_hash, faq_items).await
+    // TODO: Pass owner_id when auth is implemented
+    store_structured_knowledge(db, &document_id, None, faq_items).await
 }
 
 // --- Helper Functions ---
@@ -155,19 +177,4 @@ async fn extract_text_from_pdf(pdf_data: &[u8]) -> Result<String, KnowledgeError
         text.len()
     );
     Ok(text)
-}
-
-/// Stores the LLM-refined Markdown content in the database.
-async fn store_refined_content(
-    conn: &Connection,
-    source_identifier: &str,
-    refined_markdown: &str,
-    raw_content_hash: &str,
-) -> Result<(), KnowledgeError> {
-    info!("Storing refined markdown for source: {}", source_identifier);
-    conn.execute(
-        "INSERT INTO refined_content (source_identifier, refined_markdown, raw_content_hash) VALUES (?, ?, ?)",
-        params![source_identifier, refined_markdown, raw_content_hash],
-    ).await?;
-    Ok(())
 }

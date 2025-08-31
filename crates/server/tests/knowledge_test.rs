@@ -9,7 +9,7 @@ mod common;
 use anyhow::Result;
 use anyrag::{
     ingest::knowledge::{
-        distill_and_augment, export_for_finetuning, store_structured_knowledge, RawContent,
+        distill_and_augment, export_for_finetuning, store_structured_knowledge, IngestedDocument,
     },
     providers::ai::local::LocalAiProvider,
 };
@@ -28,9 +28,10 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     // The test starts with pre-existing raw content.
     let page_url = "http://mock.com/page";
     let markdown_content = "# Main Title\n\n## FAQ Section\n\n**Q: What is this?**\n\nA: It is a test.\n\n## Details\n\nThis section contains important details.";
-    let raw_content = RawContent {
-        url: page_url.to_string(),
-        markdown_content: markdown_content.to_string(),
+    let ingested_document = IngestedDocument {
+        id: page_url.to_string(),
+        source_url: page_url.to_string(),
+        content: markdown_content.to_string(),
         content_hash: format!("{:x}", md5::compute(markdown_content.as_bytes())),
     };
 
@@ -67,18 +68,16 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
 
     // --- 3. Act ---
     // Manually run the pipeline stages, skipping the initial fetch.
-    let faq_items = distill_and_augment(&ai_provider, &raw_content).await?;
+    let faq_items = distill_and_augment(&ai_provider, &ingested_document).await?;
     assert_eq!(faq_items.len(), 2);
     info!("-> Distillation successful. Found 2 FAQs.");
 
     let db = Builder::new_local(db_path.to_str().unwrap())
         .build()
         .await?;
-    anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&db.connect()?).await?;
 
     let stored_count =
-        store_structured_knowledge(&db, &raw_content.url, &raw_content.content_hash, faq_items)
-            .await?;
+        store_structured_knowledge(&db, &ingested_document.id, None, faq_items).await?;
     assert_eq!(stored_count, 2);
     info!("-> Storage successful. Stored 2 FAQs.");
 
@@ -88,47 +87,37 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
 
     let conn = db.connect()?;
     let mut stmt = conn
-        .prepare("SELECT question, answer, is_explicit FROM faq_kb ORDER BY is_explicit DESC")
+        .prepare("SELECT question, answer FROM faq_items")
         .await?;
     let mut rows = stmt.query(()).await?;
 
-    let row1 = rows.next().await?.unwrap();
-    let (q1, a1, e1) = (
-        match row1.get_value(0)? {
-            TursoValue::Text(s) => s,
-            v => panic!("Expected text for q1, got {v:?}"),
-        },
-        match row1.get_value(1)? {
-            TursoValue::Text(s) => s,
-            v => panic!("Expected text for a1, got {v:?}"),
-        },
-        match row1.get_value(2)? {
-            TursoValue::Integer(i) => i,
-            v => panic!("Expected integer for e1, got {v:?}"),
-        },
-    );
-    assert_eq!(q1, "What is this?");
-    assert_eq!(a1, "It is a test.");
-    assert_eq!(e1, 1);
+    let mut found_items = 0;
+    let mut found_explicit = false;
+    let mut found_augmented = false;
 
-    let row2 = rows.next().await?.unwrap();
-    let (q2, a2, e2) = (
-        match row2.get_value(0)? {
+    while let Some(row) = rows.next().await? {
+        found_items += 1;
+        let q = match row.get_value(0)? {
             TursoValue::Text(s) => s,
-            v => panic!("Expected text for q2, got {v:?}"),
-        },
-        match row2.get_value(1)? {
+            v => panic!("Expected text for question, got {v:?}"),
+        };
+        let a = match row.get_value(1)? {
             TursoValue::Text(s) => s,
-            v => panic!("Expected text for a2, got {v:?}"),
-        },
-        match row2.get_value(2)? {
-            TursoValue::Integer(i) => i,
-            v => panic!("Expected integer for e2, got {v:?}"),
-        },
-    );
-    assert_eq!(q2, "What is mentioned in the details section?");
-    assert_eq!(a2, "This section contains important details.");
-    assert_eq!(e2, 0);
+            v => panic!("Expected text for answer, got {v:?}"),
+        };
+
+        if q == "What is this?" && a == "It is a test." {
+            found_explicit = true;
+        } else if q == "What is mentioned in the details section?"
+            && a == "This section contains important details."
+        {
+            found_augmented = true;
+        }
+    }
+
+    assert_eq!(found_items, 2, "Expected to find 2 items in the database");
+    assert!(found_explicit, "Did not find the explicit FAQ");
+    assert!(found_augmented, "Did not find the augmented FAQ");
     info!("-> Database state verified successfully.");
 
     // --- 5. Act & Assert: Export for Fine-Tuning ---

@@ -97,10 +97,10 @@ async fn main() -> Result<()> {
     }
 
     // --- 3. Embed New FAQs ---
-    info!("--- Starting Embedding for New FAQs ---");
+    info!("--- Starting Embedding for New Documents ---");
     let embed_payload = EmbedNewRequest { limit: Some(100) };
 
-    match handlers::embed_faqs_new_handler(
+    match handlers::embed_new_handler(
         axum::extract::State(app_state.clone()),
         Query(main::types::DebugParams::default()),
         Json(embed_payload),
@@ -108,7 +108,7 @@ async fn main() -> Result<()> {
     .await
     {
         Ok(_) => info!("Embedding request completed successfully."),
-        Err(e) => anyhow::bail!("FAQ embedding failed: {:?}", e),
+        Err(e) => anyhow::bail!("Document embedding failed: {:?}", e),
     }
 
     // --- 4. Ask a Question using RAG ---

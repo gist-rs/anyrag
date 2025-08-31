@@ -132,7 +132,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
 
     // --- 5. Execute Embedding ---
     app.client
-        .post(format!("{}/embed/faqs/new", app.address))
+        .post(format!("{}/embed/new", app.address))
         .json(&json!({ "limit": 10 }))
         .send()
         .await?

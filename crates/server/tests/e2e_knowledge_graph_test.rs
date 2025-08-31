@@ -83,7 +83,26 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
         .build()
         .await?;
     let conn = db.connect()?;
-    anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
+    let document_id = "doc_superwidget";
+    conn.execute(
+        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
+        turso::params![
+            document_id,
+            "manual_seed/superwidget",
+            "SuperWidget Manual",
+            "The SuperWidget is a complex device."
+        ],
+    )
+    .await?;
+    conn.execute(
+        "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
+        turso::params![
+            document_id,
+            "What is the SuperWidget?",
+            "The SuperWidget is a complex device."
+        ],
+    )
+    .await?;
 
     // Define a unique fact to seed the knowledge graph.
     let now = Utc::now();
@@ -173,18 +192,22 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
         .build()
         .await?;
     let conn = db.connect()?;
-    anyrag::ingest::knowledge::create_kb_tables_if_not_exists(&conn).await?;
+    let document_id = "doc_wizarding_world";
     conn.execute(
-        "INSERT INTO faq_kb (question, answer, source_url, is_explicit, content_hash, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
         turso::params![
-            question,
-            generic_answer_seed,
+            document_id,
             "wizarding_world.txt",
-            true,
-            "hash_generic",
-            Utc::now().to_rfc3339()
+            "Wizarding World Facts",
+            generic_answer_seed
         ],
-    ).await?;
+    )
+    .await?;
+    conn.execute(
+        "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
+        turso::params![document_id, question, generic_answer_seed],
+    )
+    .await?;
 
     let now = Utc::now();
     {
