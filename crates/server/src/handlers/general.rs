@@ -7,6 +7,7 @@ use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use anyrag::{
     ingest::{ingest_from_google_sheet_url, sheet_url_to_export_url_and_table_name},
     providers::db::storage::Storage,
+    types::ContentType,
     ExecutePromptOptions, PromptClientBuilder,
 };
 use axum::{
@@ -36,8 +37,12 @@ pub async fn health_check() -> &'static str {
     "OK"
 }
 
-/// The primary handler for the `/prompt` endpoint, which is the core of the
-/// Text-to-SQL functionality. It now uses the new task-based configuration.
+/// The primary handler for the `/prompt` endpoint.
+///
+/// This handler is now "intelligent", selecting the appropriate AI task from the
+/// configuration based on the `content_type` provided in the request. If no
+/// `content_type` is specified, it defaults to the `query_generation` task for
+/// standard Text-to-SQL operations.
 pub async fn prompt_handler(
     State(app_state): State<AppState>,
     debug_params: Query<DebugParams>,
@@ -48,8 +53,14 @@ pub async fn prompt_handler(
         serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
 
     // --- Task-based Configuration Loading ---
-    // This handler's primary role is query generation. We'll use the 'query_generation' task config.
-    let task_name = "query_generation";
+    // Select the task based on content_type, defaulting to query_generation.
+    let task_name = match options.content_type {
+        Some(ContentType::Rss) => "rss_summarization",
+        Some(ContentType::Knowledge) => "rag_synthesis",
+        _ => "query_generation",
+    };
+    info!("Selected task '{task_name}' based on content type.");
+
     let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
             "Configuration for task '{task_name}' not found."
@@ -99,17 +110,14 @@ pub async fn prompt_handler(
         }
 
         options.table_name = Some(table_name);
-        // Build a client on the fly with the correct AI provider for this task.
         let client = PromptClientBuilder::new()
             .ai_provider(ai_provider.clone())
             .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
             .build()?;
-
         client.execute_prompt_with_options(options.clone()).await?
     } else if let Some(project_id) = options.project_id.as_deref() {
         // --- Dynamic BigQuery Client Creation ---
         info!("'project_id' provided. Creating a dynamic BigQuery client for this request.");
-
         #[cfg(feature = "bigquery")]
         {
             let bq_client = PromptClientBuilder::new()
@@ -121,7 +129,6 @@ pub async fn prompt_handler(
                 .execute_prompt_with_options(options.clone())
                 .await?
         }
-
         #[cfg(not(feature = "bigquery"))]
         {
             return Err(anyrag::PromptError::BigQueryFeatureNotEnabled.into());
@@ -133,7 +140,6 @@ pub async fn prompt_handler(
             .ai_provider(ai_provider.clone())
             .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
             .build()?;
-
         client.execute_prompt_with_options(options.clone()).await?
     };
 

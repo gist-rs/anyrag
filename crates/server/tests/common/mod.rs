@@ -133,6 +133,14 @@ impl TestApp {
                             .to_string(),
                     },
                 ),
+                (
+                    "rss_summarization".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are an AI assistant that specializes in analyzing and summarizing content from RSS feeds. Answer the user's question based on the provided article snippets.".to_string(),
+                        user_prompt: "# User Question\n{prompt}\n\n# Article Content\n{context}".to_string(),
+                    },
+                ),
             ]),
         };
 
