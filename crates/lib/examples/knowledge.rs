@@ -20,7 +20,7 @@
 //! # Usage
 //!
 //! From the workspace root (`anyrag/`):
-//! `UST_LOG=info cargo run -p anyrag --example knowledge --features="core-access"`
+//! `RUST_LOG=info cargo run -p anyrag --example knowledge --features="core-access"`
 
 use anyhow::Result;
 use anyrag::{
