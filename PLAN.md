@@ -15,7 +15,7 @@ For the detailed, in-progress implementation plan for the current development ph
 
 The final application will be composed of several key architectural pillars:
 
--   **`core-access` Crate**: A dedicated workspace crate that will serve as the central authority for all identity, authentication (AuthN), and authorization (AuthZ) logic.
+-   **`core-access` Crate**: A dedicated workspace crate that will serve as the central authority for all identity, authentication (AuthN), and authorization (AuthZ) logic. It manages the persistence and retrieval of both authenticated users and a deterministic "Guest User" for unauthenticated operations.
 
 -   **Metadata-Driven Search Engine**: A high-performance, multi-stage search pipeline that ensures speed and relevance. The flow is:
     1.  *Query Analysis*: An LLM extracts key entities from a user's query.
@@ -26,7 +26,7 @@ The final application will be composed of several key architectural pillars:
 
 -   **Multi-Tenant Data & Sharing Model**: A comprehensive data model that supports:
     -   **Private Content**: Owned by individual authenticated users.
-    -   **Public Content**: Ingested by guests (if enabled).
+    -   **Guest/Public Content**: Content ingested by unauthenticated users (e.g., via a local CLI or a public-facing server instance). All such content is owned by a single, deterministic "Guest User" account. This model provides crucial flexibility for different deployment scenarios (local vs. cloud) and simplifies data governance by ensuring no `owner_id` is ever `NULL`.
     -   **Group Collaboration**: The ability for users to form groups and share resources with them.
     -   **Direct Sharing**: The ability to share resources with specific individual users.
 
@@ -34,16 +34,15 @@ The final application will be composed of several key architectural pillars:
 
 The project will be implemented in a phased approach to manage complexity and deliver value incrementally.
 
--   **Phase 1 (Current Focus): Database & Search Architecture Refactoring**
+-   **Phase 1 (Completed): Database & Search Architecture Refactoring**
     -   **Goal**: Restructure the database schema to normalize data, separating content, metadata (tags), and embeddings for optimal performance and security. Re-architect the search flow to be metadata-driven.
-    -   **Details**: **See [`NOW.md`](./NOW.md) for the detailed implementation plan for this phase.**
 
--   **Phase 2: Core Access, Authentication & Ownership**
-    -   **Goal**: Implement the `core-access` crate, JWT authentication, user management, and the core ownership model (public vs. private content).
+-   **Phase 2 (Current Focus): Core Access, Authentication & Ownership**
+    -   **Goal**: Implement the `core-access` crate, a flexible authentication middleware, and the refined ownership model featuring both authenticated users and a "Guest User".
+    -   **Details**: **See [`NOW.md`](./NOW.md) for the detailed implementation plan for this phase.**
 
 -   **Phase 3: Groups, Sharing, & Collaboration**
     -   **Goal**: Build the complete feature set for creating and managing groups, and sharing resources with both groups and individual users.
 
 -   **Phase 4: Governance & Operational Excellence**
     -   **Goal**: Implement data lifecycle features (TTL, content wipeout), privacy tools (PII scanner, Right to be Forgotten), and observability (metrics, tracing).
-
