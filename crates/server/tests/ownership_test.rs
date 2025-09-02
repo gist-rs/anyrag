@@ -87,6 +87,31 @@ async fn seed_ownership_data(app: &TestApp) -> Result<()> {
         .await?;
     }
 
+    // 5. Insert embeddings for all documents so they are findable by vector search
+    let doc_a_vector: Vec<f32> = vec![1.0, 0.0];
+    let doc_guest_vector: Vec<f32> = vec![0.0, 1.0];
+
+    let doc_a_vector_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(doc_a_vector.as_ptr() as *const u8, doc_a_vector.len() * 4)
+    };
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        params!["doc_owned_by_a", "mock-model", doc_a_vector_bytes],
+    )
+    .await?;
+
+    let doc_guest_vector_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(
+            doc_guest_vector.as_ptr() as *const u8,
+            doc_guest_vector.len() * 4,
+        )
+    };
+    conn.execute(
+        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        params!["doc_guest", "mock-model", doc_guest_vector_bytes],
+    )
+    .await?;
+
     Ok(())
 }
 
@@ -113,7 +138,7 @@ async fn test_authenticated_user_sees_own_and_guest_content() -> Result<()> {
     app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
-            .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
+            .json_body(json!({ "data": [{ "embedding": [0.5, 0.5] }] }));
     });
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
@@ -166,7 +191,7 @@ async fn test_guest_user_sees_only_guest_content() -> Result<()> {
     app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
-            .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
+            .json_body(json!({ "data": [{ "embedding": [0.5, 0.5] }] }));
     });
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)

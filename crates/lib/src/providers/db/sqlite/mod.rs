@@ -298,10 +298,18 @@ impl VectorSearch for SqliteProvider {
                 Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
 
             if let Some(owner) = owner_id {
-                conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
-                query_params.push(owner.to_string().into());
-                query_params.push(guest_user_id.into());
+                if owner == guest_user_id {
+                    // It's the guest user, they only see guest content.
+                    conditions.push("d.owner_id = ?".to_string());
+                    query_params.push(guest_user_id.into());
+                } else {
+                    // It's an authenticated user, they see their own content and guest content.
+                    conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
+                    query_params.push(owner.to_string().into());
+                    query_params.push(guest_user_id.into());
+                }
             } else {
+                // No owner provided, default to only showing guest content.
                 conditions.push("d.owner_id = ?".to_string());
                 query_params.push(guest_user_id.into());
             }
@@ -390,10 +398,18 @@ impl KeywordSearch for SqliteProvider {
             let guest_user_id =
                 Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
             if let Some(owner) = owner_id {
-                conditions.push("(owner_id = ? OR owner_id = ?)".to_string());
-                params.push(TursoValue::Text(owner.to_string()));
-                params.push(TursoValue::Text(guest_user_id));
+                if owner == guest_user_id {
+                    // Guest user sees only guest content.
+                    conditions.push("owner_id = ?".to_string());
+                    params.push(TursoValue::Text(guest_user_id));
+                } else {
+                    // Authenticated user sees their own and guest content.
+                    conditions.push("(owner_id = ? OR owner_id = ?)".to_string());
+                    params.push(TursoValue::Text(owner.to_string()));
+                    params.push(TursoValue::Text(guest_user_id));
+                }
             } else {
+                // No owner means guest-only view.
                 conditions.push("owner_id = ?".to_string());
                 params.push(TursoValue::Text(guest_user_id));
             }
@@ -463,14 +479,15 @@ impl MetadataSearch for SqliteProvider {
                 Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
 
             if let Some(owner) = owner_id {
-                // Any user (guest or authenticated) can see their own documents and guest documents.
-                conditions.push("(owner_id = ? OR owner_id = ?)".to_string());
-                params.push(owner.to_string().into());
-                params.push(guest_user_id.into());
+                if owner == guest_user_id {
+                    conditions.push("owner_id = ?".to_string());
+                    params.push(guest_user_id.into());
+                } else {
+                    conditions.push("(owner_id = ? OR owner_id = ?)".to_string());
+                    params.push(owner.to_string().into());
+                    params.push(guest_user_id.into());
+                }
             } else {
-                // This branch should now be unreachable for requests that go through
-                // the user resolution middleware, but we keep it for safety/other callers.
-                // It allows searching only public/guest documents.
                 conditions.push("owner_id = ?".to_string());
                 params.push(guest_user_id.into());
             }

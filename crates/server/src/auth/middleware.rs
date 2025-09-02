@@ -14,11 +14,12 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
-use core_access::{get_or_create_user, User};
+use core_access::{get_or_create_user, User, GUEST_USER_IDENTIFIER};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::warn;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{error, info, warn};
 
 use crate::state::AppState;
 
@@ -33,9 +34,13 @@ pub struct Claims {
 
 /// An Axum extractor that provides the currently authenticated user.
 ///
-/// When used as an argument in a handler, it triggers the JWT validation logic.
-/// If the token is valid, the handler receives the `User` object. If the token
-/// is missing or invalid, a `401 Unauthorized` response is sent automatically.
+/// This extractor implements the logic defined in `NOW.md`:
+/// 1.  **No Token Present**: Resolves to a deterministic "Guest User".
+/// 2.  **Valid Token Present**: Resolves to the authenticated user.
+/// 3.  **Invalid/Expired Token Present**: Rejects the request with a `401 Unauthorized`.
+///
+/// This ensures that handlers always receive a valid `User` object (either
+/// guest or authenticated), simplifying the application logic.
 #[derive(Debug, Clone)]
 pub struct AuthenticatedUser(pub User);
 
@@ -58,48 +63,80 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        // 1. Extract the token from the `Authorization: Bearer <token>` header.
-        let TypedHeader(Authorization(bearer)) =
-            TypedHeader::<Authorization<Bearer>>::from_request_parts(parts, state)
+        // Attempt to extract the token from the `Authorization: Bearer <token>` header.
+        // This is now optional.
+        let bearer_header =
+            Option::<TypedHeader<Authorization<Bearer>>>::from_request_parts(parts, state)
                 .await
                 .map_err(|e| {
-                    warn!("Failed to extract Authorization header: {}", e);
+                    // This error should ideally not happen for an optional extractor unless something is malformed.
+                    warn!("Unexpected error during header extraction: {}", e);
                     AuthError(
-                        StatusCode::UNAUTHORIZED,
-                        "Missing or invalid Authorization header.".to_string(),
+                        StatusCode::BAD_REQUEST,
+                        "Invalid Authorization header format.".to_string(),
                     )
                 })?;
 
-        // 2. Decode and validate the JWT.
-        // In a production application, this secret should be loaded securely from config.
-        let jwt_secret =
-            std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
+        let user = if let Some(TypedHeader(Authorization(bearer))) = bearer_header {
+            // Case 1: Token is present. Validate it.
+            info!("Authorization header found, attempting to validate JWT.");
+            let jwt_secret =
+                std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
 
-        let token_data = decode::<Claims>(
-            bearer.token(),
-            &DecodingKey::from_secret(jwt_secret.as_ref()),
-            &Validation::default(),
-        )
-        .map_err(|e| {
-            warn!("JWT validation failed: {}", e);
-            AuthError(
-                StatusCode::UNAUTHORIZED,
-                "Invalid or expired token.".to_string(),
+            let token_data = decode::<Claims>(
+                bearer.token(),
+                &DecodingKey::from_secret(jwt_secret.as_ref()),
+                &Validation::default(),
             )
-        })?;
-
-        // 3. Get or create a user in the database based on the token's subject claim.
-        let user = get_or_create_user(&state.sqlite_provider.db, &token_data.claims.sub)
-            .await
             .map_err(|e| {
-                // This is an internal error because the DB should be available.
+                warn!("JWT validation failed: {}", e);
                 AuthError(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Could not retrieve user: {e}"),
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid or expired token.".to_string(),
                 )
             })?;
 
-        // 4. If all checks pass, return the authenticated user.
+            // Manually verify the expiration to be absolutely sure.
+            // The `jsonwebtoken` crate should handle this, but adding an explicit
+            // check makes the logic more robust against subtle configuration issues.
+            let current_timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| {
+                    AuthError(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "System time is before UNIX EPOCH.".to_string(),
+                    )
+                })?
+                .as_secs();
+
+            if token_data.claims.exp < current_timestamp as usize {
+                warn!(
+                    "Token has expired. exp: {}, current: {}",
+                    token_data.claims.exp, current_timestamp
+                );
+                return Err(AuthError(
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid or expired token.".to_string(),
+                ));
+            }
+
+            // Get or create a user in the database based on the token's subject claim.
+            get_or_create_user(&state.sqlite_provider.db, &token_data.claims.sub).await
+        } else {
+            // Case 2: No token is present. Use the guest user.
+            info!("No Authorization header found, using guest user.");
+            get_or_create_user(&state.sqlite_provider.db, GUEST_USER_IDENTIFIER).await
+        }
+        .map_err(|e| {
+            // This is an internal error because the DB should be available.
+            error!("Failed to get or create user: {}", e);
+            AuthError(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Could not retrieve user: {e}"),
+            )
+        })?;
+
+        // If all checks pass, return the authenticated user (either real or guest).
         Ok(AuthenticatedUser(user))
     }
 }
