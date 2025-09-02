@@ -31,7 +31,6 @@ pub struct Config {
     pub ai_api_url: String,
     pub ai_api_key: Option<String>,
     pub ai_model: Option<String>,
-    pub project_id: Option<String>,
     #[allow(unused)]
     pub db_url: String,
     pub port: u16,
@@ -64,8 +63,6 @@ pub fn get_config() -> Result<Config, ConfigError> {
     let embeddings_api_url = env::var("EMBEDDINGS_API_URL").ok();
     let embeddings_model = env::var("EMBEDDINGS_MODEL").ok();
 
-    let project_id = env::var("BIGQUERY_PROJECT_ID").ok();
-
     let db_url = env::var("DB_URL").unwrap_or_else(|_| "db/anyrag.db".to_string());
 
     let port = match env::var("PORT") {
@@ -88,7 +85,6 @@ pub fn get_config() -> Result<Config, ConfigError> {
         ai_model,
         embeddings_api_url,
         embeddings_model,
-        project_id,
         db_url,
         port,
         query_system_prompt_template,

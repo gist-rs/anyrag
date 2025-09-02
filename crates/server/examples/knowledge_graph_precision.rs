@@ -120,23 +120,49 @@ async fn main() -> Result<()> {
     info!("Seeding regular KB with generic fact...");
     let conn = app_state.sqlite_provider.db.connect()?;
     let document_id = "doc_wizarding_world";
-    // First, create the parent document.
-    conn.execute(
-        "INSERT OR IGNORE INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
-        turso::params![
-            document_id,
-            "wizarding_world.txt",
-            "Wizarding World Facts",
-            generic_answer
-        ],
-    )
-    .await?;
-    // Now, insert the FAQ item associated with that document.
-    conn.execute(
-        "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
-        turso::params![document_id, question, generic_answer],
-    )
-    .await?;
+    // First, create the parent document if it doesn't exist.
+    let source_url = "wizarding_world.txt";
+    let doc_exists = conn
+        .query(
+            "SELECT 1 FROM documents WHERE source_url = ?",
+            turso::params![source_url],
+        )
+        .await?
+        .next()
+        .await?
+        .is_some();
+
+    if !doc_exists {
+        conn.execute(
+            "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
+            turso::params![
+                document_id,
+                source_url,
+                "Wizarding World Facts",
+                generic_answer
+            ],
+        )
+        .await?;
+    }
+
+    // Now, insert the FAQ item associated with that document if it doesn't exist.
+    let faq_exists = conn
+        .query(
+            "SELECT 1 FROM faq_items WHERE document_id = ? AND question = ?",
+            turso::params![document_id, question],
+        )
+        .await?
+        .next()
+        .await?
+        .is_some();
+
+    if !faq_exists {
+        conn.execute(
+            "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
+            turso::params![document_id, question, generic_answer],
+        )
+        .await?;
+    }
     info!("Regular KB seeded.");
 
     // B. Seed the Knowledge Graph with the precise, time-sensitive roles.

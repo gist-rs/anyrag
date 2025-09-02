@@ -68,6 +68,9 @@ pub struct ExecutePromptOptions {
     /// The name of the table to be queried (e.g., "project.dataset.table").
     #[serde(default)]
     pub table_name: Option<String>,
+    /// For BigQuery, the project ID. If provided, the query will run against BigQuery instead of the default provider.
+    #[serde(default)]
+    pub project_id: Option<String>,
     /// An optional hint about the content type to guide prompt selection.
     #[serde(default)]
     pub content_type: Option<ContentType>,

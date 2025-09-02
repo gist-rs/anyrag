@@ -26,7 +26,6 @@ fn clear_env_vars() {
     env::remove_var("AI_API_URL");
     env::remove_var("AI_API_KEY");
     env::remove_var("AI_MODEL");
-    env::remove_var("BIGQUERY_PROJECT_ID");
     env::remove_var("PORT");
     env::remove_var("QUERY_SYSTEM_PROMPT_TEMPLATE");
     env::remove_var("QUERY_USER_PROMPT_TEMPLATE");
@@ -42,7 +41,6 @@ fn test_get_config_success_all_vars() {
     // Set all possible environment variables
     env::set_var("AI_PROVIDER", "local");
     env::set_var("AI_API_URL", "http://localhost:1234");
-    env::set_var("BIGQUERY_PROJECT_ID", "test-project");
     env::set_var("AI_API_KEY", "test-api-key");
     env::set_var("AI_MODEL", "test-model");
     env::set_var("PORT", "9999");
@@ -57,7 +55,6 @@ fn test_get_config_success_all_vars() {
     // Assert that all values were parsed correctly
     assert_eq!(config.ai_provider, "local");
     assert_eq!(config.ai_api_url, "http://localhost:1234");
-    assert_eq!(config.project_id, Some("test-project".to_string()));
     assert_eq!(config.ai_api_key, Some("test-api-key".to_string()));
     assert_eq!(config.ai_model, Some("test-model".to_string()));
     assert_eq!(config.port, 9999);
@@ -82,7 +79,6 @@ fn test_get_config_defaults() {
 
     // Set only the required variables
     env::set_var("AI_API_URL", "http://required.url");
-    env::set_var("BIGQUERY_PROJECT_ID", "required-project");
 
     let config = get_config().expect("Configuration should load successfully");
 
@@ -102,7 +98,6 @@ fn test_get_config_missing_required_url() {
     clear_env_vars();
 
     // Miss the AI_API_URL
-    env::set_var("BIGQUERY_PROJECT_ID", "test-project");
 
     let result = get_config();
 
@@ -116,28 +111,12 @@ fn test_get_config_missing_required_url() {
 }
 
 #[test]
-fn test_get_config_no_project_id() {
-    let _lock = ENV_LOCK.lock().unwrap();
-    clear_env_vars();
-
-    // Do not set BIGQUERY_PROJECT_ID
-    env::set_var("AI_API_URL", "http://test.url");
-
-    let config = get_config().expect("Config should load without project ID");
-
-    // Assert that project_id is None
-    assert!(config.project_id.is_none());
-    clear_env_vars();
-}
-
-#[test]
 fn test_get_config_invalid_port() {
     let _lock = ENV_LOCK.lock().unwrap();
     clear_env_vars();
 
     // Set an invalid value for PORT
     env::set_var("AI_API_URL", "http://test.url");
-    env::set_var("BIGQUERY_PROJECT_ID", "test-project");
     env::set_var("PORT", "not-a-number");
 
     let result = get_config();

@@ -68,8 +68,11 @@ pub async fn prompt_handler(
         .find(|word| word.contains("/spreadsheets/d/"));
 
     let prompt_result = if let Some(url) = sheet_url {
-        // --- Dynamic Google Sheet Querying Logic ---
-        info!("Detected Google Sheet URL in prompt: {}", url);
+        // --- Dynamic Google Sheet Querying Logic (Always uses SQLite) ---
+        info!(
+            "Detected Google Sheet URL in prompt: {}. Using SQLite provider.",
+            url
+        );
         let (export_url, table_name) = sheet_url_to_export_url_and_table_name(url)
             .map_err(|e| anyhow::anyhow!("Sheet URL transformation failed: {e}"))?;
 
@@ -80,25 +83,46 @@ pub async fn prompt_handler(
             .await
             .is_err()
         {
-            info!("Table '{table_name}' does not exist. Starting ingestion.");
+            info!("Table '{}' does not exist. Starting ingestion.", table_name);
             ingest_from_google_sheet_url(&app_state.sqlite_provider.db, &export_url, &table_name)
                 .await
                 .map_err(|e| anyhow::anyhow!("Sheet ingestion failed: {e}"))?;
         } else {
-            info!("Table '{table_name}' already exists. Skipping ingestion.");
+            info!("Table '{}' already exists. Skipping ingestion.", table_name);
         }
 
-        // Temporarily override the prompt client to use the SQLite provider for this request.
+        // Temporarily override the table name and use the default SQLite client.
         options.table_name = Some(table_name);
-        let sqlite_prompt_client = PromptClientBuilder::new()
-            .ai_provider(app_state.prompt_client.ai_provider.clone())
-            .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
-            .build()?;
-        sqlite_prompt_client
+        app_state
+            .prompt_client
             .execute_prompt_with_options(options.clone())
             .await?
+    } else if let Some(project_id) = options.project_id.as_deref() {
+        // --- Dynamic BigQuery Client Creation ---
+        info!("'project_id' provided. Creating a dynamic BigQuery client for this request.");
+
+        #[cfg(feature = "bigquery")]
+        {
+            let bq_client = PromptClientBuilder::new()
+                .ai_provider(app_state.prompt_client.ai_provider.clone())
+                .bigquery_storage(project_id.to_string())
+                .await?
+                .build()?;
+            bq_client
+                .execute_prompt_with_options(options.clone())
+                .await?
+        }
+
+        #[cfg(not(feature = "bigquery"))]
+        {
+            // If the feature is not enabled, we cannot fulfill the request.
+            return Err(anyrag::PromptError::BigQueryFeatureNotEnabled.into());
+        }
     } else {
-        // --- Standard Querying Logic (e.g., BigQuery) ---
+        // --- Standard Querying Logic (Default SQLite) ---
+        info!(
+            "No 'project_id' or sheet URL provided. Using the default SQLite-based prompt client."
+        );
         app_state
             .prompt_client
             .execute_prompt_with_options(options.clone())

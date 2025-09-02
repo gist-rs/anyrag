@@ -49,37 +49,18 @@ pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
 
     // The provider for local ingestion, embedding, and searching.
     let sqlite_provider = SqliteProvider::new(&config.db_url).await?;
+    tracing::info!(db_path = %config.db_url, "Initialized local storage provider (SQLite). This provider will be used for all ingestion and knowledge base operations.");
     // Ensure the database schema is up-to-date on startup.
     sqlite_provider.initialize_schema().await?;
 
-    // Conditionally build the prompt client.
+    // Always build the default prompt client with the SQLite provider at startup.
+    // BigQuery clients will be created dynamically per-request if a project_id is provided.
     let prompt_client = {
-        let builder = PromptClientBuilder::new().ai_provider(ai_provider);
-
-        #[cfg(feature = "bigquery")]
-        if let Some(project_id) = config.project_id {
-            tracing::info!(
-                "BIGQUERY_PROJECT_ID found, building prompt client with BigQuery storage."
-            );
-            builder.bigquery_storage(project_id).await?.build()?
-        } else {
-            tracing::info!(
-                "No BIGQUERY_PROJECT_ID found, building prompt client with SQLite storage."
-            );
-            builder
-                .storage_provider(Box::new(sqlite_provider.clone()))
-                .build()?
-        }
-
-        #[cfg(not(feature = "bigquery"))]
-        {
-            tracing::info!(
-                "'bigquery' feature not enabled, building prompt client with SQLite storage."
-            );
-            builder
-                .storage_provider(Box::new(sqlite_provider.clone()))
-                .build()?
-        }
+        tracing::info!("Initializing default prompt client with SQLite provider.");
+        PromptClientBuilder::new()
+            .ai_provider(ai_provider)
+            .storage_provider(Box::new(sqlite_provider.clone()))
+            .build()?
     };
 
     Ok(AppState {
