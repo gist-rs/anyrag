@@ -1,3 +1,32 @@
+//! Example: Programmatic Text-to-SQL for BigQuery.
+//!
+//! This example demonstrates how to use the `anyrag` library's core Text-to-SQL
+//! functionality to query a Google BigQuery table programmatically. It acts as a
+//! command-line interface, accepting a flexible JSON string that maps directly
+//! to the `ExecutePromptOptions`.
+//!
+//! # Workflow:
+//! 1.  **Setup**: Initializes the AI and BigQuery providers from environment variables.
+//! 2.  **Argument Parsing**: Reads a JSON string from the command line.
+//! 3.  **Execution**: Calls `execute_prompt_from_value` to perform the full
+//!     Text-to-SQL pipeline: generate SQL, execute it, and format the result.
+//! 4.  **Output**: Prints the final answer, the generated SQL, and the raw
+//!     database result.
+//!
+//! # Prerequisites
+//!
+//! - A valid `.env` file in the `crates/lib` directory with credentials for the
+//!   AI provider (`AI_API_URL`, `AI_API_KEY`) and BigQuery (`BIGQUERY_PROJECT_ID`).
+//! - Local Google Cloud authentication. Run `gcloud auth application-default login`.
+//!
+//! # Usage
+//!
+//! From the workspace root (`anyrag/`):
+//! ```sh
+//! cargo run -p anyrag --example query --features="bigquery" -- '{"prompt": "How many distinct corpuses are there?", "table_name": "bigquery-public-data.samples.shakespeare", "instruction": "Answer with only the number."}'
+//! ```
+//! Note the `--` which separates Cargo arguments from the example's arguments.
+
 use anyrag::{
     providers::ai::{gemini::GeminiProvider, local::LocalAiProvider},
     PromptClientBuilder,
