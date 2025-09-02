@@ -14,10 +14,9 @@ tasks:
   query_generation:
     provider: "local_default"
     system_prompt: |
-      You are a SQL expert for the specified database. Write a readonly SQL query
-      that answers the user's question. Expected output is a single SQL query only.
+      You are a {language} expert for {db_name}. Write a readonly {language} query that answers the user's question. Expected output is a single {language} query only.
     user_prompt: |
-      Follow these rules to create production-grade SQL:
+      Follow these rules to create production-grade {language}:
 
       1. For questions about "who", "what", or "list", use DISTINCT to avoid duplicate results.
       2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).
@@ -26,6 +25,9 @@ tasks:
       5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
       6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
       7. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
+
+      {select_instruction}
+      {alias_instruction}
 
       Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
 
@@ -50,7 +52,7 @@ tasks:
   knowledge_distillation:
     provider: "local_default"
     system_prompt: |
-      You are an expert data extraction and reconciliation agent...
+      You are an expert data extraction agent. Your task is to process the given Markdown content and extract two types of information: 1. Explicit FAQs. 2. Coherent chunks of content suitable for generating new FAQs. Return ONLY a valid JSON object with two keys: `faqs` (an array of objects, each with `question`, `answer`, and `is_explicit` fields) and `content_chunks` (an array of objects, each with `topic` and `content` fields). Do not include any other text or explanations.
     user_prompt: |
       # Markdown Content to Process:
       {markdown_content}
@@ -58,8 +60,7 @@ tasks:
   query_analysis:
     provider: "local_default"
     system_prompt: |
-      You are an expert query analyst. Your task is to extract key **Entities**
-      and **Keyphrases** from the user's query...
+      You are an expert query analyst. Your task is to extract key **Entities** and **Keyphrases** from the user's query. Respond with a JSON object containing two keys: "entities" and "keyphrases", which should be arrays of strings. If none are found, provide empty arrays.
     user_prompt: |
       # USER QUERY:
       {prompt}
@@ -67,7 +68,7 @@ tasks:
   llm_rerank:
     provider: "local_default"
     system_prompt: |
-      You are an expert search result re-ranker...
+      You are an expert search result re-ranker. Your task is to re-rank the given articles based on their relevance to the user's query. Return ONLY a valid JSON array of the article links, ordered from most to least relevant. Do not include any other text or explanations.
     user_prompt: |
       # User Query:
       {query_text}

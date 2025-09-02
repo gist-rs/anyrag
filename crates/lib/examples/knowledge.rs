@@ -100,15 +100,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create a user to own the ingested content.
     let user = get_or_create_user(&sqlite_provider.db, "default-user@example.com").await?;
     info!("Content will be ingested for owner_id: {}", user.id);
+
+    // Define strong prompts that demand JSON output for the ingestion pipeline.
+    let extraction_system_prompt = r#"You are an expert data extraction agent. Your task is to extract explicit FAQs and general content chunks from the provided Markdown. Respond with a JSON object containing two keys: "faqs" (an array of objects with "question", "answer", "is_explicit" keys) and "content_chunks" (an array of objects with "topic" and "content" keys)."#;
+    let augmentation_system_prompt = r#"You are an expert content analyst. Given a batch of content chunks, generate a new, relevant question for each chunk. Respond with a JSON object containing a single key "augmented_faqs", which is an array of objects with "id" (the original chunk ID) and "question" keys."#;
+    let metadata_extraction_system_prompt = r#"You are an expert document analyst. Your task is to extract key metadata from the document. Respond with a JSON array of objects, where each object has "type" (e.g., "ENTITY", "KEYPHRASE"), "subtype" (e.g., "PERSON"), and "value" keys."#;
+
     match run_ingestion_pipeline(
         &sqlite_provider.db,
         ai_provider.as_ref(),
         ingest_url,
         Some(&user.id),
-        "You are an expert data extraction agent.",
+        extraction_system_prompt,
         "Markdown Content to Process:\n{markdown_content}",
-        "You are an expert content analyst.",
-        "You are an expert document analyst.",
+        augmentation_system_prompt,
+        metadata_extraction_system_prompt,
     )
     .await
     {
@@ -173,6 +179,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let query_vector = generate_embedding(&embeddings_api_url, &embeddings_model, question).await?;
 
+    // Define a strong prompt for the query analysis step.
+    let analysis_system_prompt = r#"You are an expert query analyst. Your task is to extract key **Entities** and **Keyphrases** from the user's query. Respond with a JSON object containing two keys: "entities" and "keyphrases", which should be arrays of strings. If none are found, provide empty arrays."#;
+
     let search_results = hybrid_search(
         &sqlite_provider,
         ai_provider.as_ref(),
@@ -180,7 +189,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         question,
         None, // owner_id
         5,    // limit
-        "You are an expert query analyst.",
+        analysis_system_prompt,
         "USER QUERY:\n{prompt}",
     )
     .await?;

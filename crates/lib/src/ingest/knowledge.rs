@@ -96,6 +96,12 @@ pub struct ContentMetadata {
     pub value: String,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct MetadataResponse {
+    #[serde(default)]
+    metadata: Vec<ContentMetadata>,
+}
+
 // --- Pipeline Orchestration ---
 
 /// Orchestrates the full ingestion pipeline (Stages 1-3) for a given URL.
@@ -255,7 +261,16 @@ pub async fn distill_and_augment(
         .strip_suffix("```")
         .unwrap_or(&llm_response)
         .trim();
-    let mut extracted_data: ExtractedKnowledge = serde_json::from_str(cleaned_response)?;
+    let mut extracted_data: ExtractedKnowledge = match serde_json::from_str(cleaned_response) {
+        Ok(data) => data,
+        Err(e) => {
+            warn!(
+                "Failed to parse extraction response JSON. Error: {}. Raw response: '{}'",
+                e, cleaned_response
+            );
+            return Err(e.into());
+        }
+    };
     let original_chunk_count = extracted_data.content_chunks.len();
     extracted_data
         .content_chunks
@@ -410,16 +425,23 @@ pub async fn extract_and_store_metadata(
         .unwrap_or(&llm_response)
         .trim();
 
-    let metadata_items: Vec<ContentMetadata> = match serde_json::from_str(cleaned_response) {
-        Ok(items) => items,
-        Err(e) => {
-            warn!(
-                "Failed to parse metadata response, skipping metadata storage. Error: {}",
-                e
-            );
-            return Ok(()); // Don't fail the whole pipeline if metadata fails
-        }
-    };
+    let metadata_items: Vec<ContentMetadata> =
+        // First, try to parse the response as a direct array of metadata items.
+        match serde_json::from_str(cleaned_response) {
+            Ok(items) => items,
+            // If that fails, try parsing it as an object that contains a `metadata` field.
+            Err(_) => match serde_json::from_str::<MetadataResponse>(cleaned_response) {
+                Ok(response) => response.metadata,
+                // If both parsing attempts fail, log a warning and skip metadata storage.
+                Err(e) => {
+                    warn!(
+                        "Failed to parse metadata response as array or object, skipping. Error: {}",
+                        e
+                    );
+                    return Ok(());
+                }
+            },
+        };
 
     if metadata_items.is_empty() {
         info!("No metadata extracted for document: {document_id}");

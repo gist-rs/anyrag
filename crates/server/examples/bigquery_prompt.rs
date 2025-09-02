@@ -15,7 +15,7 @@
 //!
 //! # Prerequisites
 //!
-//! - A valid `.env` file in the `crates/server` directory with credentials
+//! - A valid `.env` file in the workspace root (`anyrag/`) with credentials
 //!   for a running AI provider and a valid `BIGQUERY_PROJECT_ID`.
 //! - A Google Cloud account with the necessary permissions. You must be authenticated
 //!   locally using `gcloud auth application-default login`.
@@ -39,19 +39,32 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    dotenvy::dotenv().ok();
+    // Load .env from the workspace root.
+    dotenvy::from_path(".env").ok();
     info!("Environment variables loaded.");
 
     // --- 2. Load Config & Explicitly Get Project ID ---
     // This is the project that will be billed for the query.
     let project_id = match env::var("BIGQUERY_PROJECT_ID") {
-        Ok(id) => id,
-        Err(_) => {
+        Ok(id) if !id.is_empty() => id,
+        _ => {
             bail!("BIGQUERY_PROJECT_ID is not set in the .env file. This example requires it.")
         }
     };
 
-    let config = config::get_config(None).expect("Failed to load configuration.");
+    let config_path = "crates/server/config.yml";
+    let fallback_path = "crates/server/config.gemini.yml";
+    let final_config_path = if std::path::Path::new(config_path).exists() {
+        config_path
+    } else if std::path::Path::new(fallback_path).exists() {
+        info!("'config.yml' not found, using template '{fallback_path}' as a fallback.");
+        fallback_path
+    } else {
+        bail!("Configuration file not found. Please copy '{fallback_path}' to '{config_path}' to run this example.");
+    };
+
+    let config =
+        config::get_config(Some(final_config_path)).expect("Failed to load configuration.");
     // The AppState will initialize with a default SQLite client, as designed.
     let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully (defaulting to SQLite).");

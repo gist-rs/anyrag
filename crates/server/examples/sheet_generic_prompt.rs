@@ -7,7 +7,7 @@
 //!
 //! # Prerequisites
 //!
-//! - A valid `.env` file in the `crates/server` directory with credentials
+//! - A valid `.env` file in the workspace root (`anyrag/`) with credentials
 //!   for a running AI provider.
 //! - An internet connection to fetch the Google Sheet.
 //!
@@ -16,7 +16,7 @@
 //! From the workspace root (`anyrag/`):
 //! `RUST_LOG=info cargo run -p anyrag-server --example sheet_generic_prompt`
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use anyrag_server::{config, handlers, state, types::DebugParams};
 use axum::{extract::Query, Json};
 use serde_json::json;
@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    dotenvy::dotenv().ok();
+    dotenvy::from_path(".env").ok();
     info!("Environment variables loaded.");
 
     let db_path = "db/anyrag_sheet_generic.db";
@@ -52,7 +52,24 @@ async fn main() -> Result<()> {
     // Set DB_URL so the app state uses the same DB as the cleanup function.
     std::env::set_var("DB_URL", db_path);
 
-    let config = config::get_config(None).expect("Failed to load configuration. Is .env present?");
+    // When running examples from the workspace root, we need to point to the config file.
+    let config_path = "crates/server/config.yml";
+    let fallback_path = "crates/server/config.gemini.yml";
+    let final_config_path = if std::path::Path::new(config_path).exists() {
+        config_path
+    } else if std::path::Path::new(fallback_path).exists() {
+        info!("'{config_path}' not found, using template '{fallback_path}' as a fallback.");
+        fallback_path
+    } else {
+        bail!("Configuration file not found. Please copy '{fallback_path}' to '{config_path}' to run this example.");
+    };
+    info!(
+        "Loading configuration for example from: {}",
+        final_config_path
+    );
+
+    let config = config::get_config(Some(final_config_path))
+        .unwrap_or_else(|e| panic!("Failed to load configuration: {e}"));
     let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully.");
 

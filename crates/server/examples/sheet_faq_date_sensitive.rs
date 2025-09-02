@@ -8,7 +8,7 @@
 //!
 //! # Prerequisites
 //!
-//! - A valid `.env` file in the `crates/server` directory with credentials
+//! - A valid `.env` file in the workspace root (`anyrag/`) with credentials
 //!   for a running AI provider.
 //! - An internet connection to fetch the Google Sheet.
 //!
@@ -17,6 +17,7 @@
 //! From the workspace root (`anyrag/`):
 //! `RUST_LOG=info cargo run -p anyrag-server --example sheet_faq_date_sensitive`
 
+use anyhow::{bail, Result};
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
@@ -26,14 +27,13 @@ use anyrag_server::{
 };
 use axum::{extract::Query, Json};
 use core_access::get_or_create_user;
-
 use std::{fs, time::Duration};
 use tokio::time::sleep;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 /// Cleans up database files for a fresh run.
-async fn cleanup_db(db_path: &str) -> anyhow::Result<()> {
+async fn cleanup_db(db_path: &str) -> Result<()> {
     for path_str in [db_path, &format!("{db_path}-wal")] {
         let path = std::path::Path::new(path_str);
         if path.exists() {
@@ -45,34 +45,35 @@ async fn cleanup_db(db_path: &str) -> anyhow::Result<()> {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<()> {
     // --- 1. Setup ---
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .init();
-    dotenvy::dotenv().ok();
+    dotenvy::from_path(".env").ok();
     info!("Environment variables loaded.");
 
     let db_path = "db/anyrag_sheet_faq_date.db";
     cleanup_db(db_path).await?;
-
-    // Set DB_URL so the app state uses the same DB as the cleanup function.
     std::env::set_var("DB_URL", db_path);
 
-    let config = config::get_config(None).expect("Failed to load configuration. Is .env present?");
+    // When running examples from the workspace root, we need to point to the config file.
+    let config_path = "crates/server/config.yml";
+    let fallback_path = "crates/server/config.gemini.yml";
+    let final_config_path = if std::path::Path::new(config_path).exists() {
+        config_path
+    } else if std::path::Path::new(fallback_path).exists() {
+        info!("'{config_path}' not found, using template '{fallback_path}' as a fallback.");
+        fallback_path
+    } else {
+        bail!("Configuration file not found. Please copy '{fallback_path}' to '{config_path}' to run this example.");
+    };
+
+    let config =
+        config::get_config(Some(final_config_path)).expect("Failed to load configuration.");
     let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully.");
 
-    // Create a user for this example run.
-    let user = get_or_create_user(
-        &app_state.sqlite_provider.db,
-        "example-user-sheet-faq@anyrag.com",
-    )
-    .await?;
-    let auth_user = AuthenticatedUser(user);
-    info!("Simulating requests for user: {}", auth_user.0.id);
-
-    sleep(Duration::from_millis(100)).await;
     // Create a user for this example run.
     let user = get_or_create_user(
         &app_state.sqlite_provider.db,
@@ -107,13 +108,11 @@ async fn main() -> anyhow::Result<()> {
                 response.result.ingested_faqs
             );
             if response.result.ingested_faqs == 0 {
-                anyhow::bail!(
-                    "No FAQs were ingested. The sheet might be empty or already processed."
-                );
+                bail!("No FAQs were ingested. The sheet might be empty or already processed.");
             }
         }
         Err(e) => {
-            anyhow::bail!("Sheet FAQ ingestion failed: {:?}", e);
+            bail!("Sheet FAQ ingestion failed: {:?}", e);
         }
     }
 
@@ -129,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
     .await
     {
         Ok(_) => info!("Embedding request completed successfully."),
-        Err(e) => anyhow::bail!("Document embedding failed: {:?}", e),
+        Err(e) => bail!("Document embedding failed: {:?}", e),
     }
 
     // --- 4. Ask a Question using RAG ---
@@ -152,7 +151,7 @@ async fn main() -> anyhow::Result<()> {
     .await
     {
         Ok(Json(response)) => response.result.text,
-        Err(e) => anyhow::bail!("Error occurred while asking question: {:?}", e),
+        Err(e) => bail!("Error occurred while asking question: {:?}", e),
     };
 
     // --- 5. Print Final Results ---

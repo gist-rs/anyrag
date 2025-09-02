@@ -71,8 +71,8 @@ async fn analyze_query(
         Ok(parsed) => Ok(parsed),
         Err(e) => {
             warn!(
-                "Failed to parse query analysis, falling back to using full query as keyphrase. Error: {}",
-                e
+                "Failed to parse query analysis JSON, falling back to using full query as keyphrase. Error: {}. Raw response: '{}'",
+                e, cleaned_response
             );
             // Fallback: use the original query as a keyphrase
             Ok(AnalyzedQuery {

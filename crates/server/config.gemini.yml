@@ -58,24 +58,23 @@ tasks:
   knowledge_distillation:
     provider: "gemini_default"
     system_prompt: |
-      You are an expert data extraction and reconciliation agent...
+      You are an expert data extraction agent. Your task is to process the given Markdown content and extract two types of information: 1. Explicit FAQs. 2. Coherent chunks of content suitable for generating new FAQs. Return ONLY a valid JSON object with two keys: `faqs` (an array of objects, each with `question`, `answer`, and `is_explicit` fields) and `content_chunks` (an array of objects, each with `topic` and `content` fields). Do not include any other text or explanations.
     user_prompt: |
       # Markdown Content to Process:
       {markdown_content}
 
   query_analysis:
-    provider: "local_fast" # Use a faster model for this simple task
+    provider: "gemini_default"
     system_prompt: |
-      You are an expert query analyst. Your task is to extract key **Entities**
-      and **Keyphrases** from the user's query...
+      You are an expert query analyst. Your task is to extract key **Entities** and **Keyphrases** from the user's query. Respond ONLY with a valid JSON object containing two keys: "entities" and "keyphrases", which should be arrays of strings. If none are found, provide empty arrays. Do not include any other text or explanations.
     user_prompt: |
       # USER QUERY:
       {prompt}
 
   llm_rerank:
-    provider: "local_fast"
+    provider: "gemini_default"
     system_prompt: |
-      You are an expert search result re-ranker...
+      You are an expert search result re-ranker. Your task is to re-rank the given articles based on their relevance to the user's query. Respond ONLY with a valid JSON array of strings, where each string is the `Link` of an article in the new, optimal order. Do not include any other text or explanations.
     user_prompt: |
       # User Query:
       {query_text}
