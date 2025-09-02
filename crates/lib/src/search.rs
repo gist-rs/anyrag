@@ -31,23 +31,6 @@ pub enum SearchMode {
 }
 // --- Query Analysis ---
 
-const QUERY_ANALYSIS_SYSTEM_PROMPT: &str = r#"You are an expert query analyst. Your task is to extract key **Entities** and **Keyphrases** from the user's query to be used for a database search.
-
-# Instructions:
-1.  **Entities**: Identify specific, proper nouns (e.g., product names, people, organizations).
-2.  **Keyphrases**: Identify the main concepts or topics.
-3.  Return a single JSON object with two keys: `entities` and `keyphrases`.
-
-# Example:
-## USER QUERY:
-What are the conditions for the True App Mega Campaign to win a Tesla?
-
-## YOUR JSON OUTPUT:
-{
-  "entities": ["True App", "Tesla"],
-  "keyphrases": ["campaign conditions", "win tesla"]
-}"#;
-
 #[derive(Deserialize, Debug)]
 struct AnalyzedQuery {
     #[serde(default)]
@@ -69,10 +52,11 @@ pub enum SearchError {
 async fn analyze_query(
     ai_provider: &dyn AiProvider,
     query_text: &str,
+    system_prompt: &str,
+    user_prompt_template: &str,
 ) -> Result<AnalyzedQuery, PromptError> {
-    let llm_response = ai_provider
-        .generate(QUERY_ANALYSIS_SYSTEM_PROMPT, query_text)
-        .await?;
+    let user_prompt = user_prompt_template.replace("{prompt}", query_text);
+    let llm_response = ai_provider.generate(system_prompt, &user_prompt).await?;
 
     debug!("LLM query analysis response: {}", llm_response);
     let cleaned_response = llm_response
@@ -107,6 +91,8 @@ pub async fn hybrid_search<P>(
     query_text: &str,
     owner_id: Option<&str>, // For security
     limit: u32,
+    analysis_system_prompt: &str,
+    analysis_user_prompt_template: &str,
 ) -> Result<Vec<SearchResult>, SearchError>
 where
     P: MetadataSearch + VectorSearch + ?Sized,
@@ -114,7 +100,13 @@ where
     info!("Starting multi-stage hybrid search for: '{}'", query_text);
 
     // --- Stage 1: Query Analysis ---
-    let analyzed_query = analyze_query(ai_provider, query_text).await?;
+    let analyzed_query = analyze_query(
+        ai_provider,
+        query_text,
+        analysis_system_prompt,
+        analysis_user_prompt_template,
+    )
+    .await?;
     info!("Analyzed query: {:?}", analyzed_query);
 
     // --- Stage 2: Metadata Pre-Filtering ---

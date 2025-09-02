@@ -10,7 +10,7 @@ This crate provides a lightweight `axum` web server that exposes the `anyrag` li
 *   **RAG Endpoint:** A dedicated endpoint to ask questions against the knowledge base, using a hybrid search backend.
 *   **Containerized Deployment:** Includes a multi-stage `Dockerfile` for building a minimal, secure server image.
 *   **Asynchronous:** Built on top of Tokio for non-blocking, efficient request handling.
-*   **Highly Configurable:** Uses environment variables for easy configuration of prompts and providers.
+*   **Highly Configurable:** Uses a `config.yml` file for detailed control over AI providers and prompts.
 
 ## Authentication
 
@@ -42,54 +42,51 @@ The service account or user running the application needs the following IAM role
 
 You can grant these roles using the `gcloud` CLI.
 
-## Environment Variable Configuration
+## Configuration
 
-The server is configured using environment variables. For local development, you can create a `.env` file in this directory. For Docker, you can use an `--env-file` or pass variables with the `-e` flag.
+The server now uses a powerful `config.yml` file for managing AI providers, embedding models, and task-specific prompts. This allows for much greater flexibility, such as using different models for different tasks (e.g., a fast local model for simple analysis and a powerful cloud model for complex synthesis).
 
-### Core Configuration
--   `AI_API_KEY`: **(Required)** Your API key for the selected AI Provider.
--   `BIGQUERY_PROJECT_ID`: **(Required)** The ID of your Google Cloud project.
--   `AI_API_URL`: **(Required)** The full URL for the AI provider's API endpoint.
--   `EMBEDDINGS_API_URL`: **(Required for RAG)** The URL for the text embeddings model.
--   `EMBEDDINGS_MODEL`: **(Required for RAG)** The name of the embeddings model.
--   `AI_PROVIDER`: The AI provider to use. Can be "gemini" or "local". Defaults to "gemini".
+### 1. Create your `config.yml`
+
+Two templates are provided:
+-   `config.gemini.yml`: Pre-configured for use with the Google Gemini API.
+-   `config.local.yml`: Pre-configured for use with a local AI provider (like Ollama or LM Studio).
+
+Copy the template that best matches your setup to a new file named `config.yml` in the `anyrag/crates/server` directory. This file is ignored by Git.
+
+```sh
+# For local models
+cp config.local.yml config.yml
+
+# For Google Gemini
+cp config.gemini.yml config.yml
+```
+
+### 2. Configure your `.env` file
+
+The `.env` file is now simplified and used only for secrets and environment-specific settings that you don't want to commit to version control. These variables are loaded and substituted into the `${VAR_NAME}` placeholders in your `config.yml`.
+
+**Core Environment Variables:**
+
+-   `AI_API_KEY`: **(Required for cloud providers)** Your secret API key.
+-   `AI_API_URL`: The base URL for your primary AI provider.
+-   `EMBEDDINGS_API_URL`: The URL for your text embedding model.
 -   `PORT`: The port for the server to listen on. Defaults to `9090`.
+-   `DB_URL`: The path to the SQLite database file. Defaults to `db/anyrag.db`.
 -   `RUST_LOG`: The logging level (e.g., `info`, `debug`).
--   `JWT_SECRET`: A secret key for signing and validating JWTs. If not set, a default, less secure key is used. **It is highly recommended to set this in production.**
-
-### Prompt Customization (Optional)
-You can set the following environment variables to define server-wide default prompts. This is useful for customizing the AI's behavior without changing the code. These can still be overridden by individual API requests.
-
--   `QUERY_SYSTEM_PROMPT_TEMPLATE`: Controls the AI's core instructions for **query generation**. Use this to change its persona, add strict rules, or adapt to a new query language.
--   `QUERY_USER_PROMPT_TEMPLATE`: Controls how the user's question and table context are presented to the AI for **query generation**. Available placeholders: `{language}`, `{context}`, `{prompt}`, `{alias_instruction}`.
--   **`FORMAT_SYSTEM_PROMPT_TEMPLATE`**: Controls the AI's persona for the final response formatting step.
--   **`FORMAT_USER_PROMPT_TEMPLATE`**: Controls how the data and original prompt are presented to the AI for formatting. Available placeholders: `{prompt}`, `{instruction}`, `{content}`.
+-   `JWT_SECRET`: A secret key for signing and validating JWTs. **It is highly recommended to set this in production.**
 
 ## Local Development (Without Docker)
 
 For running the server directly on your machine for development.
 
-1.  **Authenticate Locally:** Run `gcloud auth application-default login`.
-2.  **Create `.env` File:** In the `anyrag/crates/server` directory, copy `.env.example` to `.env` and fill in your secrets and any desired prompt customizations.
-3.  **Run the Server:**
+1.  **Authenticate with GCP (Optional):** If you plan to use the BigQuery example, run `gcloud auth application-default login`.
+2.  **Create `config.yml`:** Copy either `config.local.yml` or `config.gemini.yml` to `config.yml` and customize it for your needs.
+3.  **Create `.env` File:** In the `anyrag/crates/server` directory, copy `.env.example` to `.env` and fill in your secrets (like `AI_API_KEY`).
+4.  **Run the Server:**
     ```sh
     cargo run
     ```
-
-## Running Examples
-
-The server crate includes several examples in the `examples/` directory that demonstrate key features. You can run them from the workspace root.
-
-**Example: Running the Knowledge Base RAG Workflow**
-This example demonstrates the full end-to-end process of ingesting a URL, embedding the content, and asking questions against it.
-
-```sh
-# Ensure your .env file is configured, especially for the AI provider
-RUST_LOG=info cargo run -p anyrag-server --example knowledge_prompt
-RUST_LOG=info cargo run -p anyrag-server --example sheet_faq_date_sensitive
-RUST_LOG=info cargo run -p anyrag-server --example sheet_generic_prompt
-RUST_LOG=info cargo run -p anyrag-server --example knowledge_graph_precision
-```
 
 ## Docker Deployment
 
@@ -103,40 +100,29 @@ From the **workspace root** (`anyrag/`), run the build command:
 docker build -t anyrag-server -f crates/server/Dockerfile .
 ```
 
-### Step 2: Create the `.env` File
+### Step 2: Create Configuration Files
 
-In the `anyrag/crates/server/` directory, copy the `.env.example` file to `.env` and add your secrets.
+1.  **Create `config.yml`:** In the `anyrag/crates/server/` directory, copy your chosen template (`config.local.yml` or `config.gemini.yml`) to `config.yml`.
+2.  **Create `.env` File:** In the same directory, copy `.env.example` to `.env` and add your secrets.
 
-### Step 3: Place the Service Account Key
+### Step 3: Place the Service Account Key (Optional)
 
-Place your downloaded Google Cloud service account key file in the **workspace root** (`anyrag/`) and name it `gcp_creds.json`.
+If you plan to use the BigQuery example, place your downloaded Google Cloud service account key file in the **workspace root** (`anyrag/`) and name it `gcp_creds.json`.
 
 ### Step 4: Run the Docker Container
 
-Execute this command from the **workspace root** (`anyrag/`):
+Execute this command from the **workspace root** (`anyrag/`). It mounts your configuration files into the container.
 
 ```sh
 docker rm -f anyrag-server || true && \
 docker run --rm -d \
   -p 9090:9090 \
   --env-file ./crates/server/.env \
+  -v "$(pwd)/crates/server/config.yml:/app/config.yml:ro" \
   -v "$(pwd)/gcp_creds.json:/app/gcp_creds.json:ro" \
   --name anyrag-server \
   anyrag-server && \
 docker logs -f anyrag-server
-```
-
-### Updating a Live Service on Google Cloud Run
-
-If you have deployed this server as a service on Google Cloud Run, you can easily update its environment variables without a full redeployment. This is the recommended way to change the AI's behavior in a live environment by modifying the prompt templates.
-
-Use the `gcloud run services update` command to apply changes.
-
-**Example: Changing the AI's Query Generation Persona**
-
-```sh
-gcloud run services update YOUR_SERVICE_NAME \
-  --update-env-vars QUERY_SYSTEM_PROMPT_TEMPLATE="You are a SQL expert who only writes queries using Common Table Expressions (CTEs)."
 ```
 
 ## Running Tests
@@ -284,20 +270,6 @@ curl -X POST http://localhost:9090/ingest/text \
   }'
 ```
 
-```
-
-**Verifying the Ingestion**
-
-After ingesting, you can use the `/search/knowledge` endpoint to confirm that the text was stored and is searchable.
-
-```sh
-curl -X POST http://localhost:9090/search/knowledge \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <your_jwt>" \
-  -d '{ "query": "macros" }'
-```
-This will synthesize an answer from the ingested chunks that contain the word "macros".
-
 #### `POST /embed/new`
 
 Finds all documents in the knowledge base that have not yet been embedded and generates vector embeddings for them. This step is crucial for enabling semantic search.
@@ -345,5 +317,3 @@ curl -X POST http://localhost:9090/search/knowledge \
     "instruction": "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า"
   }'
 ```
-
-

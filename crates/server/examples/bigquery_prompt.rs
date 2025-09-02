@@ -51,7 +51,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    let config = config::get_config().expect("Failed to load configuration.");
+    let config = config::get_config(None).expect("Failed to load configuration.");
     // The AppState will initialize with a default SQLite client, as designed.
     let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully (defaulting to SQLite).");

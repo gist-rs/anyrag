@@ -88,7 +88,7 @@ pub const DEFAULT_FORMAT_USER_PROMPT: &str = r#"# PROMPT:
 pub fn get_alias_instruction(answer_key: Option<&str>) -> String {
     let key = answer_key.unwrap_or("result");
     format!(
-        "If the query uses an aggregate function or returns a single column, you MUST alias the result with `AS {key}`."
+        "In the SELECT clause, if you are selecting an aggregate function or a single column, you MUST alias it with `AS {key}`."
     )
 }
 
@@ -104,23 +104,3 @@ pub fn get_select_instruction(instruction: Option<&str>) -> String {
         _ => "Unless the user asks for 'everything' or 'all details', select only the most relevant columns to answer the question, not `SELECT *`.".to_string(),
     }
 }
-
-// --- Rerank Prompts ---
-
-/// The system prompt for the LLM-based re-ranking stage.
-///
-/// This prompt instructs the AI to act as an expert re-ranker and defines the
-/// expected JSON output format.
-pub const DEFAULT_RERANK_SYSTEM_PROMPT: &str = "You are an expert search result re-ranker. Your task is to re-order a list of provided articles based on their relevance to a user's query. Analyze the user's query and the article content (title and description). Return a JSON array containing only the `link` strings of the articles in the new, correctly ordered sequence, from most relevant to least relevant. Do not add any explanation or other text outside of the JSON array.";
-
-/// The user prompt for the LLM-based re-ranking stage.
-///
-/// This template provides the user's query and the list of candidate articles
-/// to the AI for re-ranking.
-///
-/// Placeholders: `{query_text}`, `{articles_context}`
-pub const DEFAULT_RERANK_USER_PROMPT: &str = "# User Query:
-    {query_text}n\
-    # Articles to Re-rank:
-    {articles_context}n\
-    # Your Output (JSON array of links only):\n";

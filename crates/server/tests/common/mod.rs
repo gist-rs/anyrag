@@ -16,19 +16,21 @@
 use anyhow::Result;
 use anyrag::{
     graph::types::MemoryKnowledgeGraph,
-    providers::{
-        ai::local::LocalAiProvider,
-        db::{sqlite::SqliteProvider, storage::Storage},
-    },
+    providers::db::{sqlite::SqliteProvider, storage::Storage},
     types::{TableField, TableSchema},
-    PromptClientBuilder,
 };
-use anyrag_server::{auth::middleware::Claims, router, state::AppState};
+use anyrag_server::{
+    auth::middleware::Claims,
+    config::{AppConfig, EmbeddingConfig, ProviderConfig, TaskConfig},
+    router,
+    state::{build_app_state, AppState},
+};
 use axum::serve;
 use httpmock::MockServer;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest::Client;
 use std::{
+    collections::HashMap,
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, RwLock},
@@ -69,55 +71,74 @@ impl TestApp {
         let db_file = NamedTempFile::new()?;
         let db_path = db_file.path().to_path_buf();
 
-        let ai_provider = Box::new(LocalAiProvider::new(
-            mock_server.url("/v1/chat/completions"),
-            None,
-            None,
-        )?);
+        let sqlite_provider = SqliteProvider::new(db_path.to_str().unwrap()).await?;
+        sqlite_provider.initialize_schema().await?;
 
-        let sqlite_provider = Arc::new(SqliteProvider::new(db_path.to_str().unwrap()).await?);
-
-        // Create and populate a dummy table for testing. This is crucial for tests
-        // that rely on a valid table schema being present (e.g., e2e_prompt_test).
-        sqlite_provider
-            .execute_query(
-                "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT, value REAL);",
-            )
-            .await
-            .expect("Failed to create test table in TestApp");
-        sqlite_provider
-            .execute_query("INSERT INTO test_table (id, name, value) VALUES (1, 'test', 1.0)")
-            .await
-            .expect("Failed to insert data into test table in TestApp");
-
-        // Also ensure the application schema exists for tests.
-        sqlite_provider
-            .initialize_schema()
-            .await
-            .expect("Failed to initialize schema in TestApp");
-
-        let prompt_client = Arc::new(
-            PromptClientBuilder::new()
-                .ai_provider(ai_provider)
-                .storage_provider(Box::new(sqlite_provider.as_ref().clone()))
-                .build()?,
-        );
-
-        // Initialize the knowledge graph for the test application state.
-        let knowledge_graph = Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory()));
-
-        // Build the application state, using mocks for external services.
-        let app_state = AppState {
-            prompt_client,
-            sqlite_provider,
-            knowledge_graph: knowledge_graph.clone(),
-            embeddings_api_url: Some(mock_server.url("/v1/embeddings")),
-            embeddings_model: Some("mock-embedding-model".to_string()),
-            query_system_prompt_template: None,
-            query_user_prompt_template: None,
-            format_system_prompt_template: None,
-            format_user_prompt_template: None,
+        // Create a mock AppConfig that points to our mock server
+        let mock_config = AppConfig {
+            port: 0,
+            db_url: db_path.to_str().unwrap().to_string(),
+            embedding: EmbeddingConfig {
+                api_url: mock_server.url("/v1/embeddings"),
+                model_name: "mock-embedding-model".to_string(),
+            },
+            providers: HashMap::from([(
+                "mock_provider".to_string(),
+                ProviderConfig {
+                    provider: "local".to_string(),
+                    api_url: mock_server.url("/v1/chat/completions"),
+                    api_key: None,
+                    model_name: "mock-chat-model".to_string(),
+                },
+            )]),
+            tasks: HashMap::from([
+                (
+                    "query_generation".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are an SQL expert for MockDB.".to_string(),
+                        user_prompt: "Context: {context}\nQuestion: {prompt}".to_string(),
+                    },
+                ),
+                (
+                    "rag_synthesis".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are a strict, factual AI.".to_string(),
+                        user_prompt: "User Question: {prompt}\nContext: {context}".to_string(),
+                    },
+                ),
+                (
+                    "knowledge_distillation".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are an expert data extraction agent.".to_string(),
+                        user_prompt: "Content: {markdown_content}".to_string(),
+                    },
+                ),
+                (
+                    "query_analysis".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are an expert query analyst.".to_string(),
+                        user_prompt: "Query: {prompt}".to_string(),
+                    },
+                ),
+                (
+                    "llm_rerank".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are an expert search result re-ranker.".to_string(),
+                        user_prompt: "Query: {query_text}\nArticles: {articles_context}"
+                            .to_string(),
+                    },
+                ),
+            ]),
         };
+
+        // Build the application state from the mock config.
+        let app_state = build_app_state(mock_config).await?;
+        let knowledge_graph_clone = app_state.knowledge_graph.clone();
 
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr: SocketAddr = listener.local_addr()?;
@@ -142,7 +163,7 @@ impl TestApp {
             client: Client::new(),
             mock_server,
             db_path,
-            knowledge_graph,
+            knowledge_graph: knowledge_graph_clone,
             _db_file: db_file,
             _server_handle: server_handle,
             shutdown_tx: Some(shutdown_tx),
@@ -153,29 +174,14 @@ impl TestApp {
 impl Drop for TestApp {
     fn drop(&mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
-            // The receiver might already be gone if the server task panicked,
-            // so we ignore the result of send.
             let _ = tx.send(());
         }
     }
 }
 
-/// A default implementation for `AppState` used for convenience in tests.
-///
-/// The `..Default::default()` syntax in `TestApp::spawn` relies on this to fill in
-/// fields like the prompt templates. The core providers (`prompt_client`, etc.) are
-/// immediately overwritten with the real test instances.
-/// The `impl Default for AppState` block was removed because it violates Rust's
-/// orphan rule. A foreign trait (`Default`) cannot be implemented for a foreign
-/// type (`AppState`) outside of its original crate. For the `..Default::default()`
-/// syntax to work in `TestApp::spawn`, the `Default` trait must be implemented
-/// for `AppState` within the `anyrag_server` crate itself.
-///
 /// A struct to hold common test setup resources for storage-related tests.
 pub struct TestSetup {
     pub storage_provider: Box<dyn Storage>,
-    // The temporary file for the SQLite database. It's important to keep this
-    // in scope, so it's not deleted until the TestSetup is dropped.
     _db_file: NamedTempFile,
 }
 
@@ -189,7 +195,6 @@ impl TestSetup {
             .await
             .expect("Failed to create SqliteProvider");
 
-        // Create and populate a dummy table for testing.
         provider
             .execute_query(
                 "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT, value REAL);",

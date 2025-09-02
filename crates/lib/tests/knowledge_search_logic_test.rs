@@ -134,6 +134,8 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
         user_query,
         None, // owner_id
         limit,
+        "You are an expert query analyst.",
+        "USER QUERY:\n{prompt}",
     )
     .await?;
 
@@ -173,7 +175,7 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
     // Assert Query Analysis call
     let (system_prompt_1, user_prompt_1) = &history[0];
     assert!(system_prompt_1.contains("expert query analyst"));
-    assert_eq!(user_prompt_1, user_query);
+    assert_eq!(*user_prompt_1, format!("USER QUERY:\n{user_query}"));
 
     // Assert RAG Synthesis call (most important assertion)
     let (system_prompt_2, user_prompt_2) = &history[1];

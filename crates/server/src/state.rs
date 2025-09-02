@@ -1,77 +1,83 @@
+//! # Application State
+//!
+//! This module defines the shared application state (`AppState`) and the logic
+//! for building it at startup. The `AppState` holds all shared resources, such
+//! as the configuration, database connections, and instantiated AI provider clients,
+//! making them accessible to all request handlers.
+
+use crate::config::AppConfig;
 use anyrag::{
     graph::types::MemoryKnowledgeGraph,
     providers::{
-        ai::{gemini::GeminiProvider, local::LocalAiProvider},
+        ai::{gemini::GeminiProvider, local::LocalAiProvider, AiProvider},
         db::sqlite::SqliteProvider,
     },
-    PromptClient, PromptClientBuilder,
 };
-use std::sync::{Arc, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
-use super::config::Config;
-
-/// The shared application state.
+/// The shared application state, accessible from all request handlers.
 #[derive(Clone)]
 pub struct AppState {
-    pub prompt_client: Arc<PromptClient>,
+    /// The application's configuration, loaded from `config.yml`.
+    pub config: Arc<AppConfig>,
+    /// The primary database provider for local storage and knowledge base.
     pub sqlite_provider: Arc<SqliteProvider>,
-    pub embeddings_api_url: Option<String>,
-    pub embeddings_model: Option<String>,
-    pub query_system_prompt_template: Option<String>,
-    pub query_user_prompt_template: Option<String>,
-    pub format_system_prompt_template: Option<String>,
-    pub format_user_prompt_template: Option<String>,
+    /// A map of instantiated AI providers, keyed by their name from the config.
+    pub ai_providers: Arc<HashMap<String, Box<dyn AiProvider>>>,
+    /// An in-memory knowledge graph for time-sensitive, precise data.
     pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
 }
 
 /// Builds the shared application state from the configuration.
-pub async fn build_app_state(config: Config) -> anyhow::Result<AppState> {
-    let ai_provider: Box<dyn anyrag::providers::ai::AiProvider> =
-        match config.ai_provider.as_str() {
+///
+/// This function initializes all necessary services:
+/// - It instantiates an AI provider client for each entry in the `providers`
+///   section of the configuration.
+/// - It sets up the connection to the SQLite database.
+/// - It initializes an in-memory knowledge graph.
+pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
+    // Create a map of AI provider instances from the configuration.
+    let mut ai_providers = HashMap::new();
+    for (name, provider_config) in &config.providers {
+        let provider: Box<dyn AiProvider> = match provider_config.provider.as_str() {
             "gemini" => {
-                let api_key = config.ai_api_key.clone().ok_or_else(|| {
-                    anyhow::anyhow!("AI_API_KEY is required for the gemini provider")
+                let api_key = provider_config.api_key.clone().ok_or_else(|| {
+                    anyhow::anyhow!("api_key is required for gemini provider '{name}'")
                 })?;
-                Box::new(GeminiProvider::new(config.ai_api_url.clone(), api_key)?)
+                Box::new(GeminiProvider::new(
+                    provider_config.api_url.clone(),
+                    api_key,
+                )?)
             }
             "local" => Box::new(LocalAiProvider::new(
-                config.ai_api_url.clone(),
-                config.ai_api_key.clone(),
-                config.ai_model.clone(),
+                provider_config.api_url.clone(),
+                provider_config.api_key.clone(),
+                Some(provider_config.model_name.clone()),
             )?),
             _ => {
                 return Err(anyhow::anyhow!(
-                    "Unsupported AI provider: {}",
-                    config.ai_provider
-                ))
+                    "Unsupported AI provider type '{}' for provider '{}'",
+                    provider_config.provider,
+                    name
+                ));
             }
         };
+        ai_providers.insert(name.clone(), provider);
+    }
 
     // The provider for local ingestion, embedding, and searching.
     let sqlite_provider = SqliteProvider::new(&config.db_url).await?;
-    tracing::info!(db_path = %config.db_url, "Initialized local storage provider (SQLite). This provider will be used for all ingestion and knowledge base operations.");
+    tracing::info!(db_path = %config.db_url, "Initialized local storage provider (SQLite).");
     // Ensure the database schema is up-to-date on startup.
     sqlite_provider.initialize_schema().await?;
 
-    // Always build the default prompt client with the SQLite provider at startup.
-    // BigQuery clients will be created dynamically per-request if a project_id is provided.
-    let prompt_client = {
-        tracing::info!("Initializing default prompt client with SQLite provider.");
-        PromptClientBuilder::new()
-            .ai_provider(ai_provider)
-            .storage_provider(Box::new(sqlite_provider.clone()))
-            .build()?
-    };
-
     Ok(AppState {
-        prompt_client: Arc::new(prompt_client),
+        config: Arc::new(config),
         sqlite_provider: Arc::new(sqlite_provider),
-        embeddings_api_url: config.embeddings_api_url,
-        embeddings_model: config.embeddings_model,
-        query_system_prompt_template: config.query_system_prompt_template,
-        query_user_prompt_template: config.query_user_prompt_template,
-        format_system_prompt_template: config.format_system_prompt_template,
-        format_user_prompt_template: config.format_user_prompt_template,
+        ai_providers: Arc::new(ai_providers),
         knowledge_graph: Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory())),
     })
 }

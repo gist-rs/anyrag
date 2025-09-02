@@ -17,7 +17,7 @@ core-access = { path = "../core-access" }
 # Web Framework
 axum = { workspace = true, features = ["macros"] }
 axum-extra = { version = "0.10.1", features = ["multipart", "typed-header"] }
-jsonwebtoken = "9.3.0"
+jsonwebtoken = "9.3.1"
 async-trait = { workspace = true }
 
 # Async runtime
@@ -39,6 +39,11 @@ dotenvy = { workspace = true }
 anyhow = { workspace = true }
 reqwest = { workspace = true, features = ["json", "multipart"] }
 chrono.workspace = true
+regex = { workspace = true }
+
+# Config
+config = { version = "0.15.15", features = ["yaml"] }
+serde_yaml = "0.9.34"
 
 [features]
 default = ["bigquery", "graph_db"]
@@ -52,13 +57,14 @@ futures = "0.3.31"
 gcp-bigquery-client = { workspace = true }
 chrono = { workspace = true }
 httpmock = "0.7.0"
-jsonwebtoken = "9.3.0"
+jsonwebtoken = "9.3.1"
 tempfile = "3.21.0"
 turso = { workspace = true }
 regex = { workspace = true }
+serial_test = "3.2.0"
 md5 = "0.8.0"
 pdf-writer = "0.13.0"
-uuid = { version = "1.8.0", features = ["v5", "serde"] }
+uuid = { version = "1.18.1", features = ["v5", "serde"] }
 
 [[test]]
 name = "config_test"

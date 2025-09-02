@@ -232,6 +232,20 @@ pub async fn ingest_file_handler(
     let source_identifier = source_identifier
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("File name not found in request.")))?;
 
+    // --- Task-based AI Provider Loading ---
+    let task_name = "knowledge_distillation";
+    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Configuration for task '{task_name}' not found."
+        ))
+    })?;
+    let provider_name = &task_config.provider;
+    let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Provider '{provider_name}' for task '{task_name}' not found in providers map."
+        ))
+    })?;
+
     let extractor_strategy = match extractor_choice {
         ExtractorChoice::Local => PdfSyncExtractor::Local,
         ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
@@ -239,11 +253,14 @@ pub async fn ingest_file_handler(
 
     let ingested_count = run_pdf_ingestion_pipeline(
         &app_state.sqlite_provider.db,
-        &*app_state.prompt_client.ai_provider,
+        ai_provider.as_ref(), // Pass the dynamically selected provider
         pdf_data.clone(),
         &source_identifier,
         owner_id.as_deref(),
         extractor_strategy,
+        &task_config.system_prompt,
+        &task_config.user_prompt,
+        &task_config.system_prompt, // Re-use for augmentation for now
     )
     .await?;
 
@@ -304,6 +321,20 @@ pub async fn ingest_pdf_url_handler(
         source_identifier
     );
 
+    // --- Task-based AI Provider Loading ---
+    let task_name = "knowledge_distillation";
+    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Configuration for task '{task_name}' not found."
+        ))
+    })?;
+    let provider_name = &task_config.provider;
+    let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Provider '{provider_name}' for task '{task_name}' not found in providers map."
+        ))
+    })?;
+
     let extractor_strategy = match payload.extractor {
         ExtractorChoice::Local => PdfSyncExtractor::Local,
         ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
@@ -311,11 +342,14 @@ pub async fn ingest_pdf_url_handler(
 
     let ingested_count = run_pdf_ingestion_pipeline(
         &app_state.sqlite_provider.db,
-        &*app_state.prompt_client.ai_provider,
+        ai_provider.as_ref(), // Pass the dynamically selected provider
         pdf_data.clone(),
         &source_identifier,
         owner_id.as_deref(),
         extractor_strategy,
+        &task_config.system_prompt,
+        &task_config.user_prompt,
+        &task_config.system_prompt, // Re-use for augmentation for now
     )
     .await?;
 

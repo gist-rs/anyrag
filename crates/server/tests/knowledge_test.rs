@@ -68,7 +68,14 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
 
     // --- 3. Act ---
     // Manually run the pipeline stages, skipping the initial fetch.
-    let faq_items = distill_and_augment(&ai_provider, &ingested_document).await?;
+    let faq_items = distill_and_augment(
+        &ai_provider,
+        &ingested_document,
+        "You are an expert data extraction agent.",
+        "Content: {markdown_content}",
+        "You are an expert content analyst.",
+    )
+    .await?;
     assert_eq!(faq_items.len(), 2);
     info!("-> Distillation successful. Found 2 FAQs.");
 

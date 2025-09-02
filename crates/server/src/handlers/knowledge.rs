@@ -11,7 +11,7 @@ use anyrag::{
     ingest::{export_for_finetuning, run_ingestion_pipeline},
     providers::ai::generate_embedding,
     search::hybrid_search,
-    types::{ContentType, ExecutePromptOptions},
+    types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
 };
 use axum::{
     extract::{Query, State},
@@ -68,16 +68,10 @@ pub async fn embed_new_handler(
 ) -> Result<Json<super::ApiResponse<EmbedNewResponse>>, AppError> {
     let limit = payload.limit.unwrap_or(20);
     info!("Received request to embed up to {limit} new documents.");
-    let api_url = app_state
-        .embeddings_api_url
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?
-        .clone();
-    let model = app_state
-        .embeddings_model
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?
-        .clone();
+
+    // Get embedding config from AppState
+    let api_url = &app_state.config.embedding.api_url;
+    let model = &app_state.config.embedding.model_name;
 
     let conn = app_state.sqlite_provider.db.connect()?;
     let sql = format!(
@@ -115,7 +109,7 @@ pub async fn embed_new_handler(
     let mut embedded_ids = Vec::new();
     for (doc_id, title, content) in docs_to_embed {
         let text_to_embed = format!("{title}. {content}");
-        match generate_embedding(&api_url, &model, &text_to_embed).await {
+        match generate_embedding(api_url, model, &text_to_embed).await {
             Ok(vector) => {
                 let vector_bytes: &[u8] = unsafe {
                     std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4)
@@ -176,24 +170,30 @@ pub async fn knowledge_search_handler(
         owner_id, payload.query, limit
     );
 
-    let api_url = app_state
-        .embeddings_api_url
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
-    let model = app_state
-        .embeddings_model
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+    let api_url = &app_state.config.embedding.api_url;
+    let model = &app_state.config.embedding.model_name;
 
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
 
+    // --- Get AI provider for query analysis ---
+    let task_name = "query_analysis";
+    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
+    })?;
+    let provider_name = &task_config.provider;
+    let analysis_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+    })?;
+
     let search_results = hybrid_search(
         app_state.sqlite_provider.as_ref(),
-        app_state.prompt_client.ai_provider.as_ref(),
+        analysis_provider.as_ref(),
         query_vector,
         &payload.query,
         owner_id.as_deref(),
         limit,
+        &task_config.system_prompt,
+        &task_config.user_prompt,
     )
     .await?;
 
@@ -250,17 +250,34 @@ pub async fn knowledge_search_handler(
 
     info!("--> Synthesizing answer with context:\n{}", context);
 
-    let options = ExecutePromptOptions {
+    // --- Get AI provider for RAG synthesis ---
+    let task_name = "rag_synthesis";
+    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
+    })?;
+    let provider_name = &task_config.provider;
+    let synthesis_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+    })?;
+
+    let mut options = ExecutePromptOptions {
         prompt: payload.query.clone(),
         content_type: Some(ContentType::Knowledge),
         context: Some(context.clone()),
         instruction: payload.instruction,
         ..Default::default()
     };
-    let prompt_result = app_state
-        .prompt_client
-        .execute_prompt_with_options(options.clone())
-        .await?;
+
+    // Apply prompts from config
+    options.system_prompt_template = Some(task_config.system_prompt.clone());
+    options.user_prompt_template = Some(task_config.user_prompt.clone());
+
+    let client = PromptClientBuilder::new()
+        .ai_provider(synthesis_provider.clone())
+        .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
+        .build()?;
+
+    let prompt_result = client.execute_prompt_with_options(options.clone()).await?;
 
     let debug_info = if debug_params.debug.unwrap_or(false) {
         Some(json!({
@@ -320,14 +337,35 @@ pub async fn knowledge_ingest_handler(
         payload.url, owner_id
     );
 
+    // --- Get AI provider for knowledge distillation ---
+    let task_name = "knowledge_distillation";
+    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
+    })?;
+    let provider_name = &task_config.provider;
+    let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+    })?;
+
+    // The `distill_and_augment` function which is called by the pipeline internally
+    // has two sub-passes for augmentation and metadata extraction. We assume for now
+    // that the same provider and base prompts are used, but a future refactor could
+    // make this even more granular by defining sub-tasks in the config.
     let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
-        &*app_state.prompt_client.ai_provider,
+        ai_provider.as_ref(),
         &payload.url,
         owner_id.as_deref(),
+        &task_config.system_prompt, // extraction_system_prompt
+        &task_config.user_prompt,   // extraction_user_prompt_template
+        // For now, we'll reuse the main system prompt for sub-tasks.
+        // A more advanced implementation might have dedicated tasks.
+        &task_config.system_prompt, // augmentation_system_prompt
+        &task_config.system_prompt, // metadata_extraction_system_prompt
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
+
     let response = KnowledgeIngestResponse {
         message: "Knowledge ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,

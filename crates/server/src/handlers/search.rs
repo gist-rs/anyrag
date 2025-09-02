@@ -48,14 +48,9 @@ pub async fn vector_search_handler(
     let owner_id = Some(user.0.id);
     info!("Received vector search for query: '{}'", payload.query);
     let limit = payload.limit.unwrap_or(10);
-    let api_url = app_state
-        .embeddings_api_url
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
-    let model = app_state
-        .embeddings_model
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
+    let api_url = &app_state.config.embedding.api_url;
+    let model = &app_state.config.embedding.model_name;
 
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = app_state
@@ -98,14 +93,9 @@ pub async fn hybrid_search_handler(
         payload.query, payload.mode
     );
     let limit = payload.limit.unwrap_or(10);
-    let api_url = app_state
-        .embeddings_api_url
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_API_URL not set")))?;
-    let model = app_state
-        .embeddings_model
-        .as_ref()
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("EMBEDDINGS_MODEL not set")))?;
+
+    let api_url = &app_state.config.embedding.api_url;
+    let model = &app_state.config.embedding.model_name;
 
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
 
@@ -140,10 +130,23 @@ pub async fn hybrid_search_handler(
             if candidates.is_empty() {
                 vec![]
             } else {
+                // --- Task-based AI Provider Loading for Re-ranking ---
+                let task_name = "llm_rerank";
+                let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+                    AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
+                })?;
+                let provider_name = &task_config.provider;
+                let rerank_provider =
+                    app_state.ai_providers.get(provider_name).ok_or_else(|| {
+                        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+                    })?;
+
                 llm_rerank(
-                    app_state.prompt_client.ai_provider.as_ref(),
+                    rerank_provider.as_ref(),
                     &payload.query,
                     candidates,
+                    &task_config.system_prompt,
+                    &task_config.user_prompt,
                 )
                 .await
                 .map_err(|e| AppError::Internal(anyhow::anyhow!("LLM Reranking failed: {e}")))?

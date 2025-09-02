@@ -105,6 +105,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ai_provider.as_ref(),
         ingest_url,
         Some(&user.id),
+        "You are an expert data extraction agent.",
+        "Markdown Content to Process:\n{markdown_content}",
+        "You are an expert content analyst.",
+        "You are an expert document analyst.",
     )
     .await
     {
@@ -176,6 +180,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         question,
         None, // owner_id
         5,    // limit
+        "You are an expert query analyst.",
+        "USER QUERY:\n{prompt}",
     )
     .await?;
 

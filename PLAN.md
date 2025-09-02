@@ -26,7 +26,7 @@ providers:
     provider: "gemini"
     api_url: "${AI_API_URL}"
     api_key: "${AI_API_KEY}"
-    model_name: "gemini-1.5-flash"
+    model_name: "gemini-2.5-flash-lite"
 
   local_fast:
     provider: "local"

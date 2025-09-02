@@ -7,14 +7,7 @@
 //! 4.  **Hybrid Retrieval**: The RAG query process (implemented elsewhere).
 //! 5.  **Fine-Tuning Export**: Exports the knowledge base into a format for model fine-tuning.
 
-use crate::{
-    errors::PromptError,
-    prompts::knowledge::{
-        AUGMENTATION_SYSTEM_PROMPT, KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
-        KNOWLEDGE_EXTRACTION_USER_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
-    },
-    providers::ai::AiProvider,
-};
+use crate::{errors::PromptError, providers::ai::AiProvider};
 use md5;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -111,6 +104,10 @@ pub async fn run_ingestion_pipeline(
     ai_provider: &dyn AiProvider,
     url: &str,
     owner_id: Option<&str>,
+    extraction_system_prompt: &str,
+    extraction_user_prompt_template: &str,
+    augmentation_system_prompt: &str,
+    metadata_extraction_system_prompt: &str,
 ) -> Result<usize, KnowledgeError> {
     let (document_id, ingested_document) = match ingest_and_cache_url(db, url, owner_id).await {
         Ok(content) => content,
@@ -123,13 +120,20 @@ pub async fn run_ingestion_pipeline(
 
     // Run FAQ generation and metadata extraction concurrently.
     let (faq_result, metadata_result) = tokio::join!(
-        distill_and_augment(ai_provider, &ingested_document),
+        distill_and_augment(
+            ai_provider,
+            &ingested_document,
+            extraction_system_prompt,
+            extraction_user_prompt_template,
+            augmentation_system_prompt,
+        ),
         extract_and_store_metadata(
             db,
             ai_provider,
             &document_id,
             owner_id,
-            &ingested_document.content
+            &ingested_document.content,
+            metadata_extraction_system_prompt,
         )
     );
 
@@ -230,15 +234,18 @@ pub async fn ingest_and_cache_url(
 pub async fn distill_and_augment(
     ai_provider: &dyn AiProvider,
     ingested_doc: &IngestedDocument,
+    extraction_system_prompt: &str,
+    extraction_user_prompt_template: &str,
+    augmentation_system_prompt: &str,
 ) -> Result<Vec<FaqItem>, KnowledgeError> {
     info!(
         "Starting Pass 1: Extraction for document ID: {}",
         ingested_doc.id
     );
     let user_prompt =
-        KNOWLEDGE_EXTRACTION_USER_PROMPT.replace("{markdown_content}", &ingested_doc.content);
+        extraction_user_prompt_template.replace("{markdown_content}", &ingested_doc.content);
     let llm_response = ai_provider
-        .generate(KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT, &user_prompt)
+        .generate(extraction_system_prompt, &user_prompt)
         .await?;
     debug!("LLM extraction response: {}", llm_response);
     let cleaned_response = llm_response
@@ -288,7 +295,7 @@ pub async fn distill_and_augment(
 
         let augmentation_user_prompt = format!("# Content Chunks to Analyze:\n{batched_content}");
         let llm_response = ai_provider
-            .generate(AUGMENTATION_SYSTEM_PROMPT, &augmentation_user_prompt)
+            .generate(augmentation_system_prompt, &augmentation_user_prompt)
             .await?;
 
         let cleaned_response = llm_response
@@ -384,6 +391,7 @@ pub async fn extract_and_store_metadata(
     document_id: &str,
     owner_id: Option<&str>,
     content: &str,
+    system_prompt: &str,
 ) -> Result<(), KnowledgeError> {
     info!(
         "Starting metadata extraction for document ID: {}",
@@ -391,9 +399,7 @@ pub async fn extract_and_store_metadata(
     );
 
     let user_prompt = content;
-    let llm_response = ai_provider
-        .generate(METADATA_EXTRACTION_SYSTEM_PROMPT, user_prompt)
-        .await?;
+    let llm_response = ai_provider.generate(system_prompt, user_prompt).await?;
 
     debug!("LLM metadata response: {}", llm_response);
     let cleaned_response = llm_response

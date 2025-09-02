@@ -55,6 +55,9 @@ pub async fn run_pdf_ingestion_pipeline(
     source_identifier: &str,
     owner_id: Option<&str>,
     extractor: PdfSyncExtractor,
+    distillation_system_prompt: &str,
+    distillation_user_prompt_template: &str,
+    augmentation_system_prompt: &str,
 ) -> Result<usize, KnowledgeError> {
     info!(
         "Starting PDF ingestion pipeline for '{}' using the '{:?}' extractor.",
@@ -112,7 +115,14 @@ pub async fn run_pdf_ingestion_pipeline(
         content: refined_markdown,
         content_hash,
     };
-    let faq_items = distill_and_augment(ai_provider, &ingested_document).await?;
+    let faq_items = distill_and_augment(
+        ai_provider,
+        &ingested_document,
+        distillation_system_prompt,
+        distillation_user_prompt_template,
+        augmentation_system_prompt,
+    )
+    .await?;
 
     // --- Stage 5: Store Structured Knowledge (Q&A) ---
     store_structured_knowledge(db, &document_id, owner_id, faq_items).await

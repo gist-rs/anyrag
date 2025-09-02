@@ -51,15 +51,18 @@ fn test_get_select_with_whitespace_instruction() {
 #[test]
 fn test_get_alias_with_valid_key() {
     let answer_key = "total_users";
-    let expected = "If the query uses an aggregate function or returns a single column, alias the result with `AS total_users`.";
-    assert_eq!(get_alias_instruction(Some(answer_key)), expected);
+    let expected = "In the SELECT clause, if you are selecting an aggregate function or a single column, you MUST alias it with `AS total_users`.";
+    assert_eq!(
+        get_alias_instruction(Some(answer_key)),
+        expected.to_string()
+    );
 }
 
 /// Verifies that a `None` value for the `answer_key` results in the generic instruction
 /// for the AI to choose its own alias.
 #[test]
 fn test_get_alias_with_none_key() {
-    let expected = "If the query uses an aggregate function or returns a single column, choose a descriptive, single-word, lowercase alias for the result based on the user's question (e.g., for 'how many users', use `count`; for 'who is the manager', use `manager`).";
+    let expected = "In the SELECT clause, if you are selecting an aggregate function or a single column, you MUST alias it with `AS result`.";
     assert_eq!(get_alias_instruction(None), expected.to_string());
 }
 
@@ -68,6 +71,9 @@ fn test_get_alias_with_none_key() {
 #[test]
 fn test_get_alias_with_empty_string_key() {
     let answer_key = "";
-    let expected = "If the query uses an aggregate function or returns a single column, alias the result with `AS `.";
-    assert_eq!(get_alias_instruction(Some(answer_key)), expected);
+    let expected = "In the SELECT clause, if you are selecting an aggregate function or a single column, you MUST alias it with `AS `.";
+    assert_eq!(
+        get_alias_instruction(Some(answer_key)),
+        expected.to_string()
+    );
 }

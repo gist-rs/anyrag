@@ -86,7 +86,7 @@ async fn main() -> Result<()> {
     let db_path = "db/anyrag.db";
     cleanup_db(db_path).await?;
 
-    let config = config::get_config().expect("Failed to load configuration. Is .env present?");
+    let config = config::get_config(None).expect("Failed to load configuration. Is .env present?");
     let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully.");
 

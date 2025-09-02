@@ -4,12 +4,7 @@
 //! - LLM.
 //! - Reciprocal Rank Fusion.
 
-use crate::{
-    prompts::core::{DEFAULT_RERANK_SYSTEM_PROMPT, DEFAULT_RERANK_USER_PROMPT},
-    providers::ai::AiProvider,
-    types::SearchResult,
-    PromptError,
-};
+use crate::{providers::ai::AiProvider, types::SearchResult, PromptError};
 use std::{collections::HashMap, fmt::Debug};
 use thiserror::Error;
 use tracing::{debug, info};
@@ -43,6 +38,8 @@ pub async fn llm_rerank<T: Rerankable>(
     ai_provider: &dyn AiProvider,
     query_text: &str,
     candidates: Vec<T>,
+    system_prompt: &str,
+    user_prompt_template: &str,
 ) -> Result<Vec<T>, RerankError> {
     info!(
         "Re-ranking {} candidates using LLM for query: '{}'",
@@ -64,15 +61,13 @@ pub async fn llm_rerank<T: Rerankable>(
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    let user_prompt = DEFAULT_RERANK_USER_PROMPT
+    let user_prompt = user_prompt_template
         .replace("{query_text}", query_text)
         .replace("{articles_context}", &articles_context);
 
-    debug!(system_prompt = %DEFAULT_RERANK_SYSTEM_PROMPT, user_prompt = %user_prompt, "--> Sending prompt to LLM for re-ranking");
+    debug!(system_prompt = %system_prompt, user_prompt = %user_prompt, "--> Sending prompt to LLM for re-ranking");
 
-    let llm_response = ai_provider
-        .generate(DEFAULT_RERANK_SYSTEM_PROMPT, &user_prompt)
-        .await?;
+    let llm_response = ai_provider.generate(system_prompt, &user_prompt).await?;
 
     debug!("<-- LLM re-rank response: {}", llm_response);
 

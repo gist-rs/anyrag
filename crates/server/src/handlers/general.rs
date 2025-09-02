@@ -37,7 +37,7 @@ pub async fn health_check() -> &'static str {
 }
 
 /// The primary handler for the `/prompt` endpoint, which is the core of the
-/// Text-to-SQL functionality.
+/// Text-to-SQL functionality. It now uses the new task-based configuration.
 pub async fn prompt_handler(
     State(app_state): State<AppState>,
     debug_params: Query<DebugParams>,
@@ -47,18 +47,29 @@ pub async fn prompt_handler(
     let mut options: ExecutePromptOptions =
         serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
 
-    // Apply server-wide default prompts if not provided in the request.
+    // --- Task-based Configuration Loading ---
+    // This handler's primary role is query generation. We'll use the 'query_generation' task config.
+    let task_name = "query_generation";
+    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Configuration for task '{task_name}' not found."
+        ))
+    })?;
+
+    // Get the specified AI provider for this task.
+    let provider_name = &task_config.provider;
+    let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Provider '{provider_name}' for task '{task_name}' not found in providers map."
+        ))
+    })?;
+
+    // Apply the task's default prompts, allowing the request to override them.
     if options.system_prompt_template.is_none() {
-        options.system_prompt_template = app_state.query_system_prompt_template.clone();
+        options.system_prompt_template = Some(task_config.system_prompt.clone());
     }
     if options.user_prompt_template.is_none() {
-        options.user_prompt_template = app_state.query_user_prompt_template.clone();
-    }
-    if options.format_system_prompt_template.is_none() {
-        options.format_system_prompt_template = app_state.format_system_prompt_template.clone();
-    }
-    if options.format_user_prompt_template.is_none() {
-        options.format_user_prompt_template = app_state.format_user_prompt_template.clone();
+        options.user_prompt_template = Some(task_config.user_prompt.clone());
     }
 
     // Detect if a Google Sheet URL is present in the prompt.
@@ -69,34 +80,32 @@ pub async fn prompt_handler(
 
     let prompt_result = if let Some(url) = sheet_url {
         // --- Dynamic Google Sheet Querying Logic (Always uses SQLite) ---
-        info!(
-            "Detected Google Sheet URL in prompt: {}. Using SQLite provider.",
-            url
-        );
+        info!("Detected Google Sheet URL in prompt: {url}. Using SQLite provider.");
         let (export_url, table_name) = sheet_url_to_export_url_and_table_name(url)
             .map_err(|e| anyhow::anyhow!("Sheet URL transformation failed: {e}"))?;
 
-        // Ingest the sheet into the local SQLite DB if it's not already there.
         if app_state
             .sqlite_provider
             .get_table_schema(&table_name)
             .await
             .is_err()
         {
-            info!("Table '{}' does not exist. Starting ingestion.", table_name);
+            info!("Table '{table_name}' does not exist. Starting ingestion.");
             ingest_from_google_sheet_url(&app_state.sqlite_provider.db, &export_url, &table_name)
                 .await
                 .map_err(|e| anyhow::anyhow!("Sheet ingestion failed: {e}"))?;
         } else {
-            info!("Table '{}' already exists. Skipping ingestion.", table_name);
+            info!("Table '{table_name}' already exists. Skipping ingestion.");
         }
 
-        // Temporarily override the table name and use the default SQLite client.
         options.table_name = Some(table_name);
-        app_state
-            .prompt_client
-            .execute_prompt_with_options(options.clone())
-            .await?
+        // Build a client on the fly with the correct AI provider for this task.
+        let client = PromptClientBuilder::new()
+            .ai_provider(ai_provider.clone())
+            .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
+            .build()?;
+
+        client.execute_prompt_with_options(options.clone()).await?
     } else if let Some(project_id) = options.project_id.as_deref() {
         // --- Dynamic BigQuery Client Creation ---
         info!("'project_id' provided. Creating a dynamic BigQuery client for this request.");
@@ -104,7 +113,7 @@ pub async fn prompt_handler(
         #[cfg(feature = "bigquery")]
         {
             let bq_client = PromptClientBuilder::new()
-                .ai_provider(app_state.prompt_client.ai_provider.clone())
+                .ai_provider(ai_provider.clone())
                 .bigquery_storage(project_id.to_string())
                 .await?
                 .build()?;
@@ -115,18 +124,17 @@ pub async fn prompt_handler(
 
         #[cfg(not(feature = "bigquery"))]
         {
-            // If the feature is not enabled, we cannot fulfill the request.
             return Err(anyrag::PromptError::BigQueryFeatureNotEnabled.into());
         }
     } else {
         // --- Standard Querying Logic (Default SQLite) ---
-        info!(
-            "No 'project_id' or sheet URL provided. Using the default SQLite-based prompt client."
-        );
-        app_state
-            .prompt_client
-            .execute_prompt_with_options(options.clone())
-            .await?
+        info!("No 'project_id' or sheet URL. Using default SQLite provider.");
+        let client = PromptClientBuilder::new()
+            .ai_provider(ai_provider.clone())
+            .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
+            .build()?;
+
+        client.execute_prompt_with_options(options.clone()).await?
     };
 
     let debug_info = if debug_params.debug.unwrap_or(false) {
@@ -138,6 +146,7 @@ pub async fn prompt_handler(
     } else {
         None
     };
+
     Ok(wrap_response(
         PromptResponse {
             text: prompt_result.text,
