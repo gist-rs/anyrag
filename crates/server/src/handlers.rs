@@ -3,6 +3,7 @@ use super::{
     state::AppState,
     types::{ApiResponse, DebugParams, ExtractorChoice, IngestTextRequest, IngestTextResponse},
 };
+use crate::auth::middleware::AuthenticatedUser;
 use anyrag::providers::db::storage::Storage;
 use anyrag::{
     ingest::{
@@ -27,7 +28,6 @@ use axum::{
 };
 use axum_extra::extract::Multipart;
 use chrono::Utc;
-use core_access::get_or_create_user;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -222,16 +222,18 @@ pub async fn ingest_handler(
 
 pub async fn ingest_sheet_faq_handler(
     State(app_state): State<AppState>,
+    user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<IngestSheetFaqRequest>,
 ) -> Result<Json<ApiResponse<IngestSheetFaqResponse>>, AppError> {
     info!(
-        "Received Sheet FAQ ingest request for URL: {} with gid: {:?}",
-        payload.url, payload.gid
+        "User '{}' initiating Sheet FAQ ingest for URL: {} with gid: {:?}",
+        user.0.id, payload.url, payload.gid
     );
     let ingested_count = ingest_faq_from_google_sheet(
         &app_state.sqlite_provider.db,
         &payload.url,
+        Some(&user.0.id),
         payload.gid.as_deref(),
         payload.skip_header,
     )
@@ -241,28 +243,32 @@ pub async fn ingest_sheet_faq_handler(
         message: "Sheet FAQ ingestion successful".to_string(),
         ingested_faqs: ingested_count,
     };
-    let debug_info =
-        json!({ "url": payload.url, "gid": payload.gid, "skip_header": payload.skip_header });
+    let debug_info = json!({
+        "url": payload.url,
+        "gid": payload.gid,
+        "skip_header": payload.skip_header,
+        "owner_id": user.0.id
+    });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
 pub async fn ingest_text_handler(
     State(app_state): State<AppState>,
+    user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<IngestTextRequest>,
 ) -> Result<Json<ApiResponse<IngestTextResponse>>, AppError> {
     info!(
-        "Received text ingest request from source: {}",
-        payload.source
+        "User '{}' sending text ingest request from source: {}",
+        user.0.id, payload.source
     );
     let chunks = chunk_text(&payload.text)?;
     let total_chunks = chunks.len();
 
     let mut conn = app_state.sqlite_provider.db.connect()?;
 
-    // TODO: Add owner_id from JWT once auth is implemented.
     let new_document_ids =
-        ingest_chunks_as_documents(&mut conn, chunks, &payload.source, None).await?;
+        ingest_chunks_as_documents(&mut conn, chunks, &payload.source, Some(&user.0.id)).await?;
     let ingested_count = new_document_ids.len();
 
     // TODO: Re-implement auto-embedding for the new `documents` schema.
@@ -285,12 +291,14 @@ pub async fn ingest_text_handler(
         "chunks_created": ingested_count,
         "original_text_length": payload.text.len(),
         "document_ids": new_document_ids,
+        "owner_id": user.0.id,
     });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
 pub async fn ingest_file_handler(
     State(app_state): State<AppState>,
+    user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     mut multipart: Multipart,
 ) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
@@ -307,7 +315,8 @@ pub async fn ingest_file_handler(
                     Some(field.file_name().unwrap_or("uploaded_file.pdf").to_string());
                 pdf_data = Some(field.bytes().await.map_err(anyhow::Error::from)?.to_vec());
                 info!(
-                    "Received file upload: {}",
+                    "User '{}' uploaded file: {}",
+                    user.0.id,
                     source_identifier.as_deref().unwrap()
                 );
             }
@@ -340,6 +349,7 @@ pub async fn ingest_file_handler(
         &*app_state.prompt_client.ai_provider,
         pdf_data.clone(),
         &source_identifier,
+        Some(&user.0.id),
         extractor_strategy,
     )
     .await?;
@@ -353,6 +363,7 @@ pub async fn ingest_file_handler(
         "filename": source_identifier,
         "size": pdf_data.len(),
         "extractor": extractor_choice,
+        "owner_id": user.0.id,
     });
 
     Ok(wrap_response(response, debug_params, Some(debug_info)))
@@ -367,10 +378,14 @@ pub struct IngestPdfUrlRequest {
 
 pub async fn ingest_pdf_url_handler(
     State(app_state): State<AppState>,
+    user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<IngestPdfUrlRequest>,
 ) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
-    info!("Received PDF ingest request for URL: {}", payload.url);
+    info!(
+        "User '{}' requesting PDF ingest from URL: {}",
+        user.0.id, payload.url
+    );
 
     // 1. Download the PDF, reqwest follows redirects by default.
     let response = reqwest::get(&payload.url)
@@ -414,6 +429,7 @@ pub async fn ingest_pdf_url_handler(
         &*app_state.prompt_client.ai_provider,
         pdf_data.clone(),
         &source_identifier,
+        Some(&user.0.id),
         extractor_strategy,
     )
     .await?;
@@ -428,6 +444,7 @@ pub async fn ingest_pdf_url_handler(
         "filename": source_identifier,
         "size": pdf_data.len(),
         "extractor": payload.extractor,
+        "owner_id": user.0.id,
     });
 
     Ok(wrap_response(response, debug_params, Some(debug_info)))
@@ -541,7 +558,7 @@ pub async fn vector_search_handler(
     let query_vector = generate_embedding(api_url, model, &payload.query).await?;
     let results = app_state
         .sqlite_provider
-        .vector_search(query_vector, limit, None)
+        .vector_search(query_vector, limit, None, None)
         .await?;
 
     let debug_info = json!({ "query": payload.query, "limit": limit });
@@ -588,7 +605,7 @@ pub async fn hybrid_search_handler(
     let (vector_results, keyword_results) = tokio::join!(
         app_state
             .sqlite_provider
-            .vector_search(query_vector.clone(), limit * 2, None),
+            .vector_search(query_vector.clone(), limit * 2, None, None),
         app_state
             .sqlite_provider
             .keyword_search(&payload.query, limit * 2)
@@ -637,21 +654,20 @@ pub async fn hybrid_search_handler(
 
 pub async fn knowledge_ingest_handler(
     State(app_state): State<AppState>,
+    user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<IngestRequest>,
 ) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
-    info!("Received knowledge ingest request for URL: {}", payload.url);
-    // TODO: This user identifier should come from a JWT claim in the future.
-    let user_identifier = "default_user@example.com";
-    let user = get_or_create_user(&app_state.sqlite_provider.db, user_identifier)
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to get or create user: {e}")))?;
+    info!(
+        "Received knowledge ingest request for URL: {} by user {}",
+        payload.url, user.0.id
+    );
 
     let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
         &*app_state.prompt_client.ai_provider,
         &payload.url,
-        Some(&user.id),
+        Some(&user.0.id),
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
@@ -659,7 +675,7 @@ pub async fn knowledge_ingest_handler(
         message: "Knowledge ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,
     };
-    let debug_info = json!({ "url": payload.url, "owner_id": user.id });
+    let debug_info = json!({ "url": payload.url, "owner_id": user.0.id });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
@@ -673,21 +689,18 @@ pub async fn knowledge_export_handler(
     Ok(jsonl_data)
 }
 
+#[axum::debug_handler]
 pub async fn knowledge_search_handler(
     State(app_state): State<AppState>,
+    user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<SearchRequest>,
 ) -> Result<Json<ApiResponse<PromptResponse>>, AppError> {
     let limit = payload.limit.unwrap_or(5);
     info!(
-        "Received knowledge RAG search for query: '{}', limit: {}",
-        payload.query, limit
+        "User '{}' sending knowledge RAG search for query: '{}', limit: {}",
+        user.0.id, payload.query, limit
     );
-    // TODO: This user identifier should come from a JWT claim in the future.
-    let user_identifier = "default_user@example.com";
-    let user = get_or_create_user(&app_state.sqlite_provider.db, user_identifier)
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to get or create user: {e}")))?;
 
     let api_url = app_state
         .embeddings_api_url
@@ -707,7 +720,7 @@ pub async fn knowledge_search_handler(
         app_state.prompt_client.ai_provider.as_ref(),
         query_vector,
         &payload.query,
-        Some(&user.id), // owner_id
+        Some(&user.0.id), // owner_id
         limit,
     )
     .await?;

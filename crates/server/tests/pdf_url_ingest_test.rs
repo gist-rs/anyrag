@@ -12,12 +12,12 @@
 mod common;
 
 use anyhow::Result;
-use common::TestApp;
+use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str};
 use serde_json::{json, Value};
 
-use common::main::types::ApiResponse;
+use anyrag_server::types::ApiResponse;
 
 /// Generates a simple PDF with a specific messy sentence.
 fn generate_test_pdf(text: &str) -> Result<Vec<u8>> {
@@ -133,9 +133,12 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     });
 
     // --- 4. Execute Ingestion from URL ---
+    let user_identifier = "pdf-url-user@example.com";
+    let token = generate_jwt(user_identifier)?;
     let ingest_res = app
         .client
         .post(format!("{}/ingest/pdf_url", app.address))
+        .bearer_auth(token.clone())
         .json(&json!({ "url": app.mock_server.url("/redirect-to-pdf") }))
         .send()
         .await?
@@ -153,9 +156,11 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
         .error_for_status()?;
 
     // --- 6. Execute RAG Search and Verify ---
+
     let search_res = app
         .client
         .post(format!("{}/search/knowledge", app.address))
+        .bearer_auth(token)
         .json(&json!({ "query": "what is the test number?" }))
         .send()
         .await?

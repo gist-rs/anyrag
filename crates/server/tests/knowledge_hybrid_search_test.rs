@@ -12,7 +12,25 @@ use serde_json::{json, Value};
 use std::path::Path;
 use turso::{params, Builder};
 
-use common::main::types::ApiResponse;
+use anyrag_server::{auth::middleware::Claims, types::ApiResponse};
+use jsonwebtoken::{encode, EncodingKey, Header};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Generates a valid JWT for a given user identifier (subject).
+fn generate_jwt(sub: &str) -> Result<String> {
+    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600; // Expires in 1 hour
+    let claims = Claims {
+        sub: sub.to_string(),
+        exp: expiration as usize,
+    };
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )?;
+    Ok(token)
+}
 
 /// A helper to manually insert and embed a FAQ into the database.
 async fn seed_faq(
@@ -152,9 +170,11 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     });
 
     // --- 5. Execute Hybrid RAG Search and Verify ---
+    let token = generate_jwt("test-user-khs@example.com")?;
     let search_res = app
         .client
         .post(format!("{}/search/knowledge", app.address))
+        .bearer_auth(token)
         .json(&json!({ "query": "how to handle complex Quantum Widget information" }))
         .send()
         .await?

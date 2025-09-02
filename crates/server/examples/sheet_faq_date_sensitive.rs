@@ -17,13 +17,15 @@
 //! From the workspace root (`anyrag/`):
 //! `RUST_LOG=info cargo run -p anyrag-server --example sheet_faq_date_sensitive`
 
-// Include the binary's main source file to access its components.
-#[path = "../src/main.rs"]
-mod main;
-
-use anyhow::Result;
+use anyrag_server::{
+    auth::middleware::AuthenticatedUser,
+    config,
+    handlers::{self, EmbedNewRequest, IngestSheetFaqRequest, SearchRequest},
+    state,
+    types::DebugParams,
+};
 use axum::{extract::Query, Json};
-use main::handlers::{self, EmbedNewRequest, IngestSheetFaqRequest, SearchRequest};
+use core_access::get_or_create_user;
 
 use std::{fs, time::Duration};
 use tokio::time::sleep;
@@ -31,7 +33,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 /// Cleans up database files for a fresh run.
-async fn cleanup_db(db_path: &str) -> Result<()> {
+async fn cleanup_db(db_path: &str) -> anyhow::Result<()> {
     for path_str in [db_path, &format!("{db_path}-wal")] {
         let path = std::path::Path::new(path_str);
         if path.exists() {
@@ -43,7 +45,7 @@ async fn cleanup_db(db_path: &str) -> Result<()> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     // --- 1. Setup ---
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
@@ -57,10 +59,28 @@ async fn main() -> Result<()> {
     // Set DB_URL so the app state uses the same DB as the cleanup function.
     std::env::set_var("DB_URL", db_path);
 
-    let config =
-        main::config::get_config().expect("Failed to load configuration. Is .env present?");
-    let app_state = main::state::build_app_state(config).await?;
+    let config = config::get_config().expect("Failed to load configuration. Is .env present?");
+    let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully.");
+
+    // Create a user for this example run.
+    let user = get_or_create_user(
+        &app_state.sqlite_provider.db,
+        "example-user-sheet-faq@anyrag.com",
+    )
+    .await?;
+    let auth_user = AuthenticatedUser(user);
+    info!("Simulating requests for user: {}", auth_user.0.id);
+
+    sleep(Duration::from_millis(100)).await;
+    // Create a user for this example run.
+    let user = get_or_create_user(
+        &app_state.sqlite_provider.db,
+        "example-user-sheet-faq@anyrag.com",
+    )
+    .await?;
+    let auth_user = AuthenticatedUser(user);
+    info!("Simulating requests for user: {}", auth_user.0.id);
 
     sleep(Duration::from_millis(100)).await;
 
@@ -75,7 +95,8 @@ async fn main() -> Result<()> {
 
     match handlers::ingest_sheet_faq_handler(
         axum::extract::State(app_state.clone()),
-        Query(main::types::DebugParams::default()),
+        auth_user.clone(),
+        Query(DebugParams::default()),
         Json(ingest_payload),
     )
     .await
@@ -102,7 +123,7 @@ async fn main() -> Result<()> {
 
     match handlers::embed_new_handler(
         axum::extract::State(app_state.clone()),
-        Query(main::types::DebugParams::default()),
+        Query(DebugParams::default()),
         Json(embed_payload),
     )
     .await
@@ -124,7 +145,8 @@ async fn main() -> Result<()> {
 
     let final_answer = match handlers::knowledge_search_handler(
         axum::extract::State(app_state.clone()),
-        Query(main::types::DebugParams::default()),
+        auth_user,
+        Query(DebugParams::default()),
         Json(search_payload),
     )
     .await

@@ -17,17 +17,16 @@
 //! From the workspace root (`anyrag/`):
 //! `RUST_LOG=info cargo run -p anyrag-server --example knowledge_prompt`
 
-// Include the binary's main source file to access its components.
-#[path = "../src/main.rs"]
-mod main;
-
 use anyhow::Result;
-use axum::{extract::Query, Json};
-use main::{
+use anyrag_server::{
+    auth::middleware::AuthenticatedUser,
+    config,
     handlers::{self, EmbedNewRequest, IngestRequest, SearchRequest},
-    state::AppState,
+    state::{self, AppState},
+    types::DebugParams,
 };
-
+use axum::{extract::Query, Json};
+use core_access::get_or_create_user;
 use std::{fs, time::Duration};
 use tokio::time::sleep;
 use tracing::info;
@@ -47,6 +46,7 @@ async fn cleanup_db(db_path: &str) -> Result<()> {
 /// A helper function to call the knowledge search RAG endpoint.
 async fn ask_question(
     app_state: AppState,
+    user: AuthenticatedUser,
     query: &str,
     instruction: Option<&str>,
 ) -> Result<String> {
@@ -62,7 +62,8 @@ async fn ask_question(
 
     let result = handlers::knowledge_search_handler(
         axum::extract::State(app_state),
-        Query(main::types::DebugParams::default()),
+        user,
+        Query(DebugParams::default()),
         Json(payload),
     )
     .await;
@@ -85,10 +86,14 @@ async fn main() -> Result<()> {
     let db_path = "db/anyrag.db";
     cleanup_db(db_path).await?;
 
-    let config =
-        main::config::get_config().expect("Failed to load configuration. Is .env present?");
-    let app_state = main::state::build_app_state(config).await?;
+    let config = config::get_config().expect("Failed to load configuration. Is .env present?");
+    let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully.");
+
+    // Create a user for this example run. In a real app, this would come from a JWT.
+    let user = get_or_create_user(&app_state.sqlite_provider.db, "example-user@anyrag.com").await?;
+    let auth_user = AuthenticatedUser(user);
+    info!("Simulating requests for user: {}", auth_user.0.id);
 
     sleep(Duration::from_millis(100)).await;
 
@@ -101,7 +106,8 @@ async fn main() -> Result<()> {
 
     match handlers::knowledge_ingest_handler(
         axum::extract::State(app_state.clone()),
-        Query(main::types::DebugParams::default()),
+        auth_user.clone(),
+        Query(DebugParams::default()),
         Json(ingest_payload),
     )
     .await
@@ -127,7 +133,7 @@ async fn main() -> Result<()> {
 
     match handlers::embed_new_handler(
         axum::extract::State(app_state.clone()),
-        Query(main::types::DebugParams::default()),
+        Query(DebugParams::default()),
         Json(embed_payload),
     )
     .await
@@ -142,14 +148,20 @@ async fn main() -> Result<()> {
 
     // --- 4. Ask Questions using RAG ---
     let question1 = "หากลูกค้าจ่ายบิลล่วงหน้าไม่เต็มบิล แต่มูลค่ามากกว่า 100 บาท จะได้รับสิทธิ์ไหม";
-    let answer1 = ask_question(app_state.clone(), question1, None).await?;
+    let answer1 = ask_question(app_state.clone(), auth_user.clone(), question1, None).await?;
 
     let question2 = "ทำยังไงถึงจะได้เทสล่า";
     let instruction2 = "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า";
-    let answer2 = ask_question(app_state.clone(), question2, Some(instruction2)).await?;
+    let answer2 = ask_question(
+        app_state.clone(),
+        auth_user.clone(),
+        question2,
+        Some(instruction2),
+    )
+    .await?;
 
     let question3 = "ถ้าใช้ True App เวอร์ชันเก่าอยู่ จะได้สิทธิ์ไหม?";
-    let answer3 = ask_question(app_state.clone(), question3, None).await?;
+    let answer3 = ask_question(app_state.clone(), auth_user, question3, None).await?;
 
     // --- 5. Print Final Results ---
     println!("\n\n✅ Knowledge RAG Workflow Complete!");

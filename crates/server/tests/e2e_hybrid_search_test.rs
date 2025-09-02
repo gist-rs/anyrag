@@ -15,7 +15,10 @@ use httpmock::Method;
 use serde_json::{json, Value};
 use turso::{params, Builder};
 
-use common::main::types::ApiResponse;
+use anyrag_server::auth::middleware::Claims;
+use anyrag_server::types::ApiResponse;
+use jsonwebtoken::{encode, EncodingKey, Header};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Seeds the database with two distinct documents, their metadata, and their embeddings.
 async fn seed_data_for_hybrid_search(app: &TestApp) -> Result<()> {
@@ -84,12 +87,29 @@ async fn seed_data_for_hybrid_search(app: &TestApp) -> Result<()> {
     Ok(())
 }
 
+/// Generates a valid JWT for a given user identifier (subject).
+fn generate_jwt(sub: &str) -> Result<String> {
+    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
+    let claims = Claims {
+        sub: sub.to_string(),
+        exp: expiration as usize,
+    };
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )?;
+    Ok(token)
+}
+
 #[tokio::test]
 async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
     seed_data_for_hybrid_search(&app).await?;
 
+    let user_identifier = "test-user@example.com";
     let user_query = "Tell me about the Tesla campaign prize";
     let final_rag_answer = "The campaign's grand prize is a Tesla Model 3.";
 
@@ -141,9 +161,11 @@ async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
     });
 
     // --- 3. Execute the search ---
+    let token = generate_jwt(user_identifier)?;
     let response = app
         .client
         .post(format!("{}/search/knowledge", app.address))
+        .bearer_auth(token)
         .json(&json!({ "query": user_query }))
         .send()
         .await?

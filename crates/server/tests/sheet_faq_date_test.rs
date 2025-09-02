@@ -7,11 +7,11 @@ mod common;
 
 use anyhow::Result;
 use chrono::{Duration, Utc};
-use common::TestApp;
+use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use serde_json::{json, Value};
 
-use common::main::types::ApiResponse;
+use anyrag_server::types::ApiResponse;
 
 #[tokio::test]
 async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
@@ -75,9 +75,12 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
     });
 
     // --- 4. Execute Ingestion from Sheet URL ---
+    let user_identifier = "date-test-user@example.com";
+    let token = generate_jwt(user_identifier)?;
     let ingest_res = app
         .client
         .post(format!("{}/ingest/sheet_faq", app.address))
+        .bearer_auth(token.clone())
         .json(&json!({ "url": app.mock_server.url("/spreadsheets/d/mock_sheet_id/export?format=csv") }))
         .send()
         .await?
@@ -98,6 +101,7 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
     let search_res = app
         .client
         .post(format!("{}/search/knowledge", app.address))
+        .bearer_auth(token)
         .json(&json!({ "query": "What is the hobby?" }))
         .send()
         .await?

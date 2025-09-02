@@ -39,6 +39,7 @@ pub trait VectorSearch: Send + Sync + DynClone + Debug {
         &self,
         query_vector: Vec<f32>,
         limit: u32,
+        owner_id: Option<&str>,
         document_ids: Option<&[String]>,
     ) -> Result<Vec<SearchResult>, SearchError>;
 }

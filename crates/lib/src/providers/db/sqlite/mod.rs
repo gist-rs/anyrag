@@ -259,6 +259,7 @@ impl VectorSearch for SqliteProvider {
         &self,
         query_vector: Vec<f32>,
         limit: u32,
+        owner_id: Option<&str>,
         document_ids: Option<&[String]>,
     ) -> Result<Vec<SearchResult>, SearchError> {
         info!("Executing SQLite vector search on documents.");
@@ -279,15 +280,24 @@ impl VectorSearch for SqliteProvider {
         let mut sql = format!(
             "SELECT d.title, d.source_url, d.content, {distance_calculation} AS similarity
              FROM document_embeddings de
-             JOIN documents d ON d.id = de.document_id
-             WHERE de.embedding IS NOT NULL"
+             JOIN documents d ON d.id = de.document_id"
         );
 
+        let mut conditions: Vec<String> = vec!["de.embedding IS NOT NULL".to_string()];
         let mut query_params: Vec<TursoValue> = Vec::new();
+
+        if let Some(owner) = owner_id {
+            conditions.push("(d.owner_id = ? OR d.owner_id IS NULL)".to_string());
+            query_params.push(owner.to_string().into());
+        } else {
+            conditions.push("d.owner_id IS NULL".to_string());
+        }
+
         if let Some(ids) = document_ids {
             if !ids.is_empty() {
                 let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-                sql.push_str(&format!(" AND de.document_id IN ({placeholders})"));
+                let condition = format!("de.document_id IN ({placeholders})");
+                conditions.push(condition);
                 for id in ids {
                     query_params.push(id.clone().into());
                 }
@@ -297,6 +307,7 @@ impl VectorSearch for SqliteProvider {
             }
         }
 
+        sql.push_str(&format!(" WHERE {}", conditions.join(" AND ")));
         sql.push_str(&format!(" ORDER BY similarity DESC LIMIT {limit};"));
 
         info!(sql = %sql, params = ?query_params, "Executing vector search SQL");
@@ -419,7 +430,7 @@ impl MetadataSearch for SqliteProvider {
                 .collect::<Vec<_>>()
                 .join(", ");
             metadata_conditions.push(format!(
-                "(metadata_type = 'KEYPHRASE' AND metadata_value IN ({placeholders}))"
+                "((metadata_type = 'KEYPHRASE' OR metadata_type = 'KEYPHRASES') AND metadata_value IN ({placeholders}))"
             ));
             for keyphrase in keyphrases {
                 params.push(keyphrase.clone().into());

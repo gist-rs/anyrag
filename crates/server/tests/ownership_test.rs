@@ -8,13 +8,32 @@
 mod common;
 
 use anyhow::Result;
+use anyrag_server::{auth::middleware::Claims, types::ApiResponse};
+use axum::http::StatusCode;
 use common::TestApp;
 use core_access::get_or_create_user;
 use httpmock::Method;
+use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::{json, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
 use turso::{params, Builder};
 
-use common::main::types::ApiResponse;
+/// Generates a valid JWT for a given user identifier (subject).
+/// The token is set to expire in 1 hour.
+fn generate_jwt(sub: &str) -> Result<String> {
+    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
+    let claims = Claims {
+        sub: sub.to_string(),
+        exp: expiration as usize,
+    };
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )?;
+    Ok(token)
+}
 
 /// Seeds the database with documents owned by different users and one public document.
 async fn seed_ownership_data(app: &TestApp) -> Result<()> {
@@ -23,9 +42,9 @@ async fn seed_ownership_data(app: &TestApp) -> Result<()> {
         .await?;
     let conn = db.connect()?;
 
-    // 1. Create two distinct users. The handlers are hardcoded to use this user for now.
-    let user_a_identifier = "default_user@example.com";
-    let user_b_identifier = "another_user@example.com";
+    // 1. Create two distinct users.
+    let user_a_identifier = "user_a@example.com";
+    let user_b_identifier = "user_b@example.com";
     let user_a = get_or_create_user(&db, user_a_identifier).await?;
     let user_b = get_or_create_user(&db, user_b_identifier).await?;
 
@@ -111,65 +130,50 @@ async fn seed_ownership_data(app: &TestApp) -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_search_respects_data_ownership() -> Result<()> {
+async fn test_search_respects_data_ownership_with_jwt() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
     seed_ownership_data(&app).await?;
 
-    // The user query that will be used.
+    let user_a_identifier = "user_a@example.com";
     let user_query = "Find all documents about the searchable topic";
-    // The final answer the mock AI will provide.
     let final_rag_answer = "Found User A's document and the public document.";
 
     // --- 2. Mock External Services ---
-    // A. Mock the Query Analysis to find the common metadata keyphrase.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{"message": {"role": "assistant", "content": json!({
-                "entities": [],
-                "keyphrases": ["searchable_topic"]
+                "entities": [], "keyphrases": ["searchable_topic"]
             }).to_string()}}]
         }));
     });
-
-    // B. Mock the Embedding API call (not critical for this test's logic, but needed for the flow).
     app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
     });
-
-    // C. Mock the final RAG Synthesis call.
-    // THIS IS THE CORE ASSERTION OF THE TEST.
-    // We verify that the context sent to the AI for the final answer contains the
-    // content from the user's own document and the public document, but explicitly
-    // excludes the content from the document owned by another user.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .body_contains("strict, factual AI")
-            // It MUST contain the content of the document owned by the default user.
             .body_contains("This document is owned by User A.")
-            // It MUST also contain the content of the public document.
             .body_contains("This document is public.")
-            // It MUST NOT contain the content of the document owned by User B.
             .matches(|req| {
                 !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default())
-                    .contains("This document is owned by User B.")
+                    .contains("owned by User B.")
             });
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
     });
 
-    // --- 3. Execute the search ---
-    // The handler is hardcoded to act as "default_user@example.com", so we expect
-    // to see that user's documents plus public ones.
+    // --- 3. Execute the search with a valid JWT for User A ---
+    let token = generate_jwt(user_a_identifier)?;
     let response = app
         .client
         .post(format!("{}/search/knowledge", app.address))
+        .bearer_auth(token)
         .json(&json!({ "query": user_query }))
         .send()
         .await?
@@ -181,6 +185,27 @@ async fn test_search_respects_data_ownership() -> Result<()> {
 
     query_analysis_mock.assert();
     rag_synthesis_mock.assert();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_without_token_fails() -> Result<()> {
+    // --- 1. Arrange ---
+    let app = TestApp::spawn().await?;
+
+    // --- 2. Act ---
+    let response = app
+        .client
+        .post(format!("{}/search/knowledge", app.address))
+        .json(&json!({ "query": "test" }))
+        .send()
+        .await?;
+
+    // --- 3. Assert ---
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body: Value = response.json().await?;
+    assert_eq!(body["error"], "Missing or invalid Authorization header.");
 
     Ok(())
 }

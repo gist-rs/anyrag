@@ -38,14 +38,12 @@ pub enum IngestSheetFaqError {
 pub async fn ingest_faq_from_google_sheet(
     db: &Database,
     sheet_url: &str,
+    owner_id: Option<&str>,
     gid: Option<&str>,
     skip_header: bool,
 ) -> Result<usize, IngestSheetFaqError> {
     info!("Starting FAQ ingestion from Google Sheet URL: {sheet_url}");
     let conn = db.connect()?;
-
-    // TODO: Add owner_id when auth is implemented.
-    let owner_id: Option<&str> = None;
 
     let (export_url, _) = construct_export_url_and_table_name(sheet_url, gid)?;
     let csv_data = download_csv(&export_url).await?;

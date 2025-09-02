@@ -20,16 +20,17 @@
 //! From the workspace root (`anyrag/`):
 //! `RUST_LOG=info cargo run -p anyrag-server --example knowledge_graph_precision`
 
-#[path = "../src/main.rs"]
-mod main;
-
 use anyhow::Result;
+use anyrag_server::{
+    auth::middleware::AuthenticatedUser,
+    config,
+    handlers::{self, SearchRequest},
+    state::{self, AppState},
+    types::DebugParams,
+};
 use axum::{extract::Query, Json};
 use chrono::{Duration, Utc};
-use main::{
-    handlers::{self, SearchRequest},
-    state::AppState,
-};
+use core_access::get_or_create_user;
 use std::{fs, time::Duration as StdDuration};
 use tokio::time::sleep;
 use tracing::info;
@@ -47,7 +48,12 @@ async fn cleanup_db(db_path: &str) -> Result<()> {
 }
 
 /// A helper to call the RAG endpoint.
-async fn ask_question(app_state: AppState, query: &str, use_kg: bool) -> Result<String> {
+async fn ask_question(
+    app_state: AppState,
+    user: AuthenticatedUser,
+    query: &str,
+    use_kg: bool,
+) -> Result<String> {
     info!(
         "--- Asking Question: '{}' (using Knowledge Graph: {}) ---",
         query, use_kg
@@ -63,7 +69,8 @@ async fn ask_question(app_state: AppState, query: &str, use_kg: bool) -> Result<
 
     let result = handlers::knowledge_search_handler(
         axum::extract::State(app_state),
-        Query(main::types::DebugParams::default()),
+        user,
+        Query(DebugParams::default()),
         Json(payload),
     )
     .await;
@@ -87,10 +94,16 @@ async fn main() -> Result<()> {
     cleanup_db(db_path).await?;
     std::env::set_var("DB_URL", db_path);
 
-    let config =
-        main::config::get_config().expect("Failed to load configuration. Is .env present?");
-    let app_state = main::state::build_app_state(config).await?;
+    let config = config::get_config().expect("Failed to load configuration. Is .env present?");
+    let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully.");
+
+    // Create a user for this example run.
+    let user =
+        get_or_create_user(&app_state.sqlite_provider.db, "example-user-kg@anyrag.com").await?;
+    let auth_user = AuthenticatedUser(user);
+    info!("Simulating requests for user: {}", auth_user.0.id);
+
     sleep(StdDuration::from_millis(100)).await;
 
     // --- 2. Define Scenario Data ---
@@ -163,8 +176,9 @@ async fn main() -> Result<()> {
 
     // --- 4. Ask Questions ---
     // The regular KB only has one entry, so we don't need to run embeddings for this demo.
-    let answer_without_kg = ask_question(app_state.clone(), question, false).await?;
-    let answer_with_kg = ask_question(app_state.clone(), subject, true).await?;
+    let answer_without_kg =
+        ask_question(app_state.clone(), auth_user.clone(), question, false).await?;
+    let answer_with_kg = ask_question(app_state.clone(), auth_user, subject, true).await?;
 
     // --- 5. Print Final Results ---
     println!("\n\n✅ Knowledge Graph Precision Demo Complete!");

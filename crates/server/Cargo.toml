@@ -3,6 +3,7 @@ name = "anyrag-server"
 version = "0.1.0"
 edition = "2021"
 
+
 [[bin]]
 name = "server"
 path = "src/main.rs"
@@ -14,8 +15,10 @@ anyrag = { path = "../lib" }
 core-access = { path = "../core-access" }
 
 # Web Framework
-axum = { workspace = true }
-axum-extra = { version = "0.10.1", features = ["multipart"] }
+axum = { workspace = true, features = ["macros"] }
+axum-extra = { version = "0.10.1", features = ["multipart", "typed-header"] }
+jsonwebtoken = "9.3.0"
+async-trait = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
@@ -49,6 +52,7 @@ futures = "0.3.31"
 gcp-bigquery-client = { workspace = true }
 chrono = { workspace = true }
 httpmock = "0.7.0"
+jsonwebtoken = "9.3.0"
 tempfile = "3.21.0"
 turso = { workspace = true }
 regex = { workspace = true }

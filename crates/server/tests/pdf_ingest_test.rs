@@ -12,13 +12,11 @@
 mod common;
 
 use anyhow::Result;
-use common::TestApp;
+use anyrag_server::types::ApiResponse;
+use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str};
 use serde_json::{json, Value};
-
-use crate::common::main;
-use main::types::ApiResponse;
 
 /// Generates a simple PDF with a specific messy sentence.
 fn generate_test_pdf(text: &str) -> Result<Vec<u8>> {
@@ -125,6 +123,9 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     });
 
     // --- 4. Execute Ingestion ---
+    let user_identifier = "pdf-ingest-user@example.com";
+    let token = generate_jwt(user_identifier)?;
+
     let form = reqwest::multipart::Form::new()
         .part(
             "file",
@@ -135,6 +136,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     let ingest_res = app
         .client
         .post(format!("{}/ingest/file", app.address))
+        .bearer_auth(token.clone())
         .multipart(form)
         .send()
         .await?
@@ -155,6 +157,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     let search_res = app
         .client
         .post(format!("{}/search/knowledge", app.address))
+        .bearer_auth(token)
         .json(&json!({ "query": "what is the magic number?" }))
         .send()
         .await?

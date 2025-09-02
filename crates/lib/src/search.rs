@@ -136,13 +136,15 @@ where
     if candidate_doc_ids.is_empty() {
         // Fallback: If no metadata matches, perform a broad vector search.
         info!("No candidates from metadata, falling back to broad vector search.");
-        return provider.vector_search(query_vector, limit, None).await;
+        return provider
+            .vector_search(query_vector, limit, owner_id, None)
+            .await;
     }
 
     // --- Stage 3: Vector Re-Ranking ---
     // Perform a vector search restricted to the candidate document IDs.
     let ranked_results = provider
-        .vector_search(query_vector, limit, Some(&candidate_doc_ids))
+        .vector_search(query_vector, limit, owner_id, Some(&candidate_doc_ids))
         .await?;
 
     info!(

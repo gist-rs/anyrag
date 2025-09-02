@@ -11,7 +11,7 @@ use common::TestApp;
 use httpmock::Method;
 use serde_json::json;
 
-use common::main::types::ApiResponse;
+use anyrag_server::types::ApiResponse;
 
 #[tokio::test]
 async fn test_embed_and_search_flow() -> Result<()> {

@@ -13,12 +13,6 @@
 // functions might be used by every test file that includes it.
 #![allow(unused)]
 
-// By including `main.rs`, we make the binary's modules (like `state` and `router`)
-// available to the test suite under the `main` namespace. This is a standard
-// pattern for testing Rust binaries.
-#[path = "../src/main.rs"]
-pub mod main;
-
 use anyhow::Result;
 use anyrag::{
     graph::types::MemoryKnowledgeGraph,
@@ -29,13 +23,16 @@ use anyrag::{
     types::{TableField, TableSchema},
     PromptClientBuilder,
 };
+use anyrag_server::{auth::middleware::Claims, router, state::AppState};
 use axum::serve;
 use httpmock::MockServer;
+use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest::Client;
 use std::{
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, RwLock},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tempfile::NamedTempFile;
 use tokio::{net::TcpListener, task::JoinHandle};
@@ -110,13 +107,16 @@ impl TestApp {
         let knowledge_graph = Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory()));
 
         // Build the application state, using mocks for external services.
-        let app_state = main::state::AppState {
+        let app_state = AppState {
             prompt_client,
             sqlite_provider,
             knowledge_graph: knowledge_graph.clone(),
             embeddings_api_url: Some(mock_server.url("/v1/embeddings")),
             embeddings_model: Some("mock-embedding-model".to_string()),
-            ..Default::default()
+            query_system_prompt_template: None,
+            query_user_prompt_template: None,
+            format_system_prompt_template: None,
+            format_user_prompt_template: None,
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -125,7 +125,7 @@ impl TestApp {
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let server_handle = tokio::spawn(async move {
-            let app = main::router::create_router(app_state);
+            let app = router::create_router(app_state);
             let server = serve(listener, app).with_graceful_shutdown(async {
                 shutdown_rx.await.ok();
             });
@@ -165,38 +165,12 @@ impl Drop for TestApp {
 /// The `..Default::default()` syntax in `TestApp::spawn` relies on this to fill in
 /// fields like the prompt templates. The core providers (`prompt_client`, etc.) are
 /// immediately overwritten with the real test instances.
-impl Default for main::state::AppState {
-    fn default() -> Self {
-        let mock_ai =
-            Box::new(LocalAiProvider::new("http://localhost".to_string(), None, None).unwrap());
-        // In a test context, we often can't use async in `default`, so `block_on` is acceptable.
-        let mock_storage =
-            Box::new(futures::executor::block_on(SqliteProvider::new(":memory:")).unwrap());
-
-        let prompt_client = PromptClientBuilder::new()
-            .ai_provider(mock_ai)
-            .storage_provider(mock_storage)
-            .build()
-            .unwrap();
-
-        Self {
-            prompt_client: Arc::new(prompt_client),
-            sqlite_provider: Arc::new(
-                futures::executor::block_on(SqliteProvider::new(":memory:")).unwrap(),
-            ),
-            knowledge_graph: Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory())),
-            embeddings_api_url: None,
-            embeddings_model: None,
-            query_system_prompt_template: None,
-            query_user_prompt_template: None,
-            format_system_prompt_template: None,
-            format_user_prompt_template: None,
-        }
-    }
-}
-
-// --- Storage-Only Test Setup ---
-
+/// The `impl Default for AppState` block was removed because it violates Rust's
+/// orphan rule. A foreign trait (`Default`) cannot be implemented for a foreign
+/// type (`AppState`) outside of its original crate. For the `..Default::default()`
+/// syntax to work in `TestApp::spawn`, the `Default` trait must be implemented
+/// for `AppState` within the `anyrag_server` crate itself.
+///
 /// A struct to hold common test setup resources for storage-related tests.
 pub struct TestSetup {
     pub storage_provider: Box<dyn Storage>,
@@ -260,4 +234,20 @@ pub fn get_mock_schema() -> Arc<TableSchema> {
             },
         ],
     })
+}
+
+/// Generates a valid JWT for a given user identifier (subject).
+pub fn generate_jwt(sub: &str) -> Result<String> {
+    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
+    let claims = Claims {
+        sub: sub.to_string(),
+        exp: expiration as usize,
+    };
+    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_ref()),
+    )?;
+    Ok(token)
 }

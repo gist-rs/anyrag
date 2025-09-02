@@ -16,14 +16,9 @@
 //! From the workspace root (`anyrag/`):
 //! `RUST_LOG=info cargo run -p anyrag-server --example sheet_generic_prompt`
 
-// Include the binary's main source file to access its components.
-#[path = "../src/main.rs"]
-mod main;
-
 use anyhow::Result;
+use anyrag_server::{config, handlers, state, types::DebugParams};
 use axum::{extract::Query, Json};
-use main::handlers;
-
 use serde_json::json;
 use std::{fs, time::Duration};
 use tokio::time::sleep;
@@ -57,9 +52,8 @@ async fn main() -> Result<()> {
     // Set DB_URL so the app state uses the same DB as the cleanup function.
     std::env::set_var("DB_URL", db_path);
 
-    let config =
-        main::config::get_config().expect("Failed to load configuration. Is .env present?");
-    let app_state = main::state::build_app_state(config).await?;
+    let config = config::get_config().expect("Failed to load configuration. Is .env present?");
+    let app_state = state::build_app_state(config).await?;
     info!("Application state built successfully.");
 
     sleep(Duration::from_millis(100)).await;
@@ -81,7 +75,7 @@ async fn main() -> Result<()> {
     // --- 3. Call the main prompt handler ---
     let final_answer = match handlers::prompt_handler(
         axum::extract::State(app_state.clone()),
-        Query(main::types::DebugParams::default()),
+        Query(DebugParams::default()),
         Json(prompt_payload),
     )
     .await

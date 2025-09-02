@@ -12,7 +12,7 @@ use httpmock::Method;
 use serde_json::{json, Value};
 use tracing::info;
 
-use common::main::types::ApiResponse;
+use anyrag_server::types::ApiResponse;
 
 #[tokio::test]
 async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {

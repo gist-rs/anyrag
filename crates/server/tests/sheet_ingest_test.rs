@@ -13,7 +13,7 @@ use serde_json::json;
 use tracing::info;
 use turso::Value as TursoValue;
 
-use common::main::{handlers::PromptResponse, types::ApiResponse};
+use anyrag_server::{handlers::PromptResponse, types::ApiResponse};
 
 #[tokio::test]
 async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {

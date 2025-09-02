@@ -6,7 +6,7 @@
 mod common;
 
 use anyhow::Result;
-use common::TestApp;
+use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use serde_json::json;
 
@@ -31,9 +31,11 @@ async fn test_app_calls_embedding_service() -> Result<()> {
     // 3. Act: Call an endpoint on our app that triggers the embedding service.
     // The `/search/vector` endpoint is suitable for this. The database is empty,
     // so it will return no results, but it will still call the embedding service first.
+    let token = generate_jwt("test-user@example.com")?;
     let response = app
         .client
         .post(format!("{}/search/vector", app.address))
+        .bearer_auth(token)
         .json(&json!({ "query": "test query" }))
         .send()
         .await?;

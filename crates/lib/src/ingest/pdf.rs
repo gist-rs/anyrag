@@ -53,6 +53,7 @@ pub async fn run_pdf_ingestion_pipeline(
     ai_provider: &dyn AiProvider,
     pdf_data: Vec<u8>,
     source_identifier: &str,
+    owner_id: Option<&str>,
     extractor: PdfSyncExtractor,
 ) -> Result<usize, KnowledgeError> {
     info!(
@@ -92,7 +93,7 @@ pub async fn run_pdf_ingestion_pipeline(
          ON CONFLICT(source_url) DO UPDATE SET content=excluded.content, title=excluded.title",
         params![
             document_id.clone(),
-            None::<String>, // owner_id
+            owner_id,
             source_identifier,
             title,
             refined_markdown.clone()
@@ -114,8 +115,7 @@ pub async fn run_pdf_ingestion_pipeline(
     let faq_items = distill_and_augment(ai_provider, &ingested_document).await?;
 
     // --- Stage 5: Store Structured Knowledge (Q&A) ---
-    // TODO: Pass owner_id when auth is implemented
-    store_structured_knowledge(db, &document_id, None, faq_items).await
+    store_structured_knowledge(db, &document_id, owner_id, faq_items).await
 }
 
 // --- Helper Functions ---
