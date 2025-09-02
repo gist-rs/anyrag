@@ -4,13 +4,28 @@
 // By convention, Rust looks for `tests/common.rs` or `tests/common/mod.rs`.
 mod common;
 
+use anyhow::Result;
 use common::TestApp;
 use httpmock::Method;
 use serde_json::json;
+use turso::Builder;
 
 #[tokio::test]
-async fn test_e2e_prompt_execution() {
-    let app = TestApp::spawn().await.unwrap();
+async fn test_e2e_prompt_execution() -> Result<()> {
+    let app = TestApp::spawn().await?;
+
+    // --- Arrange: Database Setup ---
+    // The TestApp creates an empty database. We need to create the table
+    // that this test intends to query.
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
+    let conn = db.connect()?;
+    conn.execute(
+        "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT, value REAL);",
+        (),
+    )
+    .await?;
 
     // The harness uses a mock AI provider. We need to mock the two calls the
     // /prompt endpoint will make: one for query generation, one for formatting.
@@ -83,4 +98,6 @@ async fn test_e2e_prompt_execution() {
     // Verify both mocks were called
     query_gen_mock.assert();
     format_mock.assert();
+
+    Ok(())
 }
