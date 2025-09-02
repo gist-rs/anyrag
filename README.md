@@ -26,6 +26,10 @@ This project is a comprehensive Rust-based platform for building a self-improvin
 -   **Self-Improvement Cycle:**
     -   **Fine-Tuning Export:** Generates a dataset from the knowledge base in the correct format for fine-tuning your base LLM, which in turn improves future data extraction.
 
+-   **Flexible Identity & Ownership:**
+    -   **JWT & Guest Access:** Supports standard JWT-based authentication for multi-user environments. For simpler use cases (like local CLI), it seamlessly falls back to a deterministic "Guest User," ensuring all ingested data has a clear owner without requiring a login.
+    -   **Ownership-Aware Search:** Search results are automatically and securely filtered based on the user's identity, ensuring users can only see their own content and public "guest" content.
+
 ## API Response Structure
 
 All JSON API responses follow a consistent structure for predictability. The primary content is always nested inside a `result` object.

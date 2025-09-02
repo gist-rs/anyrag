@@ -28,6 +28,7 @@ This library is the foundation of the `anyrag` workspace and is used by the `any
     *   Uses a hybrid search model, combining vector similarity search and keyword matching for robust context retrieval.
 *   **Pluggable Providers:** Supports different AI and storage providers (e.g., Gemini, local models, BigQuery, SQLite).
 *   **Robust and Asynchronous:** Built with Tokio for efficient, non-blocking I/O.
+*   **Identity & Ownership (`core-access` feature):** Provides a flexible user and ownership model. This allows the server to distinguish between content owned by different authenticated users and a shared "Guest User," ensuring clear data provenance.
 
 ## Prerequisites
 

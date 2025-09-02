@@ -12,6 +12,17 @@ This crate provides a lightweight `axum` web server that exposes the `anyrag` li
 *   **Asynchronous:** Built on top of Tokio for non-blocking, efficient request handling.
 *   **Highly Configurable:** Uses environment variables for easy configuration of prompts and providers.
 
+## Authentication
+
+The server uses a flexible authentication model to support both multi-user deployments and simple, unauthenticated local use.
+
+-   **JWT Authentication:** Authenticated endpoints expect a JSON Web Token (JWT) in the `Authorization` header.
+    ```
+    Authorization: Bearer <your_jwt_here>
+    ```
+-   **Guest User:** If no `Authorization` header is provided, the request is automatically processed as a special, deterministic **"Guest User"**. This allows for unauthenticated use (e.g., from a CLI or a local instance) while ensuring all ingested data has a clear owner.
+-   **Security:** Providing an *invalid* or *expired* JWT will result in a `401 Unauthorized` error.
+
 ## Prerequisites
 
 Before you begin, ensure you have the following:
@@ -44,6 +55,7 @@ The server is configured using environment variables. For local development, you
 -   `AI_PROVIDER`: The AI provider to use. Can be "gemini" or "local". Defaults to "gemini".
 -   `PORT`: The port for the server to listen on. Defaults to `9090`.
 -   `RUST_LOG`: The logging level (e.g., `info`, `debug`).
+-   `JWT_SECRET`: A secret key for signing and validating JWTs. If not set, a default, less secure key is used. **It is highly recommended to set this in production.**
 
 ### Prompt Customization (Optional)
 You can set the following environment variables to define server-wide default prompts. This is useful for customizing the AI's behavior without changing the code. These can still be overridden by individual API requests.
@@ -178,10 +190,13 @@ Triggers the full ingestion pipeline for a given URL. This process involves fetc
 
 **Request Body:** `{"url": "https://..."}`
 
+**Note:** This is an authenticated endpoint. The `owner_id` of the ingested content will be automatically assigned based on the provided JWT. If no token is provided, it will be assigned to the "Guest User".
+
 **Example:**
 ```sh
 curl -X POST http://localhost:9090/knowledge/ingest \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
   -d '{
     "url": "https://www.true.th/betterliv/support/true-app-mega-campaign"
   }'
@@ -193,11 +208,14 @@ Ingests a PDF file directly. The server processes the PDF, uses an LLM to refine
 
 **Request Body:** `multipart/form-data`
 - `file`: The PDF file to be ingested.
-- `extractor`: (Optional) A string specifying the extraction strategy. Can be `"local"` (default) or `"gemini"`. The `local` strategy uses a pure Rust library to extract text and a generic LLM to refine it. The `gemini` strategy uses the multimodal Gemini API.
+- `extractor`: (Optional) A string specifying the extraction strategy. Can be `"local"` (default) or `"gemini"`.
+
+**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
 
 **Example:**
 ```sh
 curl -X POST http://localhost:9090/ingest/file \
+  -H "Authorization: Bearer <your_jwt>" \
   -F "file=@/path/to/your/document.pdf" \
   -F "extractor=local"
 ```
@@ -210,10 +228,13 @@ Downloads and ingests a PDF from a given URL. The server follows redirects, down
 - `url`: The direct URL to the PDF file.
 - `extractor`: (Optional) The extraction strategy. Can be `"local"` (default) or `"gemini"`.
 
+**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
+
 **Example:**
 ```sh
 curl -X POST http://localhost:9090/ingest/pdf_url \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
   -d '{
     "url": "https://arxiv.org/pdf/2403.05530.pdf",
     "extractor": "local"
@@ -229,10 +250,13 @@ Ingests Q&A pairs directly from a public Google Sheet. It's designed to handle s
 - `gid`: (Optional) The specific sheet/tab ID (the number after `gid=` in the URL).
 - `skip_header`: (Optional) Whether to skip the first row of the sheet. Defaults to `true`.
 
+**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
+
 **Example:**
 ```sh
 curl -X POST http://localhost:9090/ingest/sheet_faq \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
   -d '{
     "url": "https://docs.google.com/spreadsheets/d/your_sheet_id/edit",
     "gid": "856666263"
@@ -241,16 +265,19 @@ curl -X POST http://localhost:9090/ingest/sheet_faq \
 
 #### `POST /ingest/text`
 
-Ingests raw text directly from the request body. The server will automatically chunk the text into smaller, manageable pieces based on paragraphs and a size limit, then store them in the `articles` table for later embedding and search.
+Ingests raw text directly from the request body. The server automatically chunks the text and stores each chunk as a document in the knowledge base.
 
 **Request Body:** `{"text": "...", "source": "..."}`
 - `text`: The raw text content to ingest.
 - `source`: (Optional) A string to identify the origin of the text. Defaults to `text_input`.
 
+**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
+
 **Example:**
 ```sh
 curl -X POST http://localhost:9090/ingest/text \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
   -d '{
     "text": "This is the first document about Rust macros.\n\nThis is a second paragraph about the same topic.",
     "source": "rust_docs_macros"
@@ -261,14 +288,15 @@ curl -X POST http://localhost:9090/ingest/text \
 
 **Verifying the Ingestion**
 
-After ingesting, you can use one of the search endpoints (like `/search/keyword`) to confirm that the text was stored.
+After ingesting, you can use the `/search/knowledge` endpoint to confirm that the text was stored and is searchable.
 
 ```sh
-curl -X POST http://localhost:9090/search/keyword \
+curl -X POST http://localhost:9090/search/knowledge \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
   -d '{ "query": "macros" }'
 ```
-This will return the chunks of text that contain the word "macros", proving the ingestion was successful.
+This will synthesize an answer from the ingested chunks that contain the word "macros".
 
 #### `POST /embed/new`
 
@@ -298,38 +326,24 @@ These endpoints are for searching the knowledge base.
 
 #### `POST /search/knowledge`
 
-**This is the primary RAG endpoint.** It takes a user's question, performs a hybrid search (combining semantic vector search and keyword matching) to find the most relevant facts in the knowledge base, and then uses an LLM to synthesize a final, coherent answer based on that context.
+**This is the primary RAG endpoint.** It takes a user's question, performs a hybrid search to find the most relevant facts in the knowledge base, and then uses an LLM to synthesize a final, coherent answer based on that context. The search is automatically filtered based on ownership: authenticated users see their own content plus guest content, while guest users see only guest content.
 
 **Request Body:** `{"query": "...", "limit": 5, "instruction": "..."}`
 - `query`: The user's question.
 - `limit`: (Optional) The number of facts to retrieve for context. Defaults to 5.
 - `instruction`: (Optional) A specific instruction for the final LLM synthesis step.
 
+**Note:** This is an authenticated endpoint. The search results are automatically filtered based on the user's identity.
+
 **Example:**
 ```sh
 curl -X POST http://localhost:9090/search/knowledge \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
   -d '{
     "query": "ทำยังไงถึงจะได้เทสล่า",
     "instruction": "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า"
   }'
 ```
 
----
 
-The following endpoints are for searching the legacy `articles` table, which is populated by the `/ingest` (RSS) endpoint.
-
-#### `POST /search/hybrid`
-
-Combines keyword and vector search for the most relevant results from the `articles` table.
-
-**Example:**
-```sh
-curl -X POST http://localhost:9090/search/hybrid \
-  -H "Content-Type: application/json" \
-  -d '{ "query": "Qwen3" }'
-```
-
-#### `POST /search/vector` and `POST /search/keyword`
-
-Perform pure semantic or keyword searches on the `articles` table, respectively.
