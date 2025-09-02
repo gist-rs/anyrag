@@ -31,11 +31,16 @@ pub enum IngestError {
 ///
 /// * `db`: A shared reference to the Turso database instance.
 /// * `feed_url`: The URL of the RSS feed to ingest.
+/// * `owner_id`: The ID of the user who is ingesting the content.
 ///
 /// # Returns
 ///
 /// The number of *new* documents that were successfully inserted into the database.
-pub async fn ingest_from_url(db: &Database, feed_url: &str) -> Result<usize, IngestError> {
+pub async fn ingest_from_url(
+    db: &Database,
+    feed_url: &str,
+    owner_id: Option<&str>,
+) -> Result<usize, IngestError> {
     let mut conn = db.connect()?;
 
     info!("Fetching RSS feed from: {feed_url}");
@@ -52,15 +57,15 @@ pub async fn ingest_from_url(db: &Database, feed_url: &str) -> Result<usize, Ing
 
     for item in channel.items() {
         if let (Some(title), Some(link)) = (item.title(), item.link()) {
-            let document_id = Uuid::new_v4().to_string();
+            let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, link.as_bytes()).to_string();
             let description = item.description().unwrap_or_default();
             let content = format!("{title}\n\n{description}");
 
             // The `source_url` is the unique link of the RSS item itself.
             let mut stmt = tx
                 .prepare(
-                    "INSERT INTO documents (id, source_url, title, content)
-                     VALUES (?, ?, ?, ?)
+                    "INSERT INTO documents (id, owner_id, source_url, title, content)
+                     VALUES (?, ?, ?, ?, ?)
                      ON CONFLICT(source_url) DO NOTHING",
                 )
                 .await?;
@@ -68,6 +73,7 @@ pub async fn ingest_from_url(db: &Database, feed_url: &str) -> Result<usize, Ing
             let changes = stmt
                 .execute(params![
                     document_id,
+                    owner_id,
                     link.to_string(),
                     title.to_string(),
                     content

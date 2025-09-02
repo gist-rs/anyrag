@@ -30,7 +30,7 @@ anyhow.workspace = true
 indradb-lib = { version = "5.0.0", optional = true, features = [
     "rocksdb-datastore",
 ] }
-uuid = { version = "1.18.0", features = ["v4", "serde", "v5"], optional = true }
+uuid = { version = "1.18.0", features = ["serde", "v5"], optional = true }
 core-access = { path = "../core-access", optional = true }
 
 [dev-dependencies]
@@ -44,7 +44,7 @@ anyhow = { workspace = true }
 default = ["graph_db"]
 bigquery = ["dep:gcp-bigquery-client"]
 graph_db = ["dep:indradb-lib", "dep:uuid"]
-core-access = ["dep:core-access"]
+core-access = ["dep:core-access", "dep:uuid"]
 
 [[test]]
 name = "prompts"
@@ -53,6 +53,11 @@ path = "tests/prompts.rs"
 [[test]]
 name = "ingest_test"
 path = "tests/ingest_test.rs"
+
+[[test]]
+name = "knowledge_search_logic_test"
+path = "tests/knowledge_search_logic_test.rs"
+required-features = ["core-access"]
 
 [[example]]
 name = "knowledge"

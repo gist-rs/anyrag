@@ -2,22 +2,25 @@
 //!
 //! This file contains integration tests for the `/ingest` endpoint,
 //! verifying that it correctly fetches an RSS feed and stores the articles
-//! in the database.
+//! in the database with the correct ownership.
 
 mod common;
 
 use anyhow::Result;
-use common::TestApp;
+use common::{generate_jwt, TestApp};
+use core_access::get_or_create_user;
 use httpmock::Method;
 use serde_json::json;
-use turso::Value as TursoValue;
+use turso::{Builder, Value as TursoValue};
 
 #[tokio::test]
 async fn test_ingest_endpoint_success() -> Result<()> {
     // --- Arrange ---
     let app = TestApp::spawn().await?;
+    let user_identifier = "ingest-test-user@example.com";
+    let token = generate_jwt(user_identifier)?;
 
-    // 3. Set up a mock server for the RSS feed.
+    // Set up a mock server for the RSS feed.
     let mock_rss_content = r#"
         <?xml version="1.0" encoding="UTF-8"?>
         <rss version="2.0">
@@ -30,12 +33,6 @@ async fn test_ingest_endpoint_success() -> Result<()> {
                 <link>http://mock.com/article1</link>
                 <description>Summary of article 1.</description>
                 <pubDate>Mon, 01 Jan 2024 12:00:00 GMT</pubDate>
-            </item>
-            <item>
-                <title>Test Article 2</title>
-                <link>http://mock.com/article2</link>
-                <description>Summary of article 2.</description>
-                <pubDate>Tue, 02 Jan 2024 12:00:00 GMT</pubDate>
             </item>
         </channel>
         </rss>
@@ -50,10 +47,11 @@ async fn test_ingest_endpoint_success() -> Result<()> {
 
     // --- Act ---
 
-    // 4. Call the /ingest endpoint on our app server.
+    // Call the /ingest endpoint on our app server with authentication.
     let response = app
         .client
         .post(format!("{}/ingest", app.address))
+        .bearer_auth(token)
         .json(&json!({ "url": mock_rss_url }))
         .send()
         .await
@@ -69,51 +67,44 @@ async fn test_ingest_endpoint_success() -> Result<()> {
         .json()
         .await
         .expect("Failed to parse response JSON");
-    assert_eq!(response_body["result"]["ingested_articles"], 2);
+    assert_eq!(response_body["result"]["ingested_articles"], 1);
     rss_mock.assert();
 
     // --- Assert (Database State) ---
     // Verify the data was written to the database correctly.
-    let db = turso::Builder::new_local(app.db_path.to_str().unwrap())
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await
         .expect("Failed to connect to temp db");
     let conn = db.connect().expect("Failed to get connection from db");
 
-    // Check the total count of articles.
-    let mut result_set = conn
-        .query("SELECT COUNT(*) FROM documents", ())
-        .await
-        .expect("Failed to query db for count");
-    let row = result_set
-        .next()
-        .await
-        .expect("Failed to get next row")
-        .expect("Row is None");
+    // Get the expected owner ID.
+    let expected_user = get_or_create_user(&db, user_identifier).await?;
 
-    let count: i64 = match row.get_value(0).unwrap() {
-        TursoValue::Integer(i) => i,
-        other => panic!("Expected Integer, got {other:?}"),
-    };
-    assert_eq!(count, 2, "The number of documents in the DB is incorrect.");
-
-    // Check the content of one of the documents to be sure.
+    // Check the content and owner of the inserted document.
     let mut result_set = conn
         .query(
-            "SELECT title FROM documents WHERE source_url = 'http://mock.com/article1'",
+            "SELECT owner_id, title FROM documents WHERE source_url = 'http://mock.com/article1'",
             (),
         )
         .await
         .expect("Failed to query db for specific document");
     let row = result_set
         .next()
-        .await
-        .expect("Failed to get row for document 1")
+        .await?
         .expect("Row for document 1 is None");
-    let title: String = match row.get_value(0).unwrap() {
+    let owner_id: String = match row.get_value(0)? {
+        TursoValue::Text(s) => s,
+        other => panic!("Expected Text for owner_id, got {other:?}"),
+    };
+    let title: String = match row.get_value(1)? {
         TursoValue::Text(s) => s,
         other => panic!("Expected Text for title, got {other:?}"),
     };
+    assert_eq!(
+        owner_id, expected_user.id,
+        "The owner_id in the DB is incorrect."
+    );
     assert_eq!(title, "Test Article 1");
 
     Ok(())

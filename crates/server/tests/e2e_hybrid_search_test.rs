@@ -10,18 +10,18 @@
 mod common;
 
 use anyhow::Result;
+use anyrag_server::{auth::middleware::Claims, types::ApiResponse};
 use common::TestApp;
+use core_access::get_or_create_user;
 use httpmock::Method;
+use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::{json, Value};
+use std::time::{SystemTime, UNIX_EPOCH};
 use turso::{params, Builder};
 
-use anyrag_server::auth::middleware::Claims;
-use anyrag_server::types::ApiResponse;
-use jsonwebtoken::{encode, EncodingKey, Header};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Seeds the database with two distinct documents, their metadata, and their embeddings.
-async fn seed_data_for_hybrid_search(app: &TestApp) -> Result<()> {
+/// Seeds the database with two distinct documents, their metadata, and their embeddings,
+/// all associated with a specific owner.
+async fn seed_data_for_hybrid_search(app: &TestApp, owner_id: &str) -> Result<()> {
     let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
@@ -32,18 +32,26 @@ async fn seed_data_for_hybrid_search(app: &TestApp) -> Result<()> {
     let doc1_content = "The grand prize for the campaign is a Tesla Model 3.";
     let doc1_vector = [1.0, 0.0, 0.0, 0.0];
     conn.execute(
-        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
-        params![doc1_id, "http://m.com/tesla", "Tesla Prize", doc1_content],
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+        params![
+            doc1_id,
+            owner_id,
+            "http://m.com/tesla",
+            "Tesla Prize",
+            doc1_content
+        ],
     )
     .await?;
     conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-        params![doc1_id, "ENTITY", "PRODUCT", "Tesla"],
-    ).await?;
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+        params![doc1_id, owner_id, "ENTITY", "PRODUCT", "Tesla"],
+    )
+    .await?;
     conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-        params![doc1_id, "KEYPHRASE", "CONCEPT", "campaign prize"],
-    ).await?;
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+        params![doc1_id, owner_id, "KEYPHRASE", "CONCEPT", "campaign prize"],
+    )
+    .await?;
     let doc1_vector_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(doc1_vector.as_ptr() as *const u8, doc1_vector.len() * 4)
     };
@@ -58,9 +66,10 @@ async fn seed_data_for_hybrid_search(app: &TestApp) -> Result<()> {
     let doc2_content = "You must use the True App to be eligible for the campaign.";
     let doc2_vector = [0.0, 1.0, 0.0, 0.0];
     conn.execute(
-        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
         params![
             doc2_id,
+            owner_id,
             "http://m.com/true_app",
             "True App Requirement",
             doc2_content
@@ -68,13 +77,21 @@ async fn seed_data_for_hybrid_search(app: &TestApp) -> Result<()> {
     )
     .await?;
     conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-        params![doc2_id, "ENTITY", "PRODUCT", "True App"],
-    ).await?;
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+        params![doc2_id, owner_id, "ENTITY", "PRODUCT", "True App"],
+    )
+    .await?;
     conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-        params![doc2_id, "KEYPHRASE", "CONCEPT", "eligibility requirement"],
-    ).await?;
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+        params![
+            doc2_id,
+            owner_id,
+            "KEYPHRASE",
+            "CONCEPT",
+            "eligibility requirement"
+        ],
+    )
+    .await?;
     let doc2_vector_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(doc2_vector.as_ptr() as *const u8, doc2_vector.len() * 4)
     };
@@ -107,15 +124,19 @@ fn generate_jwt(sub: &str) -> Result<String> {
 async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    seed_data_for_hybrid_search(&app).await?;
-
     let user_identifier = "test-user@example.com";
+
+    // Get the user's deterministic ID to seed the data correctly.
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
+    let user = get_or_create_user(&db, user_identifier).await?;
+    seed_data_for_hybrid_search(&app, &user.id).await?;
+
     let user_query = "Tell me about the Tesla campaign prize";
     let final_rag_answer = "The campaign's grand prize is a Tesla Model 3.";
 
     // --- 2. Mock External Services ---
-    // A. Mock the Query Analysis LLM call.
-    // It should extract "Tesla" as an entity, which is the key to the pre-filtering stage.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -133,8 +154,6 @@ async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
         }));
     });
 
-    // B. Mock the Embedding API call for the user's query vector.
-    // The vector is crafted to be a perfect match for the Tesla document.
     let query_vector = vec![1.0, 0.0, 0.0, 0.0];
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
@@ -142,19 +161,15 @@ async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": query_vector }] }));
     });
 
-    // C. Mock the final RAG Synthesis call.
-    // This is the most important assertion: we verify that the context it receives
-    // *only* contains the content from the Tesla document, proving that the
-    // metadata pre-filtering and vector re-ranking worked as expected.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("strict, factual AI") // Differentiates it from the analysis call
-            .body_contains("The grand prize for the campaign is a Tesla Model 3.") // Must contain doc1 content
+            .body_contains("strict, factual AI")
+            .body_contains("The grand prize for the campaign is a Tesla Model 3.")
             .matches(|req| {
                 !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default())
                     .contains("You must use the True App")
-            }); // MUST NOT contain doc2 content
+            });
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
@@ -173,7 +188,10 @@ async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
 
     // --- 4. Assert the final response and mock calls ---
     let response_body: ApiResponse<Value> = response.json().await?;
-    assert_eq!(response_body.result["text"], final_rag_answer);
+    assert_eq!(
+        response_body.result["text"], final_rag_answer,
+        "The final RAG answer was not as expected."
+    );
 
     query_analysis_mock.assert();
     embedding_mock.assert();

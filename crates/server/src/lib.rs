@@ -6,7 +6,7 @@ pub mod router;
 pub mod state;
 pub mod types;
 
-use self::{
+use crate::{
     config::{get_config, Config},
     router::create_router,
     state::build_app_state,

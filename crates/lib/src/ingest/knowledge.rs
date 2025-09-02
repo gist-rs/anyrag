@@ -200,7 +200,7 @@ pub async fn ingest_and_cache_url(
     }
 
     // No existing document, so create a new one.
-    let document_id = Uuid::new_v4().to_string();
+    let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, url.as_bytes()).to_string();
     let title: String = markdown_content.chars().take(80).collect();
 
     conn.execute(

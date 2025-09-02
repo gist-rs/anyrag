@@ -7,7 +7,7 @@
 mod common;
 
 use anyhow::Result;
-use common::TestApp;
+use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use serde_json::json;
 
@@ -17,6 +17,8 @@ use anyrag_server::types::ApiResponse;
 async fn test_embed_and_search_flow() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
+    let user_identifier = "embed-test-user@example.com";
+    let token = generate_jwt(user_identifier)?;
 
     let rss_mock = app.mock_server.mock(|when, then| {
         when.method(Method::GET).path("/rss");
@@ -35,34 +37,38 @@ async fn test_embed_and_search_flow() -> Result<()> {
             }));
     });
 
-    // --- 2. Act & Assert: Ingest ---
+    // --- 2. Act & Assert: Ingest (Authenticated) ---
     let ingest_res = app
         .client
         .post(format!("{}/ingest", app.address))
+        .bearer_auth(token.clone())
         .json(&json!({ "url": app.mock_server.url("/rss") }))
         .send()
         .await?;
-    assert!(ingest_res.status().is_success());
+    assert!(ingest_res.status().is_success(), "Ingest request failed");
     rss_mock.assert();
 
-    // --- 3. Act & Assert: Embed ---
+    // --- 3. Act & Assert: Embed (Public) ---
+    // The /embed/new endpoint is public and does not require authentication.
     let embed_res = app
         .client
         .post(format!("{}/embed/new", app.address))
         .json(&json!({ "limit": 10 }))
         .send()
         .await?;
-    assert!(embed_res.status().is_success());
+    assert!(embed_res.status().is_success(), "Embed request failed");
 
-    // --- 4. Act & Assert: Search ---
+    // --- 4. Act & Assert: Search (Authenticated) ---
     let search_res = app
         .client
         .post(format!("{}/search/vector", app.address))
+        .bearer_auth(token)
         .json(&json!({ "query": "A query about the test article" }))
         .send()
         .await?;
-    assert!(search_res.status().is_success());
+    assert!(search_res.status().is_success(), "Search request failed");
 
+    // Embedding is called for the ingested doc and for the search query.
     embeddings_mock.assert_hits(2);
 
     let response: ApiResponse<Vec<serde_json::Value>> = search_res.json().await?;

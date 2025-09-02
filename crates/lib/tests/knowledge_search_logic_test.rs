@@ -12,11 +12,13 @@ use anyrag::{
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
 };
 use common::{setup_tracing, MockAiProvider};
+use core_access::GUEST_USER_IDENTIFIER;
 use serde_json::json;
 use turso::params;
+use uuid::Uuid;
 
 /// A helper function to set up an in-memory database with manually inserted,
-/// distinct vectors, documents, and metadata. This removes any dependency on a live embedding model for seeding.
+/// distinct vectors, documents, and metadata, all owned by the guest user.
 async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
     // 1. Create a new, isolated in-memory database and initialize schema.
     let provider = SqliteProvider::new(":memory:").await?;
@@ -26,16 +28,21 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
         .connect()
         .expect("Failed to get connection for test setup");
 
-    // --- Document 1: Tesla ---
+    // --- Calculate the deterministic Guest User ID ---
+    let guest_user_id =
+        Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
+
+    // --- Document 1: Tesla (owned by Guest) ---
     let doc1_id = "doc_tesla";
     let doc1_vector: Vec<f32> = vec![1.0, 0.0, 0.0, 0.0];
     let doc1_vector_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(doc1_vector.as_ptr() as *const u8, doc1_vector.len() * 4)
     };
     conn.execute(
-        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
         params![
             doc1_id,
+            guest_user_id.clone(),
             "http://mock.com/tesla",
             "Tesla Prize",
             "The grand prize is a Tesla."
@@ -43,8 +50,8 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
     )
     .await?;
     conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_value) VALUES (?, ?, ?)",
-        params![doc1_id, "ENTITY", "Tesla"],
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_value) VALUES (?, ?, ?, ?)",
+        params![doc1_id, guest_user_id.clone(), "ENTITY", "Tesla"],
     )
     .await?;
     conn.execute(
@@ -53,16 +60,17 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
     )
     .await?;
 
-    // --- Document 2: Unrelated ---
+    // --- Document 2: Unrelated (owned by Guest) ---
     let doc2_id = "doc_unrelated";
     let doc2_vector: Vec<f32> = vec![0.0, 1.0, 0.0, 0.0];
     let doc2_vector_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(doc2_vector.as_ptr() as *const u8, doc2_vector.len() * 4)
     };
     conn.execute(
-        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?)",
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
         params![
             doc2_id,
+            guest_user_id.clone(),
             "http://mock.com/other",
             "Other Info",
             "This is another document."
@@ -70,8 +78,8 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
     )
     .await?;
     conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_value) VALUES (?, ?, ?)",
-        params![doc2_id, "ENTITY", "Other"],
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_value) VALUES (?, ?, ?, ?)",
+        params![doc2_id, guest_user_id.clone(), "ENTITY", "Other"],
     )
     .await?;
     conn.execute(
@@ -118,6 +126,7 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
     // --- Act ---
     // This section manually replicates the logic from the server's knowledge_search_handler
     let limit = 5;
+    // Call with `owner_id: None` to simulate a guest user request.
     let search_results = hybrid_search(
         &sqlite_provider,
         &mock_ai_provider,

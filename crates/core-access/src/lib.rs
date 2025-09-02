@@ -3,6 +3,8 @@
 //! This crate is the central authority for all identity, authentication (AuthN),
 //! and authorization (AuthZ) logic for the `anyrag` application.
 
+pub const GUEST_USER_IDENTIFIER: &str = "::guest::";
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

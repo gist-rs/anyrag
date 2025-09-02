@@ -21,7 +21,7 @@ use anyhow::Result;
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
-    handlers::{self, EmbedNewRequest, IngestRequest, SearchRequest},
+    handlers::{self, EmbedNewRequest, KnowledgeIngestRequest, SearchRequest},
     state::{self, AppState},
     types::DebugParams,
 };
@@ -100,7 +100,7 @@ async fn main() -> Result<()> {
     // --- 2. Ingest Knowledge ---
     info!("--- Starting Knowledge Ingestion ---");
     let ingest_url = "https://www.true.th/betterliv/support/true-app-mega-campaign";
-    let ingest_payload = IngestRequest {
+    let ingest_payload = KnowledgeIngestRequest {
         url: ingest_url.to_string(),
     };
 

@@ -6,6 +6,8 @@ use crate::{
     types::SearchResult,
 };
 use async_trait::async_trait;
+#[cfg(feature = "core-access")]
+use core_access::GUEST_USER_IDENTIFIER;
 use serde_json::Value;
 use std::{
     collections::HashMap,
@@ -14,7 +16,10 @@ use std::{
 };
 use tokio::sync::RwLock;
 use tracing::{debug, info};
-use turso::{params, Database, Value as TursoValue};
+use turso::{Database, Value as TursoValue};
+
+#[cfg(feature = "core-access")]
+use uuid::Uuid;
 
 mod sql;
 
@@ -286,11 +291,29 @@ impl VectorSearch for SqliteProvider {
         let mut conditions: Vec<String> = vec!["de.embedding IS NOT NULL".to_string()];
         let mut query_params: Vec<TursoValue> = Vec::new();
 
-        if let Some(owner) = owner_id {
-            conditions.push("(d.owner_id = ? OR d.owner_id IS NULL)".to_string());
-            query_params.push(owner.to_string().into());
-        } else {
-            conditions.push("d.owner_id IS NULL".to_string());
+        // This block needs the GUEST_USER_IDENTIFIER, so it's conditionally compiled.
+        #[cfg(feature = "core-access")]
+        {
+            let guest_user_id =
+                Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
+
+            if let Some(owner) = owner_id {
+                conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
+                query_params.push(owner.to_string().into());
+                query_params.push(guest_user_id.into());
+            } else {
+                conditions.push("d.owner_id = ?".to_string());
+                query_params.push(guest_user_id.into());
+            }
+        }
+        #[cfg(not(feature = "core-access"))]
+        {
+            if let Some(owner) = owner_id {
+                conditions.push("d.owner_id = ?".to_string());
+                query_params.push(owner.to_string().into());
+            } else {
+                conditions.push("d.owner_id IS NULL".to_string());
+            }
         }
 
         if let Some(ids) = document_ids {
@@ -302,7 +325,6 @@ impl VectorSearch for SqliteProvider {
                     query_params.push(id.clone().into());
                 }
             } else {
-                // If an empty list of IDs is provided, no results should match.
                 return Ok(Vec::new());
             }
         }
@@ -354,14 +376,45 @@ impl KeywordSearch for SqliteProvider {
         &self,
         query: &str,
         limit: u32,
+        owner_id: Option<&str>,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        info!("Executing keyword search on documents for: {}", query);
+        info!("Executing keyword search for: '{query}' for owner: {owner_id:?}");
         let conn = self.db.connect()?;
         let pattern = format!("%{}%", query.to_lowercase());
 
-        let sql = format!("SELECT title, source_url, content FROM documents WHERE lower(content) LIKE ? OR lower(title) LIKE ? LIMIT {limit}");
+        let mut conditions = vec!["(lower(content) LIKE ? OR lower(title) LIKE ?)".to_string()];
+        let mut params = vec![TursoValue::Text(pattern.clone()), TursoValue::Text(pattern)];
 
-        let mut results = conn.query(&sql, params![pattern.clone(), pattern]).await?;
+        #[cfg(feature = "core-access")]
+        {
+            let guest_user_id =
+                Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
+            if let Some(owner) = owner_id {
+                conditions.push("(owner_id = ? OR owner_id = ?)".to_string());
+                params.push(TursoValue::Text(owner.to_string()));
+                params.push(TursoValue::Text(guest_user_id));
+            } else {
+                conditions.push("owner_id = ?".to_string());
+                params.push(TursoValue::Text(guest_user_id));
+            }
+        }
+        #[cfg(not(feature = "core-access"))]
+        {
+            if let Some(owner) = owner_id {
+                conditions.push("owner_id = ?".to_string());
+                params.push(TursoValue::Text(owner.to_string()));
+            } else {
+                conditions.push("owner_id IS NULL".to_string());
+            }
+        }
+
+        let sql = format!(
+            "SELECT title, source_url, content FROM documents WHERE {} LIMIT {}",
+            conditions.join(" AND "),
+            limit
+        );
+
+        let mut results = conn.query(&sql, params).await?;
         let mut search_results = Vec::new();
 
         while let Some(row) = results.next().await? {
@@ -404,13 +457,32 @@ impl MetadataSearch for SqliteProvider {
         let mut conditions = Vec::new();
         let mut params: Vec<turso::Value> = Vec::new();
 
-        if let Some(owner) = owner_id {
-            // Authenticated user can see their own documents and public documents.
-            conditions.push("(owner_id = ? OR owner_id IS NULL)".to_string());
-            params.push(owner.to_string().into());
-        } else {
-            // Unauthenticated user can only see public documents.
-            conditions.push("owner_id IS NULL".to_string());
+        #[cfg(feature = "core-access")]
+        {
+            let guest_user_id =
+                Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
+
+            if let Some(owner) = owner_id {
+                // Any user (guest or authenticated) can see their own documents and guest documents.
+                conditions.push("(owner_id = ? OR owner_id = ?)".to_string());
+                params.push(owner.to_string().into());
+                params.push(guest_user_id.into());
+            } else {
+                // This branch should now be unreachable for requests that go through
+                // the user resolution middleware, but we keep it for safety/other callers.
+                // It allows searching only public/guest documents.
+                conditions.push("owner_id = ?".to_string());
+                params.push(guest_user_id.into());
+            }
+        }
+        #[cfg(not(feature = "core-access"))]
+        {
+            if let Some(owner) = owner_id {
+                conditions.push("owner_id = ?".to_string());
+                params.push(owner.to_string().into());
+            } else {
+                conditions.push("owner_id IS NULL".to_string());
+            }
         }
 
         let mut metadata_conditions = Vec::new();
@@ -440,7 +512,6 @@ impl MetadataSearch for SqliteProvider {
         if !metadata_conditions.is_empty() {
             conditions.push(format!("({})", metadata_conditions.join(" OR ")));
         } else {
-            // No metadata to search for, return empty
             return Ok(Vec::new());
         }
 

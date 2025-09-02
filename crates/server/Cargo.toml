@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
 # Internal Crate
-anyrag = { path = "../lib" }
+anyrag = { path = "../lib", features = ["core-access"] }
 core-access = { path = "../core-access" }
 
 # Web Framework
@@ -58,6 +58,7 @@ turso = { workspace = true }
 regex = { workspace = true }
 md5 = "0.8.0"
 pdf-writer = "0.13.0"
+uuid = { version = "1.8.0", features = ["v5", "serde"] }
 
 [[test]]
 name = "config_test"
@@ -102,4 +103,9 @@ harness = true
 [[test]]
 name = "ownership_test"
 path = "tests/ownership_test.rs"
+harness = true
+
+[[test]]
+name = "e2e_prompt_test"
+path = "tests/e2e_prompt_test.rs"
 harness = true

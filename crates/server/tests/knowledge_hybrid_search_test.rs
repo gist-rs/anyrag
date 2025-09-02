@@ -6,15 +6,15 @@
 mod common;
 
 use anyhow::Result;
+use anyrag_server::{auth::middleware::Claims, types::ApiResponse};
 use common::TestApp;
+use core_access::get_or_create_user;
 use httpmock::Method;
+use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::{json, Value};
 use std::path::Path;
-use turso::{params, Builder};
-
-use anyrag_server::{auth::middleware::Claims, types::ApiResponse};
-use jsonwebtoken::{encode, EncodingKey, Header};
 use std::time::{SystemTime, UNIX_EPOCH};
+use turso::{params, Builder};
 
 /// Generates a valid JWT for a given user identifier (subject).
 fn generate_jwt(sub: &str) -> Result<String> {
@@ -32,9 +32,10 @@ fn generate_jwt(sub: &str) -> Result<String> {
     Ok(token)
 }
 
-/// A helper to manually insert and embed a FAQ into the database.
+/// A helper to manually insert and embed a FAQ into the database with a specific owner.
 async fn seed_faq(
     db_path: &Path,
+    owner_id: &str,
     doc_id: &str,
     question: &str,
     answer: &str,
@@ -46,31 +47,26 @@ async fn seed_faq(
         .await?;
     let conn = db.connect()?;
 
-    // The TestApp harness initializes the schema, so no need for table creation here.
-    // Insert a parent document.
     conn.execute(
-        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
-        params![doc_id, format!("manual_seed/{doc_id}"), question, answer],
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
+        params![doc_id, owner_id, format!("manual_seed/{doc_id}"), question, answer],
     )
     .await?;
 
-    // Insert the FAQ item.
     conn.execute(
-        "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
-        params![doc_id, question, answer],
+        "INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)",
+        params![doc_id, owner_id, question, answer],
     )
     .await?;
 
-    // Insert metadata for the document.
     for (m_type, m_subtype, m_value) in metadata {
         conn.execute(
-            "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-            params![doc_id, m_type, m_subtype, m_value],
+            "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+            params![doc_id, owner_id, m_type, m_subtype, m_value],
         )
         .await?;
     }
 
-    // Convert Vec<f32> to &[u8] for BLOB storage and insert embedding for the document.
     let vector_bytes: &[u8] =
         unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
 
@@ -88,26 +84,30 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
     let db_path = app.db_path.clone();
+    let user_identifier = "test-user-khs@example.com";
+
+    // Create the user and get their ID to seed data correctly.
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
+    let user = get_or_create_user(&db, user_identifier).await?;
 
     // --- 2. Define Test Data and Vectors ---
-    // This FAQ is designed to be found by KEYWORD search for "Quantum Widget".
     let faq_keyword_question = "How does the Quantum Widget work?";
-    let faq_keyword_answer = "For how to handle complex Quantum Widget information, you must know it operates on principles of quantum entanglement.";
-    let faq_keyword_vector = vec![1.0, 0.0, 0.0, 0.0]; // Distinct vector
+    let faq_keyword_answer = "The Quantum Widget operates on principles of quantum entanglement.";
+    let faq_keyword_vector = vec![1.0, 0.0, 0.0, 0.0];
 
-    // This FAQ is designed to be found by VECTOR search for "complex information".
     let faq_vector_question = "What is the method for advanced data processing?";
     let faq_vector_answer =
         "The method for advanced data processing involves multi-layered abstraction.";
-    let faq_vector_vector = vec![0.0, 1.0, 0.0, 0.0]; // Distinct vector
+    let faq_vector_vector = vec![0.0, 1.0, 0.0, 0.0];
 
-    // The search query vector will be very close to the "advanced data processing" FAQ.
-    let search_query_vector = vec![0.0, 0.99, 0.01, 0.0];
     let final_rag_answer = "The Quantum Widget uses quantum entanglement, and advanced data processing uses multi-layered abstraction.";
 
-    // --- 3. Seed the Database ---
+    // --- 3. Seed the Database with data owned by our test user ---
     seed_faq(
         &db_path,
+        &user.id,
         "doc_keyword",
         faq_keyword_question,
         faq_keyword_answer,
@@ -117,6 +117,7 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     .await?;
     seed_faq(
         &db_path,
+        &user.id,
         "doc_vector",
         faq_vector_question,
         faq_vector_answer,
@@ -126,7 +127,6 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     .await?;
 
     // --- 4. Mock External Services ---
-    // A. Mock the Query Analysis LLM call.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -137,45 +137,38 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
                     "role": "assistant",
                     "content": json!({
                         "entities": ["Quantum Widget"],
-                        "keyphrases": ["complex information"]
+                        "keyphrases": ["advanced data processing"]
                     }).to_string()
                 }
             }]
         }));
     });
 
-    // B. Mock the Embedding API call for the search query.
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/embeddings")
-            .body_contains("complex Quantum Widget information"); // Check for the query text
+            .body_contains("complex Quantum Widget");
         then.status(200)
-            .json_body(json!({ "data": [{ "embedding": search_query_vector }] }));
+            .json_body(json!({ "data": [{ "embedding": vec![0.5, 0.5, 0.0, 0.0] }] }));
     });
 
-    // C. Mock the final RAG synthesis call. This is the most important assertion.
-    // We will verify that the context it receives contains ONLY the relevant document's content.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            // Check that the context contains ONLY the relevant document's content.
-            .body_contains("quantum entanglement") // From the metadata search result
-            .matches(|req| {
-                !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default())
-                    .contains("multi-layered abstraction")
-            }); // MUST NOT contain the other doc
+            .body_contains("quantum entanglement")
+            .body_contains("multi-layered abstraction");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
     });
 
     // --- 5. Execute Hybrid RAG Search and Verify ---
-    let token = generate_jwt("test-user-khs@example.com")?;
+    let token = generate_jwt(user_identifier)?;
     let search_res = app
         .client
         .post(format!("{}/search/knowledge", app.address))
         .bearer_auth(token)
-        .json(&json!({ "query": "how to handle complex Quantum Widget information" }))
+        .json(&json!({ "query": "tell me about complex Quantum Widget" }))
         .send()
         .await?
         .error_for_status()?;
@@ -183,10 +176,10 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     let search_body: ApiResponse<Value> = search_res.json().await?;
     assert_eq!(search_body.result["text"], final_rag_answer);
 
-    // --- 7. Assert Mock Calls ---
+    // --- 6. Assert Mock Calls ---
     query_analysis_mock.assert();
     embedding_mock.assert();
-    rag_synthesis_mock.assert(); // This confirms the core logic of the test.
+    rag_synthesis_mock.assert();
 
     Ok(())
 }

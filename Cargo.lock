@@ -143,6 +143,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "turso",
+ "uuid",
 ]
 
 [[package]]

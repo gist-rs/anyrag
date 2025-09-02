@@ -54,6 +54,7 @@ pub trait KeywordSearch: Send + Sync + DynClone + Debug {
         &self,
         query: &str,
         limit: u32,
+        owner_id: Option<&str>,
     ) -> Result<Vec<SearchResult>, SearchError>;
 }
 

@@ -10,10 +10,12 @@ use anyhow::Result;
 use anyrag_server::{auth::middleware::Claims, types::ApiResponse};
 use chrono::{Duration, Utc};
 use common::TestApp;
+use core_access::get_or_create_user;
 use httpmock::Method;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::{json, Value};
 use std::time::{SystemTime, UNIX_EPOCH};
+use turso::{params, Builder};
 
 /// Generates a valid JWT for a given user identifier (subject).
 fn generate_jwt(sub: &str) -> Result<String> {
@@ -97,15 +99,21 @@ async fn test_knowledge_graph_endpoint_e2e() -> Result<()> {
 async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
-    let db = turso::Builder::new_local(app.db_path.to_str().unwrap())
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
     let conn = db.connect()?;
+
+    // Create a user to own the data
+    let user_identifier = "test-user-kg@example.com";
+    let user = get_or_create_user(&db, user_identifier).await?;
+
     let document_id = "doc_superwidget";
     conn.execute(
-        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
-        turso::params![
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
+        params![
             document_id,
+            user.id.clone(),
             "manual_seed/superwidget",
             "SuperWidget Manual",
             "The SuperWidget is a complex device."
@@ -113,9 +121,10 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     )
     .await?;
     conn.execute(
-        "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
-        turso::params![
+        "INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)",
+        params![
             document_id,
+            user.id.clone(),
             "What is the SuperWidget?",
             "The SuperWidget is a complex device."
         ],
@@ -124,8 +133,8 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
 
     // Seed metadata and embedding for the SuperWidget document.
     conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-        turso::params![document_id, "ENTITY", "PRODUCT", "SuperWidget_X500"],
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+        params![document_id, user.id.clone(), "ENTITY", "PRODUCT", "SuperWidget_X500"],
     )
     .await?;
 
@@ -135,24 +144,7 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     };
     conn.execute(
         "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        turso::params![document_id, "mock-model", widget_vector_bytes],
-    )
-    .await?;
-
-    // Seed metadata and embedding for the SuperWidget document.
-    conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-        turso::params![document_id, "ENTITY", "PRODUCT", "SuperWidget_X500"],
-    )
-    .await?;
-
-    let widget_vector: Vec<f32> = vec![0.3, 0.2, 0.1, 0.0];
-    let widget_vector_bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(widget_vector.as_ptr() as *const u8, widget_vector.len() * 4)
-    };
-    conn.execute(
-        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        turso::params![document_id, "mock-model", widget_vector_bytes],
+        params![document_id, "mock-model", widget_vector_bytes],
     )
     .await?;
 
@@ -218,7 +210,7 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     });
 
     // --- 2. Act ---
-    let token = generate_jwt("test-user-kg@example.com")?;
+    let token = generate_jwt(user_identifier)?;
     let response = app
         .client
         .post(format!("{}/search/knowledge", app.address))
@@ -244,9 +236,14 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
 async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
+    let conn = db.connect()?;
+    let user_identifier = "harry-potter-fan@example.com";
+    let user = get_or_create_user(&db, user_identifier).await?;
 
     // --- 2. Define Scenario Data ---
-    // Use consistent, simple strings without punctuation for mock matching.
     let subject = "Harry_Potter";
     let question = "What is Harry Potter's current role?";
     let generic_answer_seed = "Harry Potter is a famous wizard known for defeating Voldemort";
@@ -254,21 +251,17 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     let present_role_seed = "Head of Magical Law Enforcement";
     let future_role_seed = "Retired Auror";
 
-    // Define the exact final answers the mock AI will return.
     let final_answer_without_kg =
         "Based on the generic info, Harry Potter is a famous wizard known for defeating Voldemort.";
     let final_answer_with_kg = "According to the Knowledge Graph, Harry Potter's current role is Head of Magical Law Enforcement.";
 
-    // --- 3. Seed Databases ---
-    let db = turso::Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let conn = db.connect()?;
+    // --- 3. Seed Databases with correct ownership ---
     let document_id = "doc_wizarding_world";
     conn.execute(
-        "INSERT INTO documents (id, source_url, title, content) VALUES (?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
-        turso::params![
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
+        params![
             document_id,
+            user.id.clone(),
             "wizarding_world.txt",
             "Wizarding World Facts",
             generic_answer_seed
@@ -276,35 +269,14 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     )
     .await?;
     conn.execute(
-        "INSERT INTO faq_items (document_id, question, answer) VALUES (?, ?, ?)",
-        turso::params![document_id, question, generic_answer_seed],
+        "INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)",
+        params![document_id, user.id.clone(), question, generic_answer_seed],
     )
     .await?;
 
-    // Also seed the metadata and embedding for the generic document so hybrid search can find it.
     conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-        turso::params![document_id, "ENTITY", "PERSON", "Harry Potter"],
-    )
-    .await?;
-
-    let generic_vector: Vec<f32> = vec![0.0, 0.0, 1.0, 0.0];
-    let generic_vector_bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            generic_vector.as_ptr() as *const u8,
-            generic_vector.len() * 4,
-        )
-    };
-    conn.execute(
-        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        turso::params![document_id, "mock-model", generic_vector_bytes],
-    )
-    .await?;
-
-    // Also seed the metadata and embedding for the generic document so hybrid search can find it.
-    conn.execute(
-        "INSERT INTO content_metadata (document_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?)",
-        turso::params![document_id, "ENTITY", "PERSON", "Harry Potter"],
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+        params![document_id, user.id.clone(), "ENTITY", "PERSON", "Harry Potter"],
     )
     .await?;
 
@@ -317,7 +289,7 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     };
     conn.execute(
         "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        turso::params![document_id, "mock-model", generic_vector_bytes],
+        params![document_id, "mock-model", generic_vector_bytes],
     )
     .await?;
 
@@ -371,7 +343,6 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5, 0.0] }] }));
     });
 
-    // Mock for the call WITHOUT KG. It should only see the generic answer.
     let rag_without_kg_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -382,7 +353,6 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
         );
     });
 
-    // Mock for the call WITH KG. It should see both answers in the context.
     let rag_with_kg_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -394,7 +364,6 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     });
 
     // --- 5. Act & Assert ---
-    let user_identifier = "harry-potter-fan@example.com";
     let token = generate_jwt(user_identifier)?;
 
     // A. Call WITHOUT the Knowledge Graph
