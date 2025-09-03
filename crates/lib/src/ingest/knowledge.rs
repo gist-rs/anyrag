@@ -102,6 +102,14 @@ pub struct MetadataResponse {
     metadata: Vec<ContentMetadata>,
 }
 
+/// A struct to hold the prompts for the various LLM calls in the ingestion pipeline.
+pub struct IngestionPrompts<'a> {
+    pub extraction_system_prompt: &'a str,
+    pub extraction_user_prompt_template: &'a str,
+    pub augmentation_system_prompt: &'a str,
+    pub metadata_extraction_system_prompt: &'a str,
+}
+
 // --- Pipeline Orchestration ---
 
 /// Orchestrates the full ingestion pipeline (Stages 1-3) for a given URL.
@@ -110,10 +118,7 @@ pub async fn run_ingestion_pipeline(
     ai_provider: &dyn AiProvider,
     url: &str,
     owner_id: Option<&str>,
-    extraction_system_prompt: &str,
-    extraction_user_prompt_template: &str,
-    augmentation_system_prompt: &str,
-    metadata_extraction_system_prompt: &str,
+    prompts: IngestionPrompts<'_>,
 ) -> Result<usize, KnowledgeError> {
     let (document_id, ingested_document) = match ingest_and_cache_url(db, url, owner_id).await {
         Ok(content) => content,
@@ -129,9 +134,9 @@ pub async fn run_ingestion_pipeline(
         distill_and_augment(
             ai_provider,
             &ingested_document,
-            extraction_system_prompt,
-            extraction_user_prompt_template,
-            augmentation_system_prompt,
+            prompts.extraction_system_prompt,
+            prompts.extraction_user_prompt_template,
+            prompts.augmentation_system_prompt,
         ),
         extract_and_store_metadata(
             db,
@@ -139,7 +144,7 @@ pub async fn run_ingestion_pipeline(
             &document_id,
             owner_id,
             &ingested_document.content,
-            metadata_extraction_system_prompt,
+            prompts.metadata_extraction_system_prompt,
         )
     );
 

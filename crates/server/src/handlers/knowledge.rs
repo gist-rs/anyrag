@@ -8,9 +8,10 @@ use super::{
 };
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
+    ingest::knowledge::IngestionPrompts,
     ingest::{export_for_finetuning, run_ingestion_pipeline},
     providers::ai::generate_embedding,
-    search::hybrid_search,
+    search::{hybrid_search, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
 };
 use axum::{
@@ -185,6 +186,10 @@ pub async fn knowledge_search_handler(
         AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
     })?;
 
+    let prompts = HybridSearchPrompts {
+        analysis_system_prompt: &task_config.system_prompt,
+        analysis_user_prompt_template: &task_config.user_prompt,
+    };
     let search_results = hybrid_search(
         app_state.sqlite_provider.as_ref(),
         analysis_provider.as_ref(),
@@ -192,8 +197,7 @@ pub async fn knowledge_search_handler(
         &payload.query,
         owner_id.as_deref(),
         limit,
-        &task_config.system_prompt,
-        &task_config.user_prompt,
+        prompts,
     )
     .await?;
 
@@ -362,15 +366,19 @@ pub async fn knowledge_ingest_handler(
         ))
     })?;
 
+    let prompts = IngestionPrompts {
+        extraction_system_prompt: &task_config.system_prompt,
+        extraction_user_prompt_template: &task_config.user_prompt,
+        augmentation_system_prompt: &aug_task_config.system_prompt,
+        metadata_extraction_system_prompt: &meta_task_config.system_prompt,
+    };
+
     let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
         ai_provider.as_ref(),
         &payload.url,
         owner_id.as_deref(),
-        &task_config.system_prompt,      // extraction_system_prompt
-        &task_config.user_prompt,        // extraction_user_prompt_template
-        &aug_task_config.system_prompt,  // augmentation_system_prompt
-        &meta_task_config.system_prompt, // metadata_extraction_system_prompt
+        prompts,
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;

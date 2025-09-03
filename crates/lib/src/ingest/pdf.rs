@@ -34,6 +34,14 @@ pub enum PdfSyncExtractor {
     Gemini,
 }
 
+/// Defines the prompts for the PDF ingestion pipeline.
+#[derive(Debug)]
+pub struct PdfIngestionPrompts<'a> {
+    pub distillation_system_prompt: &'a str,
+    pub distillation_user_prompt_template: &'a str,
+    pub augmentation_system_prompt: &'a str,
+}
+
 // --- Pipeline Orchestration ---
 
 /// Orchestrates the full ingestion pipeline for a PDF file's content.
@@ -55,9 +63,7 @@ pub async fn run_pdf_ingestion_pipeline(
     source_identifier: &str,
     owner_id: Option<&str>,
     extractor: PdfSyncExtractor,
-    distillation_system_prompt: &str,
-    distillation_user_prompt_template: &str,
-    augmentation_system_prompt: &str,
+    prompts: PdfIngestionPrompts<'_>,
 ) -> Result<usize, KnowledgeError> {
     info!(
         "Starting PDF ingestion pipeline for '{}' using the '{:?}' extractor.",
@@ -118,9 +124,9 @@ pub async fn run_pdf_ingestion_pipeline(
     let faq_items = distill_and_augment(
         ai_provider,
         &ingested_document,
-        distillation_system_prompt,
-        distillation_user_prompt_template,
-        augmentation_system_prompt,
+        prompts.distillation_system_prompt,
+        prompts.distillation_user_prompt_template,
+        prompts.augmentation_system_prompt,
     )
     .await?;
 

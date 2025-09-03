@@ -29,6 +29,13 @@ pub enum SearchMode {
     /// Uses the fast Reciprocal Rank Fusion algorithm.
     Rrf,
 }
+
+/// A struct to hold the prompts for the hybrid search query analysis step.
+pub struct HybridSearchPrompts<'a> {
+    pub analysis_system_prompt: &'a str,
+    pub analysis_user_prompt_template: &'a str,
+}
+
 // --- Query Analysis ---
 
 #[derive(Deserialize, Debug)]
@@ -91,8 +98,7 @@ pub async fn hybrid_search<P>(
     query_text: &str,
     owner_id: Option<&str>, // For security
     limit: u32,
-    analysis_system_prompt: &str,
-    analysis_user_prompt_template: &str,
+    prompts: HybridSearchPrompts<'_>,
 ) -> Result<Vec<SearchResult>, SearchError>
 where
     P: MetadataSearch + VectorSearch + ?Sized,
@@ -103,8 +109,8 @@ where
     let analyzed_query = analyze_query(
         ai_provider,
         query_text,
-        analysis_system_prompt,
-        analysis_user_prompt_template,
+        prompts.analysis_system_prompt,
+        prompts.analysis_user_prompt_template,
     )
     .await?;
     info!("Analyzed query: {:?}", analyzed_query);

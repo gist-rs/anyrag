@@ -8,7 +8,7 @@ mod common;
 use anyhow::Result;
 use anyrag::{
     providers::db::sqlite::SqliteProvider,
-    search::hybrid_search,
+    search::{hybrid_search, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
 };
 use common::{setup_tracing, MockAiProvider};
@@ -134,8 +134,10 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
         user_query,
         None, // owner_id
         limit,
-        "You are an expert query analyst.",
-        "USER QUERY:\n{prompt}",
+        HybridSearchPrompts {
+            analysis_system_prompt: "You are an expert query analyst.",
+            analysis_user_prompt_template: "USER QUERY:\n{prompt}",
+        },
     )
     .await?;
 

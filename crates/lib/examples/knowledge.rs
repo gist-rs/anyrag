@@ -24,7 +24,7 @@
 
 use anyhow::Result;
 use anyrag::{
-    ingest::{run_ingestion_pipeline, KnowledgeError},
+    ingest::{knowledge::IngestionPrompts, run_ingestion_pipeline, KnowledgeError},
     prompts::knowledge::{
         AUGMENTATION_SYSTEM_PROMPT, KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
         KNOWLEDGE_EXTRACTION_USER_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
@@ -33,7 +33,7 @@ use anyrag::{
         ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
         db::sqlite::SqliteProvider,
     },
-    search::hybrid_search,
+    search::{hybrid_search, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions},
     PromptClientBuilder,
 };
@@ -105,15 +105,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let user = get_or_create_user(&sqlite_provider.db, "default-user@example.com").await?;
     info!("Content will be ingested for owner_id: {}", user.id);
 
+    let prompts = IngestionPrompts {
+        extraction_system_prompt: KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
+        extraction_user_prompt_template: KNOWLEDGE_EXTRACTION_USER_PROMPT,
+        augmentation_system_prompt: AUGMENTATION_SYSTEM_PROMPT,
+        metadata_extraction_system_prompt: METADATA_EXTRACTION_SYSTEM_PROMPT,
+    };
     match run_ingestion_pipeline(
         &sqlite_provider.db,
         ai_provider.as_ref(),
         ingest_url,
         Some(&user.id),
-        KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
-        KNOWLEDGE_EXTRACTION_USER_PROMPT,
-        AUGMENTATION_SYSTEM_PROMPT,
-        METADATA_EXTRACTION_SYSTEM_PROMPT,
+        prompts,
     )
     .await
     {
@@ -188,8 +191,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         question,
         Some(&user.id), // owner_id
         5,              // limit
-        analysis_system_prompt,
-        "USER QUERY:\n{prompt}",
+        HybridSearchPrompts {
+            analysis_system_prompt,
+            analysis_user_prompt_template: "USER QUERY:\n{prompt}",
+        },
     )
     .await?;
 

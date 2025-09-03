@@ -40,6 +40,7 @@ impl From<config::ConfigError> for ConfigError {
 
 /// The root configuration structure, mapping directly to `config.yml`.
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct AppConfig {
     /// The port for the server to listen on. Loaded from `PORT` env var.
     #[serde(default = "default_port")]
@@ -67,6 +68,7 @@ fn default_db_url() -> String {
 
 /// Configuration for the embedding model provider.
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct EmbeddingConfig {
     pub api_url: String,
     pub model_name: String,
@@ -74,6 +76,7 @@ pub struct EmbeddingConfig {
 
 /// A reusable configuration for a specific AI provider instance.
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct ProviderConfig {
     /// The type of provider (e.g., "gemini", "local").
     pub provider: String,
@@ -85,6 +88,7 @@ pub struct ProviderConfig {
 
 /// Defines the prompts and provider for a specific application task.
 #[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
 pub struct TaskConfig {
     /// The key of the provider to use from the `providers` map.
     pub provider: String,

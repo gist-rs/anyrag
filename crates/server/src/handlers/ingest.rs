@@ -261,6 +261,12 @@ pub async fn ingest_file_handler(
         ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
     };
 
+    let prompts = anyrag::ingest::pdf::PdfIngestionPrompts {
+        distillation_system_prompt: &task_config.system_prompt,
+        distillation_user_prompt_template: &task_config.user_prompt,
+        augmentation_system_prompt: &augmentation_task_config.system_prompt,
+    };
+
     let ingested_count = run_pdf_ingestion_pipeline(
         &app_state.sqlite_provider.db,
         ai_provider.as_ref(), // Pass the dynamically selected provider
@@ -268,9 +274,7 @@ pub async fn ingest_file_handler(
         &source_identifier,
         owner_id.as_deref(),
         extractor_strategy,
-        &task_config.system_prompt,
-        &task_config.user_prompt,
-        &augmentation_task_config.system_prompt,
+        prompts,
     )
     .await?;
 
@@ -360,6 +364,12 @@ pub async fn ingest_pdf_url_handler(
         ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
     };
 
+    let prompts = anyrag::ingest::pdf::PdfIngestionPrompts {
+        distillation_system_prompt: &task_config.system_prompt,
+        distillation_user_prompt_template: &task_config.user_prompt,
+        augmentation_system_prompt: &augmentation_task_config.system_prompt,
+    };
+
     let ingested_count = run_pdf_ingestion_pipeline(
         &app_state.sqlite_provider.db,
         ai_provider.as_ref(), // Pass the dynamically selected provider
@@ -367,9 +377,7 @@ pub async fn ingest_pdf_url_handler(
         &source_identifier,
         owner_id.as_deref(),
         extractor_strategy,
-        &task_config.system_prompt,
-        &task_config.user_prompt,
-        &augmentation_task_config.system_prompt,
+        prompts,
     )
     .await?;
 
