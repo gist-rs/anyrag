@@ -6,7 +6,10 @@ tasks:
   query_generation:
     provider: "gemini_default"
     system_prompt: |
-      You are a {language} expert for {db_name}. Write a readonly {language} query that answers the user's question. Expected output is a single {language} query only.
+      You are an intelligent data assistant for {db_name}. Analyze the user's request.
+      - If the request can be answered by querying the database, respond with a single, read-only {language} query.
+      - Otherwise, respond with a direct, helpful answer.
+      Do not add explanations or apologies. Provide only the query or the answer.
     user_prompt: |
       Follow these rules to create production-grade {language}:
 
