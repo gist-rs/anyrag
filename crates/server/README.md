@@ -61,10 +61,10 @@ This layered approach allows you to customize providers and prompts independentl
 
     ```sh
     # For local models, this sets all tasks to use the 'local_default' provider
-    cp config.local.yml config.yml
+    cp crates/server/config.local.yml crates/server/config.yml
 
     # For Google Gemini
-    # cp config.gemini.yml config.yml
+    # cp crates/server/config.gemini.yml crates/server/config.yml
     ```
 2.  **(Optional) Create `prompt.yml`:** If you want to customize any of the default prompts from `config.prompt.yml`, create a `prompt.yml` file and add *only* the `tasks` you wish to override. For example:
     ```yml
@@ -89,17 +89,31 @@ The `.env` file is used for secrets and environment-specific settings that you d
 -   `RUST_LOG`: The logging level (e.g., `info`, `debug`).
 -   `JWT_SECRET`: A secret key for signing and validating JWTs. **It is highly recommended to set this in production.**
 
-## Local Development (Without Docker)
+## Running Locally (Without Docker)
 
-For running the server directly on your machine for development.
+For running the server and CLI directly on your machine for development.
 
-1.  **Create `.env` File:** In the `anyrag/crates/server` directory, copy `.env.example` to `.env`.
-2.  **Set `AI_PROVIDER`:** Edit your new `.env` file and set `AI_PROVIDER` to `local` or `gemini`, and fill in any required secrets like `AI_API_KEY`.
-3.  **Run the Server:** From the **workspace root** (`anyrag/`), run the command:
+### 1. Running the Server
+
+The server is the backend API that the CLI connects to.
+
+1.  **Create Configuration:** Ensure you have created your `crates/server/config.yml` and `crates/server/.env` files as described in the "Configuration" section above.
+2.  **Run the Server:** From the **workspace root** (`anyrag/`), run the command:
     ```sh
-    cargo run
+    cargo run -p anyrag-server
     ```
-The server will automatically find and load the correct configuration based on your `.env` file.
+The server will start and listen on the port specified in your `.env` file (defaults to 9090).
+
+### 2. Running the CLI (TUI)
+
+The CLI is the interactive terminal user interface. The server must be running before you start the CLI.
+
+1.  **Open a New Terminal:** Keep the server running in its own terminal window.
+2.  **Run the CLI:** From the **workspace root** (`anyrag/`), run the command in the new terminal:
+    ```sh
+    cargo run -p cli
+    ```
+The interactive TUI will launch and connect to the running server.
 
 ## Docker Deployment
 

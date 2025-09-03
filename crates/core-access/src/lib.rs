@@ -27,6 +27,8 @@ pub enum CoreAccessError {
 pub struct User {
     /// The unique, deterministic ID of the user (UUIDv5 from an external identifier).
     pub id: String,
+    /// The user's role (e.g., 'user', 'root').
+    pub role: String,
     /// The timestamp when the user was first created.
     pub created_at: DateTime<Utc>,
 }
@@ -35,7 +37,7 @@ impl TryFrom<&Row> for User {
     type Error = CoreAccessError;
 
     fn try_from(row: &Row) -> std::result::Result<Self, Self::Error> {
-        let created_at_str: String = row.get(1)?;
+        let created_at_str: String = row.get(2)?;
         let created_at =
             chrono::NaiveDateTime::parse_from_str(&created_at_str, "%Y-%m-%d %H:%M:%S")
                 .map(|ndt| DateTime::<Utc>::from_naive_utc_and_offset(ndt, Utc))
@@ -47,6 +49,7 @@ impl TryFrom<&Row> for User {
 
         Ok(User {
             id: row.get(0)?,
+            role: row.get(1)?,
             created_at,
         })
     }
@@ -67,7 +70,7 @@ pub async fn get_or_create_user(
     // 1. Try to SELECT the user first for maximum compatibility.
     let mut rows = conn
         .query(
-            "SELECT id, created_at FROM users WHERE id = ?",
+            "SELECT id, role, created_at FROM users WHERE id = ?",
             params![user_id.clone()],
         )
         .await?;
@@ -77,17 +80,32 @@ pub async fn get_or_create_user(
         return User::try_from(&row);
     }
 
-    // 2. User does not exist, so INSERT them.
+    // 2. User does not exist. Determine role.
+    // A guest user can never be root. The first non-guest user becomes root.
+    let role = if user_identifier == GUEST_USER_IDENTIFIER {
+        "user"
+    } else {
+        let root_exists = conn
+            .query("SELECT 1 FROM users WHERE role = 'root' LIMIT 1", ())
+            .await?
+            .next()
+            .await?
+            .is_some();
+
+        if !root_exists { "root" } else { "user" }
+    };
+
+    // Insert the new user with the determined role.
     conn.execute(
-        "INSERT INTO users (id) VALUES (?)",
-        params![user_id.clone()],
+        "INSERT INTO users (id, role) VALUES (?, ?)",
+        params![user_id.clone(), role],
     )
     .await?;
 
     // 3. SELECT the newly created user to get all fields (like created_at).
     let mut rows = conn
         .query(
-            "SELECT id, created_at FROM users WHERE id = ?",
+            "SELECT id, role, created_at FROM users WHERE id = ?",
             params![user_id],
         )
         .await?;
@@ -120,12 +138,68 @@ mod tests {
         let expected_id =
             Uuid::new_v5(&Uuid::NAMESPACE_URL, user_identifier.as_bytes()).to_string();
         assert_eq!(user1.id, expected_id);
+        assert_eq!(user1.role, "root", "The first user should be root");
 
         // 4. Act: Second call should retrieve the same user
         let user2 = get_or_create_user(&db, user_identifier).await.unwrap();
 
         // 5. Assert: Check that the retrieved user is identical
         assert_eq!(user1.id, user2.id);
+        assert_eq!(user1.role, user2.role);
         assert_eq!(user1.created_at.timestamp(), user2.created_at.timestamp());
+
+        // 6. Act: Create a second user
+        let second_user_identifier = "another@example.com";
+        let user3 = get_or_create_user(&db, second_user_identifier)
+            .await
+            .unwrap();
+
+        // 7. Assert: The second user should have the 'user' role
+        assert_ne!(user1.id, user3.id);
+        assert_eq!(
+            user3.role, "user",
+            "The second user should have the 'user' role"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_guest_user_is_never_root() {
+        // 1. Arrange
+        let provider = SqliteProvider::new(":memory:").await.unwrap();
+        provider.initialize_schema().await.unwrap();
+        let db = provider.db;
+
+        // 2. Act: Create guest user first.
+        let guest_user = get_or_create_user(&db, GUEST_USER_IDENTIFIER)
+            .await
+            .unwrap();
+
+        // 3. Assert: The guest user should NOT be root, even if they are the first user.
+        assert_eq!(
+            guest_user.role, "user",
+            "The guest user should never be root"
+        );
+
+        // 4. Act: Create a normal user.
+        let normal_user = get_or_create_user(&db, "first.real.user@example.com")
+            .await
+            .unwrap();
+
+        // 5. Assert: This user should now be root because they are the first non-guest user.
+        assert_eq!(
+            normal_user.role, "root",
+            "The first non-guest user should be root"
+        );
+
+        // 6. Act: Create a second normal user.
+        let second_normal_user = get_or_create_user(&db, "second.real.user@example.com")
+            .await
+            .unwrap();
+
+        // 7. Assert: The second user should have the 'user' role.
+        assert_eq!(
+            second_normal_user.role, "user",
+            "The second non-guest user should have the 'user' role"
+        );
     }
 }

@@ -16,13 +16,8 @@ core-access = { path = "../core-access" }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }
-axum-extra = { version = "0.10.1", features = [
-    "multipart",
-    "typed-header",
-    "cookie",
-] }
+axum-extra = { version = "0.10.1", features = ["multipart", "typed-header"] }
 jsonwebtoken = "9.3.1"
-openidconnect = { version = "3.8.0", features = ["reqwest", "serde_json"] }
 async-trait = { workspace = true }
 
 # Async runtime
@@ -49,6 +44,7 @@ regex = { workspace = true }
 # Config
 config = { version = "0.15.15", features = ["yaml"] }
 serde_yaml = "0.9.34"
+uuid = "1.18.1"
 
 [features]
 default = ["bigquery", "graph_db"]
