@@ -28,6 +28,7 @@ use anyrag::{
     prompts::knowledge::{
         AUGMENTATION_SYSTEM_PROMPT, KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
         KNOWLEDGE_EXTRACTION_USER_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
+        QUERY_ANALYSIS_SYSTEM_PROMPT, QUERY_ANALYSIS_USER_PROMPT,
     },
     providers::{
         ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
@@ -181,9 +182,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let query_vector = generate_embedding(&embeddings_api_url, &embeddings_model, question).await?;
 
-    // Define a strong prompt for the query analysis step.
-    let analysis_system_prompt = r#"You are an expert query analyst. Your task is to extract key **Entities** and **Keyphrases** from the user's query. Respond with a JSON object containing two keys: "entities" and "keyphrases", which should be arrays of strings. If none are found, provide empty arrays."#;
-
     let search_results = hybrid_search(
         &sqlite_provider,
         ai_provider.as_ref(),
@@ -192,8 +190,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(&user.id), // owner_id
         5,              // limit
         HybridSearchPrompts {
-            analysis_system_prompt,
-            analysis_user_prompt_template: "USER QUERY:\n{prompt}",
+            analysis_system_prompt: QUERY_ANALYSIS_SYSTEM_PROMPT,
+            analysis_user_prompt_template: QUERY_ANALYSIS_USER_PROMPT,
         },
     )
     .await?;

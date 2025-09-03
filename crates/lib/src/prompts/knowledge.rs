@@ -117,3 +117,13 @@ pub const KNOWLEDGE_RAG_USER_PROMPT: &str = r#"# User Question
 {context}
 # Your Answer:
 "#;
+
+// --- Hybrid Search Prompts ---
+
+/// The system prompt for the query analysis step in a hybrid search.
+/// It instructs the model to extract entities and keyphrases from a user's query.
+pub const QUERY_ANALYSIS_SYSTEM_PROMPT: &str = r#"You are an expert query analyst. Your task is to extract key **Entities** and **Keyphrases** from the user's query. Respond with a JSON object containing two keys: "entities" and "keyphrases", which should be arrays of strings. If none are found, provide empty arrays."#;
+
+/// The user prompt for the query analysis step.
+/// Placeholder: {prompt}
+pub const QUERY_ANALYSIS_USER_PROMPT: &str = "USER QUERY:\n{prompt}";

@@ -9,6 +9,7 @@
 
 use crate::{
     ingest::knowledge::{distill_and_augment, store_structured_knowledge, KnowledgeError},
+    prompts::pdf::PDF_REFINEMENT_SYSTEM_PROMPT,
     providers::ai::AiProvider,
 };
 use md5;
@@ -17,11 +18,6 @@ use serde::de::Error as _; // For the `custom` method on serde_json::Error
 use tracing::{info, instrument, warn};
 use turso::{params, Database};
 use uuid::Uuid;
-
-// --- Prompts ---
-
-/// The system prompt used to instruct the LLM to refine extracted text into structured Markdown.
-pub const PDF_REFINEMENT_SYSTEM_PROMPT: &str = r#"You are an expert technical analyst. Your task is to process the content of the provided document text and reformat it into a clean, well-structured Markdown document. Extract all key information, including topics, sub-topics, questions, and important data points. Use headings (#, ##), lists (*), and bold text (**text**) to organize the content logically. Do not summarize or omit details; the goal is to create a comprehensive and machine-readable version of the original content that preserves all facts."#;
 
 // --- Data Structures ---
 
