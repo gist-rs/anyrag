@@ -1,2 +1,3 @@
 # Local configuration file. Should not be committed.
 /config.yml
+/prompt.yml

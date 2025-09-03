@@ -11,6 +11,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
+use tracing::info;
 
 /// A custom error type for configuration issues.
 #[derive(Debug)]
@@ -25,7 +26,7 @@ impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConfigError::General(msg) => write!(f, "Configuration error: {msg}"),
-            ConfigError::NotFound(path) => write!(f, "Configuration file not found: {path}. Please copy either `config.local.yml` or `config.gemini.yml` to `config.yml` to get started."),
+            ConfigError::NotFound(msg) => write!(f, "{msg}"),
         }
     }
 }
@@ -96,6 +97,25 @@ pub struct TaskConfig {
     pub user_prompt: String,
 }
 
+// Helper to read a file, substitute env vars, and return its content.
+// Returns Ok(None) if the file does not exist, or an error if it fails to read.
+fn read_and_substitute(path: &str) -> Result<Option<String>, ConfigError> {
+    if !std::path::Path::new(path).exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(path)
+        .map_err(|e| ConfigError::General(format!("Failed to read config file '{path}': {e}")))?;
+
+    let re = Regex::new(r"\$\{(?P<var>[A-Z0-9_]+)\}").unwrap();
+    let expanded_content = re.replace_all(&content, |caps: &regex::Captures| {
+        let var_name = &caps["var"];
+        env::var(var_name).unwrap_or_else(|_| "".to_string())
+    });
+
+    Ok(Some(expanded_content.to_string()))
+}
+
 /// Loads the application configuration from a file and environment variables.
 ///
 /// This function reads the configuration from a file. It also merges in environment
@@ -103,26 +123,46 @@ pub struct TaskConfig {
 /// - Top-level keys like `port` and `db_url` are overridden by `PORT` and `DB_URL`.
 /// - Nested keys are overridden by `ANYRAG_...` variables (e.g., `ANYRAG_EMBEDDING__API_URL`).
 pub fn get_config(config_path_override: Option<&str>) -> Result<AppConfig, ConfigError> {
-    let config_path = config_path_override.unwrap_or("config.yml");
-    if !std::path::Path::new(config_path).exists() {
-        return Err(ConfigError::NotFound(config_path.to_string()));
+    let base_path = env!("CARGO_MANIFEST_DIR");
+    let mut builder = ConfigBuilder::builder();
+
+    // Layer 1: Base Prompts (Required)
+    let prompt_path = format!("{base_path}/config.prompt.yml");
+    let prompts_content = read_and_substitute(&prompt_path)?
+        .ok_or_else(|| ConfigError::NotFound(format!("Base prompt file not found at '{prompt_path}'. This file is a required part of the application.")))?;
+    builder = builder.add_source(File::from_str(&prompts_content, FileFormat::Yaml));
+
+    // Layer 2: Main Config (with Fallback)
+    let main_config_path = if let Some(override_path) = config_path_override {
+        override_path.to_string()
+    } else {
+        let user_config_path = format!("{base_path}/config.yml");
+        if std::path::Path::new(&user_config_path).exists() {
+            info!("Loading user-defined configuration from '{user_config_path}'.");
+            user_config_path
+        } else {
+            let provider = env::var("AI_PROVIDER").unwrap_or_else(|_| "local".to_string());
+            let fallback_path = format!("{base_path}/config.{provider}.yml");
+            info!("'{user_config_path}' not found. Falling back to '{fallback_path}' based on AI_PROVIDER='{provider}'.");
+            fallback_path
+        }
+    };
+
+    let main_content = read_and_substitute(&main_config_path)?
+        .ok_or_else(|| ConfigError::NotFound(format!("Main config file not found at '{main_config_path}'. Please ensure 'config.yml' exists or your AI_PROVIDER is set to load a valid template ('local' or 'gemini').")))?;
+    builder = builder.add_source(File::from_str(&main_content, FileFormat::Yaml));
+
+    // Layer 3: User Prompt Overrides (Optional)
+    let user_prompt_path = format!("{base_path}/prompt.yml");
+    if let Some(user_prompts_content) = read_and_substitute(&user_prompt_path)? {
+        info!("Loading user prompt overrides from '{user_prompt_path}'.");
+        builder = builder.add_source(File::from_str(&user_prompts_content, FileFormat::Yaml));
     }
 
-    // Manually read the file and substitute env vars
-    let content = fs::read_to_string(config_path)
-        .map_err(|e| ConfigError::General(format!("Failed to read config file: {e}")))?;
-    let re = Regex::new(r"\$\{(?P<var>[A-Z0-9_]+)\}").unwrap();
-    let expanded_content = re.replace_all(&content, |caps: &regex::Captures| {
-        let var_name = &caps["var"];
-        env::var(var_name).unwrap_or_else(|_| "".to_string())
-    });
-
-    let settings = ConfigBuilder::builder()
-        // 1. Load the YAML file after substituting env vars.
-        .add_source(File::from_str(expanded_content.as_ref(), FileFormat::Yaml))
-        // 2. Load unprefixed environment variables to override top-level keys like PORT.
+    let settings = builder
+        // Layer 4: Load environment variables for top-level keys like PORT.
         .add_source(Environment::default())
-        // 3. Load prefixed environment variables for nested keys (less critical now, but good for direct overrides).
+        // Layer 5: Load prefixed environment variables for deeper overrides.
         .add_source(
             Environment::with_prefix("ANYRAG")
                 .prefix_separator("_")
@@ -131,6 +171,6 @@ pub fn get_config(config_path_override: Option<&str>) -> Result<AppConfig, Confi
         )
         .build()?;
 
-    // 4. Deserialize the fully resolved configuration into our `AppConfig` struct.
+    // Deserialize the fully resolved configuration into our `AppConfig` struct.
     settings.try_deserialize::<AppConfig>().map_err(Into::into)
 }

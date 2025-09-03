@@ -44,27 +44,40 @@ You can grant these roles using the `gcloud` CLI.
 
 ## Configuration
 
-The server now uses a powerful `config.yml` file for managing AI providers, embedding models, and task-specific prompts. This allows for much greater flexibility, such as using different models for different tasks (e.g., a fast local model for simple analysis and a powerful cloud model for complex synthesis).
+The server uses a powerful, layered configuration system to maximize flexibility and adhere to the DRY (Don't Repeat Yourself) principle.
 
-### 1. Create your `config.yml`
+-   **`config.prompt.yml`**: Contains all the default task prompts. This file is part of the repository and provides a stable base.
+-   **`config.yml`**: **(Required, user-created)** Defines which AI providers and embedding models to use. You create this file from a template (`config.gemini.yml` or `config.local.yml`).
+-   **`prompt.yml`**: **(Optional, user-created)** Allows you to override specific prompts from the default set without modifying the base `config.prompt.yml` file. This file is ignored by Git.
+-   **`.env`**: **(Required, user-created)** Stores secrets (like API keys) and environment-specific variables (like `PORT`).
 
-Two templates are provided:
--   `config.gemini.yml`: Pre-configured for use with the Google Gemini API.
--   `config.local.yml`: Pre-configured for use with a local AI provider (like Ollama or LM Studio).
+This layered approach allows you to customize providers and prompts independently while keeping the default configuration clean.
 
-Copy the template that best matches your setup to a new file named `config.yml` in the `anyrag/crates/server` directory. This file is ignored by Git.
+### 1. Create your configuration files
 
-```sh
-# For local models
-cp config.local.yml config.yml
+1.  **Create `config.yml`:** Copy the template that best matches your setup to a new file named `config.yml` in the `anyrag/crates/server` directory. This file is for defining your AI providers and is ignored by Git.
+    -   `config.gemini.yml`: For the Google Gemini API.
+    -   `config.local.yml`: For a local AI provider (like Ollama or LM Studio).
 
-# For Google Gemini
-cp config.gemini.yml config.yml
-```
+    ```sh
+    # For local models, this sets all tasks to use the 'local_default' provider
+    cp config.local.yml config.yml
+
+    # For Google Gemini
+    # cp config.gemini.yml config.yml
+    ```
+2.  **(Optional) Create `prompt.yml`:** If you want to customize any of the default prompts from `config.prompt.yml`, create a `prompt.yml` file and add *only* the `tasks` you wish to override. For example:
+    ```yml
+    # prompt.yml
+    tasks:
+      rag_synthesis:
+        provider: "local_fast" # You can even change the provider for a specific task
+        system_prompt: "You are a pirate AI. Answer the user's question based on the scrolls."
+    ```
 
 ### 2. Configure your `.env` file
 
-The `.env` file is now simplified and used only for secrets and environment-specific settings that you don't want to commit to version control. These variables are loaded and substituted into the `${VAR_NAME}` placeholders in your `config.yml`.
+The `.env` file is used for secrets and environment-specific settings that you don't want to commit to version control. These variables are loaded and substituted into the `${VAR_NAME}` placeholders in your configuration files (`config.yml`, `prompt.yml`, etc.).
 
 **Core Environment Variables:**
 
@@ -80,13 +93,13 @@ The `.env` file is now simplified and used only for secrets and environment-spec
 
 For running the server directly on your machine for development.
 
-1.  **Authenticate with GCP (Optional):** If you plan to use the BigQuery example, run `gcloud auth application-default login`.
-2.  **Create `config.yml`:** Copy either `config.local.yml` or `config.gemini.yml` to `config.yml` and customize it for your needs.
-3.  **Create `.env` File:** In the `anyrag/crates/server` directory, copy `.env.example` to `.env` and fill in your secrets (like `AI_API_KEY`).
-4.  **Run the Server:**
+1.  **Create `.env` File:** In the `anyrag/crates/server` directory, copy `.env.example` to `.env`.
+2.  **Set `AI_PROVIDER`:** Edit your new `.env` file and set `AI_PROVIDER` to `local` or `gemini`, and fill in any required secrets like `AI_API_KEY`.
+3.  **Run the Server:** From the **workspace root** (`anyrag/`), run the command:
     ```sh
     cargo run
     ```
+The server will automatically find and load the correct configuration based on your `.env` file.
 
 ## Docker Deployment
 
@@ -102,8 +115,9 @@ docker build -t anyrag-server -f crates/server/Dockerfile .
 
 ### Step 2: Create Configuration Files
 
-1.  **Create `config.yml`:** In the `anyrag/crates/server/` directory, copy your chosen template (`config.local.yml` or `config.gemini.yml`) to `config.yml`.
-2.  **Create `.env` File:** In the same directory, copy `.env.example` to `.env` and add your secrets.
+1.  **Create `config.yml`:** In the `anyrag/crates/server/` directory, copy your chosen template to `config.yml`.
+2.  **Create `prompt.yml` (Optional):** If you have prompt overrides, ensure this file is present.
+3.  **Create `.env` File:** In the same directory, copy `.env.example` to `.env` and add your secrets.
 
 ### Step 3: Place the Service Account Key (Optional)
 
@@ -111,14 +125,17 @@ If you plan to use the BigQuery example, place your downloaded Google Cloud serv
 
 ### Step 4: Run the Docker Container
 
-Execute this command from the **workspace root** (`anyrag/`). It mounts your configuration files into the container.
+Execute this command from the **workspace root** (`anyrag/`). It mounts your local configuration files into the container. Note that `config.prompt.yml` is already included in the Docker image.
 
 ```sh
+# This command mounts both your main config and your optional prompt overrides.
+# If you don't have a prompt.yml, you can remove that '-v' line.
 docker rm -f anyrag-server || true && \
 docker run --rm -d \
   -p 9090:9090 \
   --env-file ./crates/server/.env \
   -v "$(pwd)/crates/server/config.yml:/app/config.yml:ro" \
+  -v "$(pwd)/crates/server/prompt.yml:/app/prompt.yml:ro" \
   -v "$(pwd)/gcp_creds.json:/app/gcp_creds.json:ro" \
   --name anyrag-server \
   anyrag-server && \
