@@ -21,17 +21,20 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, prelude::*};
+use std::fs::File;
 use std::io::{self, Stdout};
 use std::time::Duration;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{fmt, EnvFilter};
 
 // --- Main Application Entry ---
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Setup logging
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(tracing::Level::INFO)
+    // Setup logging to a file to prevent interfering with the TUI.
+    let log_file = File::create("anyrag-cli.log")?;
+    let subscriber = fmt::Subscriber::builder()
+        .with_writer(log_file) // Direct logs to the file
+        .with_env_filter(EnvFilter::from_default_env()) // Allow RUST_LOG override, e.g. RUST_LOG=info
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
