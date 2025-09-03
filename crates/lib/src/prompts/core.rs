@@ -104,3 +104,4 @@ pub fn get_select_instruction(instruction: Option<&str>) -> String {
         _ => "Unless the user asks for 'everything' or 'all details', select only the most relevant columns to answer the question, not `SELECT *`.".to_string(),
     }
 }
+//

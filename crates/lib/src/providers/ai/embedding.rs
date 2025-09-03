@@ -6,7 +6,7 @@
 use crate::errors::PromptError;
 use reqwest::Client as ReqwestClient;
 use serde::{Deserialize, Serialize};
-use tracing::debug;
+use tracing::{debug, info};
 
 // --- OpenAI-compatible request and response structures for embeddings ---
 
@@ -42,6 +42,7 @@ pub async fn generate_embedding(
     model: &str,
     input: &str,
 ) -> Result<Vec<f32>, PromptError> {
+    info!("Generating embedding using model '{model}' with API URL: {api_url}");
     let client = ReqwestClient::new();
     let request_body = EmbeddingRequest { model, input };
 

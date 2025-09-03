@@ -140,7 +140,7 @@ providers:
     provider: "gemini"
     api_url: "${ANYRAG_PROVIDERS__GEMINI__API_URL}"
     api_key: "${ANYRAG_PROVIDERS__GEMINI__API_KEY}"
-    model_name: "gemini-pro"
+    model_name: "gemini-2.5-flash-lite"
 tasks:
   default: { provider: "gemini", system_prompt: "sys", user_prompt: "user" }
 "#;

@@ -20,11 +20,15 @@
 //! # Usage
 //!
 //! From the workspace root (`anyrag/`):
-//! `RUST_LOG=info cargo run -p anyrag --example knowledge --features="core-access"`
+//! `RUST_LOG=debug cargo run -p anyrag --example knowledge --features="core-access"`
 
 use anyhow::Result;
 use anyrag::{
     ingest::{run_ingestion_pipeline, KnowledgeError},
+    prompts::knowledge::{
+        AUGMENTATION_SYSTEM_PROMPT, KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
+        KNOWLEDGE_EXTRACTION_USER_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
+    },
     providers::{
         ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
         db::sqlite::SqliteProvider,
@@ -101,20 +105,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let user = get_or_create_user(&sqlite_provider.db, "default-user@example.com").await?;
     info!("Content will be ingested for owner_id: {}", user.id);
 
-    // Define strong prompts that demand JSON output for the ingestion pipeline.
-    let extraction_system_prompt = r#"You are an expert data extraction agent. Your task is to extract explicit FAQs and general content chunks from the provided Markdown. Respond with a JSON object containing two keys: "faqs" (an array of objects with "question", "answer", "is_explicit" keys) and "content_chunks" (an array of objects with "topic" and "content" keys)."#;
-    let augmentation_system_prompt = r#"You are an expert content analyst. Given a batch of content chunks, generate a new, relevant question for each chunk. Respond with a JSON object containing a single key "augmented_faqs", which is an array of objects with "id" (the original chunk ID) and "question" keys."#;
-    let metadata_extraction_system_prompt = r#"You are an expert document analyst. Your task is to extract key metadata from the document. Respond with a JSON array of objects, where each object has "type" (e.g., "ENTITY", "KEYPHRASE"), "subtype" (e.g., "PERSON"), and "value" keys."#;
-
     match run_ingestion_pipeline(
         &sqlite_provider.db,
         ai_provider.as_ref(),
         ingest_url,
         Some(&user.id),
-        extraction_system_prompt,
-        "Markdown Content to Process:\n{markdown_content}",
-        augmentation_system_prompt,
-        metadata_extraction_system_prompt,
+        KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
+        KNOWLEDGE_EXTRACTION_USER_PROMPT,
+        AUGMENTATION_SYSTEM_PROMPT,
+        METADATA_EXTRACTION_SYSTEM_PROMPT,
     )
     .await
     {
@@ -187,8 +186,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ai_provider.as_ref(),
         query_vector,
         question,
-        None, // owner_id
-        5,    // limit
+        Some(&user.id), // owner_id
+        5,              // limit
         analysis_system_prompt,
         "USER QUERY:\n{prompt}",
     )
