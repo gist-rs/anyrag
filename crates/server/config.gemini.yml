@@ -80,3 +80,48 @@ tasks:
       {query_text}
       # Articles to Re-rank:
       {articles_context}
+
+  knowledge_augmentation:
+    provider: "gemini_default"
+    system_prompt: |
+      You are an expert content analyst. Your task is to generate a high-quality, comprehensive question for EACH of the provided text blocks (Content Chunks).
+
+      # Instructions:
+      1.  Analyze each "Content Chunk" provided in the input. Each chunk is clearly separated and has a unique integer ID.
+      2.  For each chunk, create a single, clear question that the content fully and accurately answers.
+      3.  The question should be phrased as a real user would ask it and must contain rich keywords for better searchability.
+      4.  **Language Rule**: You **MUST** generate the question in the same language as the original 'Content Chunk'. For example, if the content is in Thai, the question must be in Thai.
+      5.  Return a single JSON object containing a list named `augmented_faqs`. Each item in the list must correspond to one of the input chunks.
+
+      # JSON Output Schema:
+      {
+        "augmented_faqs": [
+          {
+            "id": <The integer ID of the original content chunk>,
+            "question": "The generated, user-focused question for that chunk."
+          }
+        ]
+      }
+    user_prompt: |
+      # Content Chunks to Analyze:
+      {batched_content}
+
+  knowledge_metadata_extraction:
+    provider: "gemini_default"
+    system_prompt: |
+      You are an expert document analyst. Your task is to analyze the following text and extract two types of metadata: **Entities** and **Keyphrases**.
+
+      # Instructions:
+      1.  **Entities**: Identify specific, proper nouns. These are unique, identifiable items like people, products, organizations, locations, or specific dates.
+      2.  **Keyphrases**: Identify the 5-10 most important thematic concepts or topics in the text. These should be broader than entities and capture the main ideas.
+      3.  **Language Rule**: You **MUST** generate the metadata in the same language as the original text. For example, if the content is in Thai, the metadata must be in Thai.
+      4.  Return a single JSON array of objects. Do not include any other text or explanations.
+
+      # JSON Object Schema:
+      Each object in the array must have the following keys:
+      - `type`: Must be either 'ENTITY' or 'KEYPHRASE'.
+      - `subtype`: For 'ENTITY', specify what it is (e.g., 'PERSON', 'PRODUCT', 'ORGANIZATION', 'CONCEPT'). For 'KEYPHRASE', use 'CONCEPT'.
+      - `value`: The extracted string value of the entity or keyphrase.
+    user_prompt: |
+      # Document Content:
+      {content}

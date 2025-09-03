@@ -246,6 +246,16 @@ pub async fn ingest_file_handler(
         ))
     })?;
 
+    let augmentation_task_config = app_state
+        .config
+        .tasks
+        .get("knowledge_augmentation")
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Task 'knowledge_augmentation' not found in config"
+            ))
+        })?;
+
     let extractor_strategy = match extractor_choice {
         ExtractorChoice::Local => PdfSyncExtractor::Local,
         ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
@@ -260,7 +270,7 @@ pub async fn ingest_file_handler(
         extractor_strategy,
         &task_config.system_prompt,
         &task_config.user_prompt,
-        &task_config.system_prompt, // Re-use for augmentation for now
+        &augmentation_task_config.system_prompt,
     )
     .await?;
 
@@ -335,6 +345,16 @@ pub async fn ingest_pdf_url_handler(
         ))
     })?;
 
+    let augmentation_task_config = app_state
+        .config
+        .tasks
+        .get("knowledge_augmentation")
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Task 'knowledge_augmentation' not found in config"
+            ))
+        })?;
+
     let extractor_strategy = match payload.extractor {
         ExtractorChoice::Local => PdfSyncExtractor::Local,
         ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
@@ -349,7 +369,7 @@ pub async fn ingest_pdf_url_handler(
         extractor_strategy,
         &task_config.system_prompt,
         &task_config.user_prompt,
-        &task_config.system_prompt, // Re-use for augmentation for now
+        &augmentation_task_config.system_prompt,
     )
     .await?;
 

@@ -76,34 +76,6 @@ pub const AUGMENTATION_SYSTEM_PROMPT: &str = r#"You are an expert content analys
   ]
 }
 
-# Example:
-## INPUT:
----
-ID: 0
-TOPIC: Campaign Conditions
-CONTENT:
-The campaign runs from July 1, 2025 to December 31, 2025. All users with the latest app version are eligible.
----
-ID: 1
-TOPIC: วิธีการลงทะเบียน
-CONTENT:
-หากต้องการลงทะเบียน ให้ไปที่หน้าแคมเปญในแอปแล้วกดปุ่ม "ลงทะเบียน"
----
-
-## EXPECTED JSON OUTPUT:
-{
-  "augmented_faqs": [
-    {
-      "id": 0,
-      "question": "What are the conditions and duration of the 2025 campaign?"
-    },
-    {
-      "id": 1,
-      "question": "ขั้นตอนการลงทะเบียนแคมเปญผ่านแอปต้องทำอย่างไร?"
-    }
-  ]
-}
-
 Please provide only the JSON object in your response. Do not add any extra text or explanations.
 "#;
 
@@ -124,45 +96,16 @@ Each object in the array must have the following keys:
 - `subtype`: For 'ENTITY', specify what it is (e.g., 'PERSON', 'PRODUCT', 'ORGANIZATION', 'CONCEPT'). For 'KEYPHRASE', use 'CONCEPT'.
 - `value`: The extracted string value of the entity or keyphrase.
 
-# Example:
-## INPUT TEXT:
-The True App Mega Campaign offers a chance to win a Tesla. To be eligible, customers must pay their bills via the True App between July 1 and August 31, 2024. This promotion is managed by True Corporation.
-
-## EXPECTED JSON OUTPUT:
-[
-  {
-    "type": "ENTITY",
-    "subtype": "PRODUCT",
-    "value": "True App"
-  },
-  {
-    "type": "ENTITY",
-    "subtype": "PRODUCT",
-    "value": "Tesla"
-  },
-  {
-    "type": "ENTITY",
-    "subtype": "ORGANIZATION",
-    "value": "True Corporation"
-  },
-  {
-    "type": "KEYPHRASE",
-    "subtype": "CONCEPT",
-    "value": "bill payment campaign"
-  },
-  {
-    "type": "KEYPHRASE",
-    "subtype": "CONCEPT",
-    "value": "Tesla giveaway"
-  }
-]
+Please provide only the JSON object in your response.
 "#;
 
 // --- RAG (Retrieval-Augmented Generation) Prompts ---
 
 /// The system prompt for synthesizing an answer from retrieved knowledge base context.
 /// This instructs the AI to answer only based on the provided context.
-pub const KNOWLEDGE_RAG_SYSTEM_PROMPT: &str = "You are a strict, factual AI. Your sole purpose is to answer the user's question based *only* on the provided #Context. A 'Definitive Answer from Knowledge Graph' takes absolute priority; if present, you MUST use it as your answer and ignore other context. If no definitive answer is provided, synthesize an answer from the rest of the context. You MUST NOT use any external knowledge or make assumptions. If the context is insufficient, state that you cannot answer.";
+pub const KNOWLEDGE_RAG_SYSTEM_PROMPT: &str =
+    "You are a strict, factual AI. Your sole purpose is to answer the user's
+      question based *only* on the provided #Context.";
 
 /// The user prompt for the RAG synthesis step.
 /// This structures the input with the user's query and the retrieved context.
@@ -172,5 +115,5 @@ pub const KNOWLEDGE_RAG_USER_PROMPT: &str = r#"# User Question
 
 # Context
 {context}
-
-# Your Answer:"#;
+# Your Answer:
+"#;

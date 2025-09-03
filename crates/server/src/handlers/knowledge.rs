@@ -347,21 +347,30 @@ pub async fn knowledge_ingest_handler(
         AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
     })?;
 
-    // The `distill_and_augment` function which is called by the pipeline internally
-    // has two sub-passes for augmentation and metadata extraction. We assume for now
-    // that the same provider and base prompts are used, but a future refactor could
-    // make this even more granular by defining sub-tasks in the config.
+    // --- Get prompts for augmentation and metadata sub-tasks ---
+    let aug_task_name = "knowledge_augmentation";
+    let aug_task_config = app_state.config.tasks.get(aug_task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Task '{aug_task_name}' not found in config"
+        ))
+    })?;
+
+    let meta_task_name = "knowledge_metadata_extraction";
+    let meta_task_config = app_state.config.tasks.get(meta_task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Task '{meta_task_name}' not found in config"
+        ))
+    })?;
+
     let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
         ai_provider.as_ref(),
         &payload.url,
         owner_id.as_deref(),
-        &task_config.system_prompt, // extraction_system_prompt
-        &task_config.user_prompt,   // extraction_user_prompt_template
-        // For now, we'll reuse the main system prompt for sub-tasks.
-        // A more advanced implementation might have dedicated tasks.
-        &task_config.system_prompt, // augmentation_system_prompt
-        &task_config.system_prompt, // metadata_extraction_system_prompt
+        &task_config.system_prompt,      // extraction_system_prompt
+        &task_config.user_prompt,        // extraction_user_prompt_template
+        &aug_task_config.system_prompt,  // augmentation_system_prompt
+        &meta_task_config.system_prompt, // metadata_extraction_system_prompt
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
