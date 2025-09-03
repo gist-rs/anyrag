@@ -16,8 +16,13 @@ core-access = { path = "../core-access" }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }
-axum-extra = { version = "0.10.1", features = ["multipart", "typed-header"] }
+axum-extra = { version = "0.10.1", features = [
+    "multipart",
+    "typed-header",
+    "cookie",
+] }
 jsonwebtoken = "9.3.1"
+openidconnect = { version = "3.8.0", features = ["reqwest", "serde_json"] }
 async-trait = { workspace = true }
 
 # Async runtime

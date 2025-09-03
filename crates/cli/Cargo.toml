@@ -1,0 +1,28 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# TUI
+ratatui = { version = "0.27.0", features = ["all-widgets"] }
+crossterm = "0.27.0"
+
+# Async & Networking
+tokio = { workspace = true, features = ["full"] }
+hyper = { version = "1.4.1", features = ["full"] }
+reqwest = { workspace = true, features = ["json"] }
+
+# Data & Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Auth & System Interaction
+keyring = "3.1.0"
+open = "5.3.0"
+
+# Error Handling & Logging
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -11,6 +11,12 @@ pub fn create_router(app_state: AppState) -> Router {
     Router::new()
         .route("/", get(handlers::root))
         .route("/health", get(handlers::health_check))
+        // --- OAuth 2.0 Authentication Routes ---
+        .route("/auth/login/google", get(handlers::google_login_handler))
+        .route(
+            "/auth/callback/google",
+            get(handlers::google_auth_callback_handler),
+        )
         .route("/prompt", post(handlers::prompt_handler))
         .route("/ingest", post(handlers::ingest_handler))
         .route("/ingest/text", post(handlers::ingest_text_handler))
