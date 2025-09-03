@@ -12,7 +12,7 @@ providers:
 
 tasks:
   query_generation:
-    provider: "local_default"
+    provider: "gemini_default"
     system_prompt: |
       You are a {language} expert for {db_name}. Write a readonly {language} query that answers the user's question. Expected output is a single {language} query only.
     user_prompt: |
@@ -38,7 +38,7 @@ tasks:
       {prompt}
 
   rag_synthesis:
-    provider: "local_default"
+    provider: "gemini_default"
     system_prompt: |
       You are a strict, factual AI. Your sole purpose is to answer the user's
       question based *only* on the provided #Context.
@@ -50,7 +50,7 @@ tasks:
       # Your Answer:
 
   knowledge_distillation:
-    provider: "local_default"
+    provider: "gemini_default"
     system_prompt: |
       You are an expert data extraction agent. Your task is to process the given Markdown content and extract two types of information: 1. Explicit FAQs. 2. Coherent chunks of content suitable for generating new FAQs. Return ONLY a valid JSON object with two keys: `faqs` (an array of objects, each with `question`, `answer`, and `is_explicit` fields) and `content_chunks` (an array of objects, each with `topic` and `content` fields). Do not include any other text or explanations.
     user_prompt: |
@@ -58,19 +58,64 @@ tasks:
       {markdown_content}
 
   query_analysis:
-    provider: "local_default"
+    provider: "gemini_default"
     system_prompt: |
-      You are an expert query analyst. Your task is to extract key **Entities** and **Keyphrases** from the user's query. Respond with a JSON object containing two keys: "entities" and "keyphrases", which should be arrays of strings. If none are found, provide empty arrays.
+      You are an expert query analyst. Your task is to extract key **Entities** and **Keyphrases** from the user's query. Respond ONLY with a valid JSON object containing two keys: "entities" and "keyphrases", which should be arrays of strings. If none are found, provide empty arrays. Do not include any other text or explanations.
     user_prompt: |
       # USER QUERY:
       {prompt}
 
   llm_rerank:
-    provider: "local_default"
+    provider: "gemini_default"
     system_prompt: |
-      You are an expert search result re-ranker. Your task is to re-rank the given articles based on their relevance to the user's query. Return ONLY a valid JSON array of the article links, ordered from most to least relevant. Do not include any other text or explanations.
+      You are an expert search result re-ranker. Your task is to re-rank the given articles based on their relevance to the user's query. Respond ONLY with a valid JSON array of strings, where each string is the `Link` of an article in the new, optimal order. Do not include any other text or explanations.
     user_prompt: |
       # User Query:
       {query_text}
       # Articles to Re-rank:
       {articles_context}
+
+  knowledge_augmentation:
+    provider: "gemini_default"
+    system_prompt: |
+      You are an expert content analyst. Your task is to generate a high-quality, comprehensive question for EACH of the provided text blocks (Content Chunks).
+
+      # Instructions:
+      1.  Analyze each "Content Chunk" provided in the input. Each chunk is clearly separated and has a unique integer ID.
+      2.  For each chunk, create a single, clear question that the content fully and accurately answers.
+      3.  The question should be phrased as a real user would ask it and must contain rich keywords for better searchability.
+      4.  **Language Rule**: You **MUST** generate the question in the same language as the original 'Content Chunk'. For example, if the content is in Thai, the question must be in Thai.
+      5.  Return a single JSON object containing a list named `augmented_faqs`. Each item in the list must correspond to one of the input chunks.
+
+      # JSON Output Schema:
+      {
+        "augmented_faqs": [
+          {
+            "id": <The integer ID of the original content chunk>,
+            "question": "The generated, user-focused question for that chunk."
+          }
+        ]
+      }
+    user_prompt: |
+      # Content Chunks to Analyze:
+      {batched_content}
+
+  knowledge_metadata_extraction:
+    provider: "gemini_default"
+    system_prompt: |
+      You are an expert document analyst. Your task is to analyze the following text and extract two types of metadata: **Entities** and **Keyphrases**.
+
+      # Instructions:
+      1.  **Entities**: Identify specific, proper nouns. These are unique, identifiable items like people, products, organizations, locations, or specific dates.
+      2.  **Keyphrases**: Identify the 5-10 most important thematic concepts or topics in the text. These should be broader than entities and capture the main ideas.
+      3.  **Language Rule**: You **MUST** generate the metadata in the same language as the original text. For example, if the content is in Thai, the metadata must be in Thai.
+      4.  Return a single JSON array of objects. Do not include any other text or explanations.
+
+      # JSON Object Schema:
+      Each object in the array must have the following keys:
+      - `type`: Must be either 'ENTITY' or 'KEYPHRASE'.
+      - `subtype`: For 'ENTITY', specify what it is (e.g., 'PERSON', 'PRODUCT', 'ORGANIZATION', 'CONCEPT'). For 'KEYPHRASE', use 'CONCEPT'.
+      - `value`: The extracted string value of the entity or keyphrase.
+    user_prompt: |
+      # Document Content:
+      {content}

@@ -84,7 +84,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     let distillation_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("reconciliation agent"); // Check for the distillation prompt
+            .body_contains("data extraction agent"); // Check for the distillation prompt
         then.status(200)
             .json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({
                 "faqs": [{ "question": distilled_question, "answer": distilled_answer, "is_explicit": false }],

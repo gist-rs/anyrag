@@ -141,7 +141,15 @@ impl TestApp {
                         user_prompt: "# User Question\n{prompt}\n\n# Article Content\n{context}".to_string(),
                     },
                 ),
-            ]),
+                (
+                    "knowledge_augmentation".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are an expert content analyst.".to_string(),
+                        user_prompt: "Content Chunks to Analyze: {batched_content}".to_string(),
+                    },
+                ),
+            ])
         };
 
         // Build the application state from the mock config.
