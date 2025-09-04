@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# TUI
-ratatui = { version = "0.27.0", features = ["all-widgets"] }
-crossterm = "0.27.0"
+# CLI
+clap = { version = "4.5.4", features = ["derive"] }
+
+# GCP/Firebase
+gcp_sdk = { version = "0.26.0", features = ["firestore"] }
 
 # Async & Networking
 tokio = { workspace = true, features = ["full"] }
