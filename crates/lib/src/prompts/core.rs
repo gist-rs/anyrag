@@ -99,7 +99,7 @@ pub fn get_alias_instruction(answer_key: Option<&str>) -> String {
 pub fn get_select_instruction(instruction: Option<&str>) -> String {
     match instruction {
         Some(inst) if !inst.trim().is_empty() => format!(
-            "The user's ultimate goal is to receive an answer that follows this #OUTPUT instruction: \"{inst}\". You MUST select all columns from the schema that are necessary to fulfill this final request. For example, if the instruction is to 'summarize the body', you MUST select the 'body' column. Do not use `SELECT *`."
+            "The user's ultimate goal is to receive an answer that follows this #OUTPUT instruction: \"{inst}\". You MUST select all columns from the schema that are necessary to fulfill this final request. For example, if the instruction is to 'summarize the email body', you MUST select both the 'email_subject' and 'email_body' columns to provide sufficient context. Do not use `SELECT *`."
         ),
         _ => "Unless the user asks for 'everything' or 'all details', select only the most relevant columns to answer the question, not `SELECT *`.".to_string(),
     }

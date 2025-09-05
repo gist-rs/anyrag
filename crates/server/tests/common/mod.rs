@@ -149,6 +149,14 @@ impl TestApp {
                         user_prompt: "Content Chunks to Analyze: {batched_content}".to_string(),
                     },
                 ),
+                (
+                    "knowledge_metadata_extraction".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are an expert document analyst.".to_string(),
+                        user_prompt: "Document Content: {content}".to_string(),
+                    },
+                ),
             ])
         };
 

@@ -109,3 +109,8 @@ harness = true
 name = "e2e_prompt_test"
 path = "tests/e2e_prompt_test.rs"
 harness = true
+
+[[test]]
+name = "faq_ingestion_test"
+path = "tests/faq_ingestion_test.rs"
+harness = true
