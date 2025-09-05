@@ -296,6 +296,12 @@ pub async fn distill_and_augment(
             return Err(e.into());
         }
     };
+
+    // After parsing, filter out any FAQs that might have empty questions or answers.
+    extracted_data
+        .faqs
+        .retain(|faq| !faq.question.is_empty() && !faq.answer.is_empty());
+
     let original_chunk_count = extracted_data.content_chunks.len();
     extracted_data
         .content_chunks
