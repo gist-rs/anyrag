@@ -40,7 +40,7 @@ regex = { workspace = true }
 
 # Config
 config = { version = "0.15.15", features = ["yaml"] }
-uuid = "1.18.1"
+uuid = { workspace = true }
 
 [features]
 default = ["bigquery", "graph_db"]
@@ -57,7 +57,7 @@ regex = { workspace = true }
 serial_test = "3.2.0"
 md5 = "0.8.0"
 pdf-writer = "0.13.0"
-uuid = { version = "1.18.1", features = ["v5", "serde"] }
+uuid = { workspace = true }
 
 [[test]]
 name = "config_test"
