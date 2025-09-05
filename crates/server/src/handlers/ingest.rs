@@ -3,13 +3,14 @@
 //! This module contains all the Axum handlers for data ingestion endpoints,
 //! such as ingesting from RSS, text, files, and Google Sheets.
 
-use super::knowledge::KnowledgeIngestResponse;
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use crate::auth::middleware::AuthenticatedUser;
 #[cfg(feature = "rss")]
 use anyrag::ingest::ingest_from_url;
 use anyrag::ingest::{
-    ingest_faq_from_google_sheet, run_pdf_ingestion_pipeline,
+    ingest_faq_from_google_sheet,
+    knowledge::IngestionPrompts,
+    run_ingestion_pipeline, run_pdf_ingestion_pipeline,
     text::{chunk_text, ingest_chunks_as_documents},
     PdfSyncExtractor,
 };
@@ -35,6 +36,17 @@ pub struct IngestRssRequest {
 pub struct IngestRssResponse {
     message: String,
     ingested_articles: usize,
+}
+
+#[derive(Deserialize)]
+pub struct IngestWebRequest {
+    pub url: String,
+}
+
+#[derive(Serialize)]
+pub struct IngestWebResponse {
+    pub message: String,
+    pub ingested_faqs: usize,
 }
 
 #[derive(Deserialize)]
@@ -200,7 +212,7 @@ pub async fn ingest_file_handler(
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     mut multipart: Multipart,
-) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
+) -> Result<Json<ApiResponse<IngestWebResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     let mut pdf_data: Option<Vec<u8>> = None;
     let mut source_identifier: Option<String> = None;
@@ -283,7 +295,7 @@ pub async fn ingest_file_handler(
     )
     .await?;
 
-    let response = KnowledgeIngestResponse {
+    let response = IngestWebResponse {
         message: "PDF ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,
     };
@@ -304,7 +316,7 @@ pub async fn ingest_pdf_url_handler(
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<IngestPdfUrlRequest>,
-) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
+) -> Result<Json<ApiResponse<IngestWebResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     info!(
         "User '{:?}' requesting PDF ingest from URL: {}",
@@ -386,7 +398,7 @@ pub async fn ingest_pdf_url_handler(
     )
     .await?;
 
-    let response = KnowledgeIngestResponse {
+    let response = IngestWebResponse {
         message: "PDF URL ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,
     };
@@ -399,5 +411,68 @@ pub async fn ingest_pdf_url_handler(
         "owner_id": owner_id,
     });
 
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+/// Handler for the knowledge base ingestion pipeline from a web URL.
+pub async fn ingest_web_handler(
+    State(app_state): State<AppState>,
+    user: AuthenticatedUser,
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<IngestWebRequest>,
+) -> Result<Json<super::ApiResponse<IngestWebResponse>>, AppError> {
+    let owner_id = Some(user.0.id);
+    info!(
+        "Received web ingest request for URL: {} by user {:?}",
+        payload.url, owner_id
+    );
+
+    // --- Get AI provider for knowledge distillation ---
+    let task_name = "knowledge_distillation";
+    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
+    })?;
+    let provider_name = &task_config.provider;
+    let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+    })?;
+
+    // --- Get prompts for augmentation and metadata sub-tasks ---
+    let aug_task_name = "knowledge_augmentation";
+    let aug_task_config = app_state.config.tasks.get(aug_task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Task '{aug_task_name}' not found in config"
+        ))
+    })?;
+
+    let meta_task_name = "knowledge_metadata_extraction";
+    let meta_task_config = app_state.config.tasks.get(meta_task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Task '{meta_task_name}' not found in config"
+        ))
+    })?;
+
+    let prompts = IngestionPrompts {
+        extraction_system_prompt: &task_config.system_prompt,
+        extraction_user_prompt_template: &task_config.user_prompt,
+        augmentation_system_prompt: &aug_task_config.system_prompt,
+        metadata_extraction_system_prompt: &meta_task_config.system_prompt,
+    };
+
+    let ingested_count = run_ingestion_pipeline(
+        &app_state.sqlite_provider.db,
+        ai_provider.as_ref(),
+        &payload.url,
+        owner_id.as_deref(),
+        prompts,
+    )
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
+
+    let response = IngestWebResponse {
+        message: "Knowledge ingestion pipeline completed successfully.".to_string(),
+        ingested_faqs: ingested_count,
+    };
+    let debug_info = json!({ "url": payload.url, "owner_id": owner_id });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }

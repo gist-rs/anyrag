@@ -201,9 +201,9 @@ curl -X POST http://localhost:9090/prompt \
 
 These endpoints are for building and maintaining the self-improving knowledge base.
 
-#### `POST /knowledge/ingest`
+#### `POST /ingest/web`
 
-Triggers the full ingestion pipeline for a given URL. This process involves fetching the content, using an LLM to distill it into structured Q&A pairs, and storing it in the knowledge base.
+Triggers the full knowledge-distillation pipeline for a given web URL. This process involves fetching the content, using an LLM to distill it into structured Q&A pairs, and storing it in the knowledge base.
 
 **Request Body:** `{"url": "https://..."}`
 
@@ -211,7 +211,7 @@ Triggers the full ingestion pipeline for a given URL. This process involves fetc
 
 **Example:**
 ```sh
-curl -X POST http://localhost:9090/knowledge/ingest \
+curl -X POST http://localhost:9090/ingest/web \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <your_jwt>" \
   -d '{

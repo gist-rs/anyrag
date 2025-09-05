@@ -8,8 +8,7 @@ use super::{
 };
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
-    ingest::knowledge::IngestionPrompts,
-    ingest::{export_for_finetuning, run_ingestion_pipeline},
+    ingest::export_for_finetuning,
     providers::ai::generate_embedding,
     search::{hybrid_search, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
@@ -25,17 +24,6 @@ use tracing::{error, info};
 use turso::params;
 
 // --- API Payloads for Knowledge Base ---
-
-#[derive(Deserialize)]
-pub struct KnowledgeIngestRequest {
-    pub url: String,
-}
-
-#[derive(Serialize)]
-pub struct KnowledgeIngestResponse {
-    pub message: String,
-    pub ingested_faqs: usize,
-}
 
 #[derive(Deserialize, Debug)]
 pub struct EmbedNewRequest {
@@ -326,67 +314,4 @@ pub async fn knowledge_graph_search_handler(
         debug: None,
         result: response,
     }))
-}
-
-/// Handler for the knowledge base ingestion pipeline.
-pub async fn knowledge_ingest_handler(
-    State(app_state): State<AppState>,
-    user: AuthenticatedUser,
-    debug_params: Query<DebugParams>,
-    Json(payload): Json<KnowledgeIngestRequest>,
-) -> Result<Json<super::ApiResponse<KnowledgeIngestResponse>>, AppError> {
-    let owner_id = Some(user.0.id);
-    info!(
-        "Received knowledge ingest request for URL: {} by user {:?}",
-        payload.url, owner_id
-    );
-
-    // --- Get AI provider for knowledge distillation ---
-    let task_name = "knowledge_distillation";
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
-    })?;
-    let provider_name = &task_config.provider;
-    let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
-    })?;
-
-    // --- Get prompts for augmentation and metadata sub-tasks ---
-    let aug_task_name = "knowledge_augmentation";
-    let aug_task_config = app_state.config.tasks.get(aug_task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Task '{aug_task_name}' not found in config"
-        ))
-    })?;
-
-    let meta_task_name = "knowledge_metadata_extraction";
-    let meta_task_config = app_state.config.tasks.get(meta_task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Task '{meta_task_name}' not found in config"
-        ))
-    })?;
-
-    let prompts = IngestionPrompts {
-        extraction_system_prompt: &task_config.system_prompt,
-        extraction_user_prompt_template: &task_config.user_prompt,
-        augmentation_system_prompt: &aug_task_config.system_prompt,
-        metadata_extraction_system_prompt: &meta_task_config.system_prompt,
-    };
-
-    let ingested_count = run_ingestion_pipeline(
-        &app_state.sqlite_provider.db,
-        ai_provider.as_ref(),
-        &payload.url,
-        owner_id.as_deref(),
-        prompts,
-    )
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
-
-    let response = KnowledgeIngestResponse {
-        message: "Knowledge ingestion pipeline completed successfully.".to_string(),
-        ingested_faqs: ingested_count,
-    };
-    let debug_info = json!({ "url": payload.url, "owner_id": owner_id });
-    Ok(wrap_response(response, debug_params, Some(debug_info)))
 }

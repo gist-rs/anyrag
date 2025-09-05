@@ -40,10 +40,7 @@ pub fn create_router(app_state: AppState) -> Router {
             "/search/knowledge",
             post(handlers::knowledge_search_handler),
         )
-        .route(
-            "/knowledge/ingest",
-            post(handlers::knowledge_ingest_handler),
-        )
+        .route("/ingest/web", post(handlers::ingest_web_handler))
         .route("/knowledge/export", get(handlers::knowledge_export_handler))
         .route(
             "/search/knowledge_graph",
