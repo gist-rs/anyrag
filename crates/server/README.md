@@ -5,8 +5,8 @@ This crate provides a lightweight `axum` web server that exposes the `anyrag` li
 ## Features
 
 *   **RESTful API:** Exposes all core functionalities via a simple API.
-*   **Dynamic Sheet Querying:** Accepts Google Sheet URLs directly in prompts, ingesting and querying them on the fly.
-*   **Multi-Source Ingestion:** Endpoints for building a knowledge base from web pages, PDFs (via upload or URL), raw text, and structured Google Sheets.
+*   **Dynamic Source Querying:** Accepts Google Sheet URLs, PDF URLs, or web page URLs directly in prompts, ingesting and querying them on the fly.
+*   **Controllable Ingestion:** Endpoints for building a knowledge base from web pages, PDFs, raw text, and Google Sheets, with fine-grained control over AI-based FAQ generation and embedding.
 *   **RAG Endpoint:** A dedicated endpoint to ask questions against the knowledge base, using a hybrid search backend.
 *   **Containerized Deployment:** Includes a multi-stage `Dockerfile` for building a minimal, secure server image.
 *   **Asynchronous:** Built on top of Tokio for non-blocking, efficient request handling.
@@ -203,13 +203,15 @@ These endpoints are for building and maintaining the self-improving knowledge ba
 
 #### `POST /ingest/web`
 
-Triggers the full knowledge-distillation pipeline for a given web URL. This process involves fetching the content, using an LLM to distill it into structured Q&A pairs, and storing it in the knowledge base.
+Fetches and processes content from a web URL.
+
+**Query Parameters:**
+- `faq` (boolean, optional): If `true`, runs the full AI-based pipeline to distill the content into structured Q&A pairs. Defaults to `false`.
+- `embed` (boolean, optional): If `true` (default), generates and stores vector embeddings for the ingested content, making it available for semantic search.
 
 **Request Body:** `{"url": "https://..."}`
 
-**Note:** This is an authenticated endpoint. The `owner_id` of the ingested content will be automatically assigned based on the provided JWT. If no token is provided, it will be assigned to the "Guest User".
-
-**Example:**
+**Example (Light Ingest):**
 ```sh
 curl -X POST http://localhost:9090/ingest/web \
   -H "Content-Type: application/json" \
@@ -219,13 +221,21 @@ curl -X POST http://localhost:9090/ingest/web \
   }'
 ```
 
+**Example (FAQ Generation):**
+```sh
+curl -X POST "http://localhost:9090/ingest/web?faq=true" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "url": "https://www.true.th/betterliv/support/true-app-mega-campaign"
+  }'
+```
+
 #### `POST /ingest/rss`
 
-Ingests articles from an RSS feed URL. The server fetches the feed, parses the items, and stores them as individual documents in the knowledge base.
+Ingests articles from an RSS feed URL, storing each item as a separate document.
 
 **Request Body:** `{"url": "https://..."}`
-
-**Note:** This is an authenticated endpoint. The `owner_id` of the ingested content will be automatically assigned based on the provided JWT. If no token is provided, it will be assigned to the "Guest User".
 
 **Example:**
 ```sh
@@ -237,59 +247,58 @@ curl -X POST http://localhost:9090/ingest/rss \
   }'
 ```
 
-#### `POST /ingest/file`
+#### `POST /ingest/pdf`
 
-Ingests a PDF file directly. The server processes the PDF, uses an LLM to refine the extracted content into structured Markdown, stores this refined content, and then distills it into Q&A pairs for the knowledge base.
+Processes a PDF from either a direct file upload or a URL.
 
-**Request Body:** `multipart/form-data`
+**Query Parameters:**
+- `faq` (boolean, optional): If `true`, runs the full AI-based pipeline to distill the content into structured Q&A pairs. Defaults to `false`.
+- `embed` (boolean, optional): If `true` (default), generates vector embeddings for the ingested content.
+
+**Request Body:** `multipart/form-data` containing either a `file` part or a `url` part.
 - `file`: The PDF file to be ingested.
+- `url`: A direct URL to a PDF file to be downloaded and ingested.
 - `extractor`: (Optional) A string specifying the extraction strategy. Can be `"local"` (default) or `"gemini"`.
 
-**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
-
-**Example:**
+**Example (File Upload):**
 ```sh
-curl -X POST http://localhost:9090/ingest/file \
+curl -X POST "http://localhost:9090/ingest/pdf?faq=true" \
   -H "Authorization: Bearer <your_jwt>" \
   -F "file=@/path/to/your/document.pdf" \
   -F "extractor=local"
 ```
 
-#### `POST /ingest/pdf_url`
-
-Downloads and ingests a PDF from a given URL. The server follows redirects, downloads the file, and then processes it using the same pipeline as the `/ingest/file` endpoint.
-
-**Request Body:** `{"url": "...", "extractor": "..."}`
-- `url`: The direct URL to the PDF file.
-- `extractor`: (Optional) The extraction strategy. Can be `"local"` (default) or `"gemini"`.
-
-**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
-
-**Example:**
+**Example (URL):**
 ```sh
-curl -X POST http://localhost:9090/ingest/pdf_url \
+curl -X POST "http://localhost:9090/ingest/pdf?faq=true" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -F "url=https://arxiv.org/pdf/2403.05530.pdf" \
+  -F "extractor=local"
+```
+
+#### `POST /ingest/sheet`
+
+Ingests data from a public Google Sheet. The behavior is controlled by the `faq` query parameter.
+
+**Query Parameters:**
+- `faq` (boolean, optional): If `true`, ingests a sheet formatted with "Question" and "Answer" columns directly as Q&A pairs. If `false` (default), ingests the sheet as a generic table in the database.
+- `embed` (boolean, optional): If `true` (default), generates vector embeddings for the ingested rows or Q&A pairs.
+
+**Request Body:** `{"url": "...", "gid": "...", "skip_header": true}`
+
+**Example (Generic Table Ingest):**
+```sh
+curl -X POST http://localhost:9090/ingest/sheet \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <your_jwt>" \
   -d '{
-    "url": "https://arxiv.org/pdf/2403.05530.pdf",
-    "extractor": "local"
+    "url": "https://docs.google.com/spreadsheets/d/your_sheet_id/edit"
   }'
 ```
 
-#### `POST /ingest/sheet_faq`
-
-Ingests Q&A pairs directly from a public Google Sheet. It's designed to handle structured FAQ data and can recognize date columns (`start_at`, `end_at`) to create time-sensitive knowledge.
-
-**Request Body:** `{"url": "...", "gid": "...", "skip_header": true}`
-- `url`: The public URL of the Google Sheet.
-- `gid`: (Optional) The specific sheet/tab ID (the number after `gid=` in the URL).
-- `skip_header`: (Optional) Whether to skip the first row of the sheet. Defaults to `true`.
-
-**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
-
-**Example:**
+**Example (FAQ Ingest):**
 ```sh
-curl -X POST http://localhost:9090/ingest/sheet_faq \
+curl -X POST "http://localhost:9090/ingest/sheet?faq=true" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <your_jwt>" \
   -d '{
@@ -300,13 +309,13 @@ curl -X POST http://localhost:9090/ingest/sheet_faq \
 
 #### `POST /ingest/text`
 
-Ingests raw text directly from the request body. The server automatically chunks the text and stores each chunk as a document in the knowledge base.
+Ingests raw text directly from the request body.
+
+**Query Parameters:**
+- `faq` (boolean, optional): If `true`, runs the full AI-based pipeline on the entire text. If `false` (default), the text is automatically chunked and each chunk is stored as a separate document.
+- `embed` (boolean, optional): If `true` (default), generates vector embeddings for the ingested text.
 
 **Request Body:** `{"text": "...", "source": "..."}`
-- `text`: The raw text content to ingest.
-- `source`: (Optional) A string to identify the origin of the text. Defaults to `text_input`.
-
-**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
 
 **Example:**
 ```sh
@@ -334,7 +343,7 @@ curl -X POST http://localhost:9090/embed/new \
 
 #### `GET /knowledge/export`
 
-Exports the entire FAQ knowledge base into a JSONL (JSON Lines) file suitable for fine-tuning a large language model. This completes the "virtuous cycle".
+Exports the entire FAQ knowledge base into a JSONL (JSON Lines) file suitable for fine-tuning a large language model.
 
 **Example:**
 ```sh
@@ -353,8 +362,6 @@ These endpoints are for searching the knowledge base.
 - `query`: The user's question.
 - `limit`: (Optional) The number of facts to retrieve for context. Defaults to 5.
 - `instruction`: (Optional) A specific instruction for the final LLM synthesis step.
-
-**Note:** This is an authenticated endpoint. The search results are automatically filtered based on the user's identity.
 
 **Example:**
 ```sh

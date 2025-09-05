@@ -19,19 +19,15 @@ pub fn create_router(app_state: AppState) -> Router {
             get(handlers::google_auth_callback_handler),
         )
         .route("/auth/me", get(handlers::get_me_handler))
-        // --- Admin Routes ---
-        .route("/users", get(handlers::get_users_handler))
+        .route("/users", get(handlers::get_users_handler)) // --- Admin Route ---
         .route("/prompt", post(handlers::prompt_handler))
         .route("/ingest/text", post(handlers::ingest_text_handler))
         .route(
-            "/ingest/file",
-            post(handlers::ingest_file_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+            "/ingest/pdf",
+            post(handlers::ingest_pdf_handler).layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
         )
-        .route("/ingest/pdf_url", post(handlers::ingest_pdf_url_handler))
-        .route(
-            "/ingest/sheet_faq",
-            post(handlers::ingest_sheet_faq_handler),
-        )
+        .route("/ingest/sheet", post(handlers::ingest_sheet_handler))
+        .route("/ingest/web", post(handlers::ingest_web_handler))
         .route("/embed/new", post(handlers::embed_new_handler))
         .route("/search/vector", post(handlers::vector_search_handler))
         .route("/search/keyword", post(handlers::keyword_search_handler))
@@ -40,7 +36,6 @@ pub fn create_router(app_state: AppState) -> Router {
             "/search/knowledge",
             post(handlers::knowledge_search_handler),
         )
-        .route("/ingest/web", post(handlers::ingest_web_handler))
         .route("/knowledge/export", get(handlers::knowledge_export_handler))
         .route(
             "/search/knowledge_graph",
