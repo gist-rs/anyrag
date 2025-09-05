@@ -4,17 +4,11 @@
 //! to a local SQLite database. It handles authentication, data fetching,
 //! schema inference, and writing to SQLite.
 
-use crate::providers::db::sqlite::SqliteProvider;
+use crate::{ingest::state_manager, providers::db::sqlite::SqliteProvider};
 
 use chrono::{DateTime, Utc};
 use firestore::{FirestoreDb, FirestoreDocument, FirestoreQueryDirection, FirestoreTimestamp};
-use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{BufReader, BufWriter},
-    path::Path,
-};
+use std::{collections::HashMap, path::Path};
 use thiserror::Error;
 use tokio_stream::StreamExt;
 use tracing::info;
@@ -94,7 +88,8 @@ pub async fn dump_firestore_collection(
     let mut query = firestore_db.fluent().select().from(options.collection);
 
     let last_timestamp = if options.incremental {
-        read_last_timestamp(&project_id, &table_name)?
+        state_manager::read_last_timestamp(&project_id, &table_name)
+            .map_err(|e| FirebaseIngestError::Internal(e.to_string()))?
             .map(|s| s.parse::<DateTime<Utc>>())
             .transpose()?
             .map(FirestoreTimestamp)
@@ -155,7 +150,12 @@ pub async fn dump_firestore_collection(
     // 6. Update State
     if options.incremental {
         if let Some(ts_to_save) = newest_timestamp_seen {
-            write_last_timestamp(&project_id, &table_name, &ts_to_save.0.to_rfc3339())?;
+            state_manager::write_last_timestamp(
+                &project_id,
+                &table_name,
+                &ts_to_save.0.to_rfc3339(),
+            )
+            .map_err(|e| FirebaseIngestError::Internal(e.to_string()))?;
         }
     }
 
@@ -411,57 +411,4 @@ fn convert_firestore_value_to_turso(
         None => TursoValue::Null,
     };
     Ok(val)
-}
-
-// --- State Management for Incremental Sync ---
-
-#[derive(Serialize, Deserialize, Default, Debug)]
-struct SyncState(HashMap<String, String>);
-
-fn read_last_timestamp(
-    project_id: &str,
-    collection_name: &str,
-) -> Result<Option<String>, std::io::Error> {
-    let state_file_name = format!(".anyrag_sync_state_{project_id}.json");
-    let path = Path::new(&state_file_name);
-    if !path.exists() {
-        info!("Sync state file not found. A full sync will be performed.");
-        return Ok(None);
-    }
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let state: SyncState = serde_json::from_reader(reader).unwrap_or_default();
-    let timestamp = state.0.get(collection_name).cloned();
-    if let Some(ts) = &timestamp {
-        info!("Found last sync timestamp for collection '{collection_name}': {ts}");
-    } else {
-        info!(
-            "No sync timestamp found for collection '{collection_name}'. A full sync will be performed."
-        );
-    }
-    Ok(timestamp)
-}
-
-fn write_last_timestamp(
-    project_id: &str,
-    collection_name: &str,
-    timestamp: &str,
-) -> Result<(), std::io::Error> {
-    let state_file_name = format!(".anyrag_sync_state_{project_id}.json");
-    let path = Path::new(&state_file_name);
-    let mut state: SyncState = if path.exists() {
-        let file = File::open(path)?;
-        let reader = BufReader::new(file);
-        serde_json::from_reader(reader).unwrap_or_default()
-    } else {
-        SyncState::default()
-    };
-    state
-        .0
-        .insert(collection_name.to_string(), timestamp.to_string());
-    let file = File::create(path)?;
-    let writer = BufWriter::new(file);
-    serde_json::to_writer_pretty(writer, &state).unwrap();
-    info!("Updated sync state for collection '{collection_name}' to: {timestamp}");
-    Ok(())
 }

@@ -18,6 +18,7 @@ pub mod shared;
 pub mod sheet_faq;
 #[cfg(feature = "sheets")]
 pub mod sheets;
+pub mod state_manager;
 pub mod text;
 
 pub use embedding::{embed_article, EmbeddingError};
