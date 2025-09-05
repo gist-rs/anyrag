@@ -19,6 +19,7 @@ This library is the foundation of the `anyrag` workspace and is used by the `any
         -   Web URLs (fetching and cleaning Markdown).
         -   PDF files (from uploads or direct URLs).
         -   Google Sheets (for structured, time-sensitive FAQs).
+        -   RSS feeds (for continuous content updates).
         -   Raw text (with automatic chunking).
     *   **Distill & Augment:** Uses a two-pass LLM process to extract explicit FAQs and generate new ones from unstructured content.
     *   **Store & Embed:** Saves structured Q&A pairs into a local SQLite database and generates vector embeddings for semantic search.
