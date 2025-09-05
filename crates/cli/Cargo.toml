@@ -5,13 +5,15 @@ edition = "2021"
 
 [dependencies]
 # CLI
-clap = { version = "4.5.4", features = ["derive"] }
+clap = { version = "4.5.47", features = ["derive"] }
 
 # GCP/Firebase
-gcp_sdk = { version = "0.26.0", features = ["firestore"] }
+firestore = { path = "../../firestore-rs" }
+gcloud-sdk = { version = "0.28", features = ["google-firestore-v1"] }
 
 # Async & Networking
 tokio = { workspace = true, features = ["full"] }
+tokio-stream = "0.1"
 hyper = { version = "1.7.0", features = ["full"] }
 hyper-util = { version = "0.1.16", features = ["full"] }
 reqwest = { workspace = true, features = ["json"] }
@@ -20,6 +22,7 @@ reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_urlencoded = "0.7.1"
+chrono = { version = "0.4", features = ["serde"] }
 
 # Auth & System Interaction
 keyring = "3.6.3"
@@ -31,3 +34,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = "2.5.7"
+
+anyrag = { path = "../lib" }
+turso.workspace = true
+rustls = "0.23.31"
