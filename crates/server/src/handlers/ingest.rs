@@ -26,13 +26,13 @@ use tracing::info;
 
 #[cfg(feature = "rss")]
 #[derive(Deserialize)]
-pub struct IngestRequest {
+pub struct IngestRssRequest {
     pub url: String,
 }
 
 #[cfg(feature = "rss")]
 #[derive(Serialize)]
-pub struct IngestResponse {
+pub struct IngestRssResponse {
     message: String,
     ingested_articles: usize,
 }
@@ -92,12 +92,12 @@ pub struct IngestPdfUrlRequest {
 
 /// Handler for ingesting content from an RSS feed URL.
 #[cfg(feature = "rss")]
-pub async fn ingest_handler(
+pub async fn ingest_rss_handler(
     State(app_state): State<AppState>,
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
-    Json(payload): Json<IngestRequest>,
-) -> Result<Json<ApiResponse<IngestResponse>>, AppError> {
+    Json(payload): Json<IngestRssRequest>,
+) -> Result<Json<ApiResponse<IngestRssResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     info!(
         "User '{:?}' initiating ingest for URL: {}",
@@ -109,7 +109,7 @@ pub async fn ingest_handler(
         owner_id.as_deref(),
     )
     .await?;
-    let response = IngestResponse {
+    let response = IngestRssResponse {
         message: "Ingestion successful".to_string(),
         ingested_articles: ingested_count,
     };

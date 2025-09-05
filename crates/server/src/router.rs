@@ -52,7 +52,7 @@ pub fn create_router(app_state: AppState) -> Router {
 
     #[cfg(feature = "rss")]
     {
-        router = router.route("/ingest", post(handlers::ingest_handler));
+        router = router.route("/ingest/rss", post(handlers::ingest_rss_handler));
     }
 
     router
