@@ -9,7 +9,6 @@ name = "server"
 path = "src/main.rs"
 
 [dependencies]
-openssl = { version = "0.10", features = ["vendored"] }
 # Internal Crate
 anyrag = { path = "../lib", features = ["core-access"] }
 core-access = { path = "../core-access" }
@@ -18,7 +17,6 @@ core-access = { path = "../core-access" }
 axum = { workspace = true, features = ["macros"] }
 axum-extra = { version = "0.10.1", features = ["multipart", "typed-header"] }
 jsonwebtoken = "9.3.1"
-async-trait = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }
@@ -32,7 +30,6 @@ tower-http = { workspace = true }
 serde = { workspace = true }
 serde_json.workspace = true
 turso = { workspace = true }
-futures = { workspace = true }
 
 # Other
 dotenvy = { workspace = true }
@@ -43,7 +40,6 @@ regex = { workspace = true }
 
 # Config
 config = { version = "0.15.15", features = ["yaml"] }
-serde_yaml = "0.9.34"
 uuid = "1.18.1"
 
 [features]
@@ -52,10 +48,6 @@ bigquery = ["anyrag/bigquery"]
 graph_db = ["anyrag/graph_db"]
 
 [dev-dependencies]
-async-trait = { workspace = true }
-dyn-clone = { workspace = true }
-futures = "0.3.31"
-gcp-bigquery-client = { workspace = true }
 chrono = { workspace = true }
 httpmock = "0.7.0"
 jsonwebtoken = "9.3.1"

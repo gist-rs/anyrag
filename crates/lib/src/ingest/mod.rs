@@ -5,6 +5,7 @@
 //! database for later use in RAG.
 
 pub mod embedding;
+pub mod firebase;
 pub mod knowledge;
 pub mod pdf;
 pub mod rss;
@@ -14,6 +15,7 @@ pub mod sheets;
 pub mod text;
 
 pub use embedding::{embed_article, EmbeddingError};
+pub use firebase::{dump_firestore_collection, DumpFirestoreOptions, FirebaseIngestError};
 pub use knowledge::{export_for_finetuning, run_ingestion_pipeline, KnowledgeError};
 pub use pdf::{run_pdf_ingestion_pipeline, PdfSyncExtractor};
 pub use rss::{ingest_from_url, IngestError as RssIngestError};
