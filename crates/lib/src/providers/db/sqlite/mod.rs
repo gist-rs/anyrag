@@ -504,25 +504,29 @@ impl MetadataSearch for SqliteProvider {
 
         let mut metadata_conditions = Vec::new();
         if !entities.is_empty() {
-            let placeholders = entities.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let entity_likes: Vec<String> = entities
+                .iter()
+                .map(|_| "lower(metadata_value) LIKE ?".to_string())
+                .collect();
             metadata_conditions.push(format!(
-                "(metadata_type = 'ENTITY' AND metadata_value IN ({placeholders}))"
+                "(metadata_type = 'ENTITY' AND ({}))",
+                entity_likes.join(" OR ")
             ));
             for entity in entities {
-                params.push(entity.clone().into());
+                params.push(format!("%{}%", entity.to_lowercase()).into());
             }
         }
         if !keyphrases.is_empty() {
-            let placeholders = keyphrases
+            let keyphrase_likes: Vec<String> = keyphrases
                 .iter()
-                .map(|_| "?")
-                .collect::<Vec<_>>()
-                .join(", ");
+                .map(|_| "lower(metadata_value) LIKE ?".to_string())
+                .collect();
             metadata_conditions.push(format!(
-                "((metadata_type = 'KEYPHRASE' OR metadata_type = 'KEYPHRASES') AND metadata_value IN ({placeholders}))"
+                "((metadata_type = 'KEYPHRASE' OR metadata_type = 'KEYPHRASES') AND ({}))",
+                keyphrase_likes.join(" OR ")
             ));
             for keyphrase in keyphrases {
-                params.push(keyphrase.clone().into());
+                params.push(format!("%{}%", keyphrase.to_lowercase()).into());
             }
         }
 
