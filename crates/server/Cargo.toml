@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal Crate
-anyrag = { path = "../lib", features = ["core-access"] }
+anyrag = { path = "../lib", features = ["core-access", "rss"] }
 core-access = { path = "../core-access" }
 
 # Web Framework
@@ -43,9 +43,10 @@ config = { version = "0.15.15", features = ["yaml"] }
 uuid = { workspace = true }
 
 [features]
-default = ["bigquery", "graph_db"]
+default = ["bigquery", "graph_db", "rss"]
 bigquery = ["anyrag/bigquery"]
 graph_db = ["anyrag/graph_db"]
+rss = ["anyrag/rss"]
 
 [dev-dependencies]
 chrono = { workspace = true }
