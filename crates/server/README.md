@@ -219,6 +219,24 @@ curl -X POST http://localhost:9090/knowledge/ingest \
   }'
 ```
 
+#### `POST /ingest/rss`
+
+Ingests articles from an RSS feed URL. The server fetches the feed, parses the items, and stores them as individual documents in the knowledge base.
+
+**Request Body:** `{"url": "https://..."}`
+
+**Note:** This is an authenticated endpoint. The `owner_id` of the ingested content will be automatically assigned based on the provided JWT. If no token is provided, it will be assigned to the "Guest User".
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/ingest/rss \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "url": "http://example.com/feed.xml"
+  }'
+```
+
 #### `POST /ingest/file`
 
 Ingests a PDF file directly. The server processes the PDF, uses an LLM to refine the extracted content into structured Markdown, stores this refined content, and then distills it into Q&A pairs for the knowledge base.

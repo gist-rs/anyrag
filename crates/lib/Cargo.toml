@@ -42,7 +42,7 @@ tempfile = "3.21.0"
 anyhow = { workspace = true }
 
 [features]
-default = ["graph_db", "firebase", "pdf", "sheets", "rss"]
+default = ["graph_db", "firebase", "pdf", "sheets"]
 bigquery = ["dep:gcp-bigquery-client"]
 graph_db = ["dep:indradb-lib", "dep:uuid"]
 core-access = ["dep:core-access", "dep:uuid"]
