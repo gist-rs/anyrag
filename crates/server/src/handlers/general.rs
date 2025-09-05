@@ -55,6 +55,7 @@ pub async fn prompt_handler(
     // --- Task-based Configuration Loading ---
     // Select the task based on content_type, defaulting to query_generation.
     let task_name = match options.content_type {
+        #[cfg(feature = "rss")]
         Some(ContentType::Rss) => "rss_summarization",
         Some(ContentType::Knowledge) => "rag_synthesis",
         _ => "query_generation",

@@ -8,7 +8,7 @@ use tower_http::trace::TraceLayer;
 
 /// Creates the Axum router with all the application routes.
 pub fn create_router(app_state: AppState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/", get(handlers::root))
         .route("/health", get(handlers::health_check))
         .route("/documents", get(handlers::get_documents_handler))
@@ -22,7 +22,6 @@ pub fn create_router(app_state: AppState) -> Router {
         // --- Admin Routes ---
         .route("/users", get(handlers::get_users_handler))
         .route("/prompt", post(handlers::prompt_handler))
-        .route("/ingest", post(handlers::ingest_handler))
         .route("/ingest/text", post(handlers::ingest_text_handler))
         .route(
             "/ingest/file",
@@ -49,7 +48,14 @@ pub fn create_router(app_state: AppState) -> Router {
         .route(
             "/search/knowledge_graph",
             post(handlers::knowledge_graph_search_handler),
-        )
+        );
+
+    #[cfg(feature = "rss")]
+    {
+        router = router.route("/ingest", post(handlers::ingest_handler));
+    }
+
+    router
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
 }

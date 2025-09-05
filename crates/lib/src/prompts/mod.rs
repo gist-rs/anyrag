@@ -6,4 +6,5 @@
 pub mod core;
 pub mod knowledge;
 pub mod pdf;
+#[cfg(feature = "rss")]
 pub mod rss;

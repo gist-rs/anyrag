@@ -6,8 +6,10 @@
 use super::knowledge::KnowledgeIngestResponse;
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use crate::auth::middleware::AuthenticatedUser;
+#[cfg(feature = "rss")]
+use anyrag::ingest::ingest_from_url;
 use anyrag::ingest::{
-    ingest_faq_from_google_sheet, ingest_from_url, run_pdf_ingestion_pipeline,
+    ingest_faq_from_google_sheet, run_pdf_ingestion_pipeline,
     text::{chunk_text, ingest_chunks_as_documents},
     PdfSyncExtractor,
 };
@@ -22,11 +24,13 @@ use tracing::info;
 
 // --- API Payloads for Ingestion ---
 
+#[cfg(feature = "rss")]
 #[derive(Deserialize)]
 pub struct IngestRequest {
     pub url: String,
 }
 
+#[cfg(feature = "rss")]
 #[derive(Serialize)]
 pub struct IngestResponse {
     message: String,
@@ -87,6 +91,7 @@ pub struct IngestPdfUrlRequest {
 // --- Ingestion Handlers ---
 
 /// Handler for ingesting content from an RSS feed URL.
+#[cfg(feature = "rss")]
 pub async fn ingest_handler(
     State(app_state): State<AppState>,
     user: AuthenticatedUser,

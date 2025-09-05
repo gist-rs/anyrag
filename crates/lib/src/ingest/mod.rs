@@ -10,6 +10,7 @@ pub mod firebase;
 pub mod knowledge;
 #[cfg(feature = "pdf")]
 pub mod pdf;
+#[cfg(feature = "rss")]
 pub mod rss;
 #[cfg(feature = "sheets")]
 pub mod shared;
@@ -25,6 +26,7 @@ pub use firebase::{dump_firestore_collection, DumpFirestoreOptions, FirebaseInge
 pub use knowledge::{export_for_finetuning, run_ingestion_pipeline, KnowledgeError};
 #[cfg(feature = "pdf")]
 pub use pdf::{run_pdf_ingestion_pipeline, PdfSyncExtractor};
+#[cfg(feature = "rss")]
 pub use rss::{ingest_from_url, IngestError as RssIngestError};
 #[cfg(feature = "sheets")]
 pub use sheet_faq::{ingest_faq_from_google_sheet, IngestSheetFaqError};
