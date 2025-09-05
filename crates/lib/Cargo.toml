@@ -20,11 +20,11 @@ async-trait.workspace = true
 dyn-clone = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 turso = { workspace = true }
-csv = { workspace = true }
+csv = { workspace = true, optional = true }
 rss = { workspace = true }
 dotenvy = "0.15.7"
 md5 = "0.8"
-pdf = { version = "0.9.0" }
+pdf = { version = "0.9.0", optional = true }
 anyhow.workspace = true
 indradb-lib = { version = "5.0.0", optional = true, features = [
     "rocksdb-datastore",
@@ -42,11 +42,13 @@ tempfile = "3.21.0"
 anyhow = { workspace = true }
 
 [features]
-default = ["graph_db", "firebase"]
+default = ["graph_db", "firebase", "pdf", "sheets"]
 bigquery = ["dep:gcp-bigquery-client"]
 graph_db = ["dep:indradb-lib", "dep:uuid"]
 core-access = ["dep:core-access", "dep:uuid"]
 firebase = ["dep:gcloud-sdk", "dep:tokio-stream", "dep:firestore"]
+pdf = ["dep:pdf"]
+sheets = ["dep:csv"]
 
 [[test]]
 name = "prompts"
