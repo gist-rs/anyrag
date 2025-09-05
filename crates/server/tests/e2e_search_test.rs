@@ -97,7 +97,7 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
 
     // --- 3. Ingest and Embed as an authenticated user ---
     app.client
-        .post(format!("{}/ingest", app.address))
+        .post(format!("{}/ingest/rss", app.address))
         .bearer_auth(token.clone()) // Authenticate this request
         .json(&json!({ "url": app.mock_server.url("/rss") }))
         .send()

@@ -38,7 +38,7 @@ All JSON API responses follow a consistent structure for predictability. The pri
 
 All endpoints support a `debug` query parameter. When you append `?debug=true` to a request URL, the server adds a `debug` object to the response, containing contextual information about the request.
 
--   **Standard Response (`/ingest`)**
+-   **Standard Response (`/ingest/rss`)**
     ```json
     {
       "result": {
@@ -47,7 +47,7 @@ All endpoints support a `debug` query parameter. When you append `?debug=true` t
       }
     }
     ```
--   **Debug Response (`/ingest?debug=true`)**
+-   **Debug Response (`/ingest/rss?debug=true`)**
     ```json
     {
       "debug": {
