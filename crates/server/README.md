@@ -197,6 +197,18 @@ curl -X POST http://localhost:9090/prompt \
   }'
 ```
 
+**Example: Shorthand Alias**
+```sh
+# This shorthand...
+curl -X POST http://localhost:9090/prompt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "prompt": "ls pantip_topics_samples limit=20"
+  }'
+# ...is automatically translated into a full prompt for the AI.
+```
+
 ### Knowledge Base Management API
 
 These endpoints are for building and maintaining the self-improving knowledge base.
@@ -371,5 +383,82 @@ curl -X POST http://localhost:9090/search/knowledge \
   -d '{
     "query": "ทำยังไงถึงจะได้เทสล่า",
     "instruction": "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า"
+  }'
+```
+
+### Advanced API
+
+These endpoints provide more direct control over data retrieval and generation, catering to advanced use cases.
+
+#### `POST /db/query`
+
+Executes a raw, read-only SQL query directly against a project's database. This is useful for programmatic access where you know the exact query you need to run.
+
+**Request Body:** `{"db": "...", "query": "..."}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/db/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "query": "SELECT _id, title, rating FROM pantip_topics_samples WHERE rating >= 3 ORDER BY rating DESC LIMIT 10"
+  }'
+```
+
+#### `POST /gen/text`
+
+Generates new text content by first executing the `context_prompt` as a Text-to-SQL query to retrieve structured data, and then feeding that data as context to the `generation_prompt`. This allows for creating sophisticated, data-driven content.
+
+**Request Body:** `{"db": "...", "generation_prompt": "...", "context_prompt": "..."}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/gen/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "generation_prompt": "Write a short, romantic story in the style of a modern Thai drama, told from a first-person perspective (using ''I'', ''me'', ''my'').",
+    "context_prompt": "Use themes and characters from the highest-rated stories about ''love'' (ความรัก) in the `pantip_topics_samples` table as inspiration."
+  }'
+```
+
+### Data Pipeline API
+
+These endpoints allow you to manage the data lifecycle, from ingesting remote data to building the local knowledge graph that powers advanced generation.
+
+#### `POST /ingest/firebase`
+
+Triggers a server-side dump of a Firestore collection into the corresponding project's local SQLite database.
+
+**Request Body:** `{"project_id": "...", "collection": "...", ...}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/ingest/firebase \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "project_id": "kratooded",
+    "collection": "pantip_topics_samples",
+    "incremental": true,
+    "timestamp_field": "created_time",
+    "limit": 100
+  }'
+```
+
+#### `POST /graph/build`
+
+Builds or updates the in-memory Knowledge Graph from a specified table in a project's local SQLite database.
+
+**Request Body:** `{"db": "...", "table_name": "..."}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/graph/build \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "table_name": "pantip_topics_samples"
   }'
 ```

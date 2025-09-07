@@ -27,6 +27,9 @@ pub trait Storage: Send + Sync + DynClone + Debug {
 
     /// Retrieves the schema for a given table.
     async fn get_table_schema(&self, table_name: &str) -> Result<Arc<TableSchema>, PromptError>;
+
+    /// Lists all tables in the database.
+    async fn list_tables(&self) -> Result<Vec<String>, PromptError>;
 }
 
 dyn_clone::clone_trait_object!(Storage);

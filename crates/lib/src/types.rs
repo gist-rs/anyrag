@@ -74,6 +74,9 @@ pub struct ExecutePromptOptions {
     /// For BigQuery, the project ID. If provided, the query will run against BigQuery instead of the default provider.
     #[serde(default)]
     pub project_id: Option<String>,
+    /// The name of the local project database to use (e.g., "kratooded"). This triggers the use of the SQLite provider.
+    #[serde(default)]
+    pub db: Option<String>,
     /// An optional hint about the content type to guide prompt selection.
     #[serde(default)]
     pub content_type: Option<ContentType>,

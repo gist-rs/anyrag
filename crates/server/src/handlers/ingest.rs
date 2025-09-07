@@ -8,11 +8,11 @@ use crate::auth::middleware::AuthenticatedUser;
 #[cfg(feature = "rss")]
 use anyrag::ingest::ingest_from_url;
 use anyrag::ingest::{
-    ingest_faq_from_google_sheet, ingest_from_google_sheet_url,
+    dump_firestore_collection, ingest_faq_from_google_sheet, ingest_from_google_sheet_url,
     knowledge::IngestionPrompts,
     run_ingestion_pipeline, run_pdf_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
     text::{chunk_text, ingest_chunks_as_documents},
-    PdfSyncExtractor,
+    DumpFirestoreOptions, PdfSyncExtractor,
 };
 use axum::{
     extract::{Query, State},
@@ -100,6 +100,23 @@ pub enum ExtractorChoice {
     #[default]
     Local,
     Gemini,
+}
+
+#[derive(Deserialize)]
+pub struct IngestFirebaseRequest {
+    pub project_id: String,
+    pub collection: String,
+    #[serde(default)]
+    pub incremental: bool,
+    pub timestamp_field: Option<String>,
+    pub limit: Option<i32>,
+    pub fields: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+pub struct IngestFirebaseResponse {
+    pub message: String,
+    pub ingested_documents: usize,
 }
 
 // --- Ingestion Handlers ---
@@ -451,5 +468,50 @@ pub async fn ingest_web_handler(
         ingested_faqs: ingested_count,
     };
     let debug_info = json!({ "url": payload.url, "owner_id": owner_id });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+/// Handler for ingesting a Firestore collection into a local project database.
+#[cfg(feature = "firebase")]
+pub async fn ingest_firebase_handler(
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<IngestFirebaseRequest>,
+) -> Result<Json<ApiResponse<IngestFirebaseResponse>>, AppError> {
+    info!(
+        "Received Firestore ingest request for project: '{}', collection: '{}'",
+        payload.project_id, payload.collection
+    );
+
+    let db_path = format!("db/{}.db", payload.project_id);
+    let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
+    sqlite_provider.initialize_schema().await?;
+
+    let options = DumpFirestoreOptions {
+        project_id: &payload.project_id,
+        collection: &payload.collection,
+        incremental: payload.incremental,
+        timestamp_field: payload.timestamp_field.as_deref(),
+        limit: payload.limit,
+        fields: payload.fields.as_deref(),
+    };
+
+    let ingested_count = dump_firestore_collection(&sqlite_provider, options)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Firebase dump failed: {}", e)))?;
+
+    let response = IngestFirebaseResponse {
+        message: format!("Successfully ingested {ingested_count} documents from Firestore."),
+        ingested_documents: ingested_count,
+    };
+
+    let debug_info = json!({
+        "project_id": payload.project_id,
+        "collection": payload.collection,
+        "incremental": payload.incremental,
+        "timestamp_field": payload.timestamp_field,
+        "limit": payload.limit,
+        "fields": payload.fields,
+    });
+
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }

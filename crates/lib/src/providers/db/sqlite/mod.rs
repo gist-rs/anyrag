@@ -255,6 +255,34 @@ impl Storage for SqliteProvider {
 
         Ok(schema)
     }
+
+    async fn list_tables(&self) -> Result<Vec<String>, PromptError> {
+        info!("Listing all tables in SQLite database.");
+        let conn = self
+            .db
+            .connect()
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+                (),
+            )
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+
+        let mut tables = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
+        {
+            if let Ok(TursoValue::Text(name)) = row.get_value(0) {
+                tables.push(name);
+            }
+        }
+        Ok(tables)
+    }
 }
 
 #[async_trait]

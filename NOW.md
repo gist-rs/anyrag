@@ -11,7 +11,7 @@ To address the need for a simple, direct way to list table contents, a new, powe
 *   **Request Body Example:**
     ```json
     {
-      "project_id": "talent-finder-us",
+      "project_id": "kratooded",
       "query": "SELECT _id, title, rating FROM pantip_topics_samples WHERE rating >= 3 ORDER BY rating DESC LIMIT 10"
     }
     ```
@@ -25,7 +25,7 @@ For quick, interactive exploration, the existing `/prompt` endpoint will be enha
 *   **Shorthand Example:**
     ```json
     {
-      "project_id": "talent-finder-us",
+      "project_id": "kratooded",
       "prompt": "ls pantip_topics_samples limit=20"
     }
     ```
@@ -40,7 +40,7 @@ This addresses the most sophisticated use case: generating new content based on 
 *   **Request Body Example:**
     ```json
     {
-      "project_id": "talent-finder-us",
+      "project_id": "kratooded",
       "generation_prompt": "Write a short, romantic story in the style of a modern Thai drama.",
       "context_prompt": "Use themes and characters from the highest-rated stories about 'love' (ความรัก) in the 'pantip_topics_samples' table as inspiration."
     }

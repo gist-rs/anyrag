@@ -201,13 +201,35 @@ impl PromptClient {
                 .replace("{alias_instruction}", &alias_instruction);
 
             (system_prompt, user_prompt)
-        } else if options.table_name.is_some() {
+        } else if options.table_name.is_some() || options.db.is_some() {
             // --- Logic for Query Generation ---
             info!("[get_query_from_prompt] Using table-based query generation.");
+
+            // If a specific table is named, get its schema.
             if let Some(table) = &options.table_name {
                 let schema = self.storage_provider.get_table_schema(table).await?;
                 let schema_str = Self::format_schema_for_prompt(&schema);
-                context.push_str(&format!("Schema for `{table}`: ({schema_str}). "));
+                context.push_str(&format!("# Schema for `{table}`\n{schema_str}\n\n"));
+            } else {
+                // If no specific table is named, but a DB is context, get all table schemas.
+                info!("[get_query_from_prompt] No table_name provided; fetching all schemas for the current DB.");
+                let tables = self.storage_provider.list_tables().await?;
+                for table in tables {
+                    // It's possible for schema fetching to fail for a specific table.
+                    // We'll log the error but continue, so the AI gets as much context as possible.
+                    match self.storage_provider.get_table_schema(&table).await {
+                        Ok(schema) => {
+                            let schema_str = Self::format_schema_for_prompt(&schema);
+                            context.push_str(&format!("# Schema for `{table}`\n{schema_str}\n\n"));
+                        }
+                        Err(e) => {
+                            error!(
+                                "[get_query_from_prompt] Failed to get schema for table '{}': {}",
+                                table, e
+                            );
+                        }
+                    }
+                }
             }
 
             let system_prompt = options.system_prompt_template.clone().unwrap_or_else(|| {
@@ -320,23 +342,26 @@ impl PromptClient {
         Ok(QueryOrAnswer::Query(query))
     }
 
+    /// Formats a `TableSchema` into a markdown-like string for the AI prompt.
     fn format_schema_for_prompt(schema: &TableSchema) -> String {
         schema
             .fields
             .iter()
             .map(|field| {
                 let mut field_str = format!(
-                    "{field_name} {field_type:?}",
+                    "- {field_name}: {field_type:?}",
                     field_name = field.name,
                     field_type = field.r#type
                 );
                 if let Some(desc) = &field.description {
-                    field_str.push_str(&format!(" ({desc})"));
+                    if !desc.is_empty() {
+                        field_str.push_str(&format!(" ({desc})"));
+                    }
                 }
                 field_str
             })
             .collect::<Vec<String>>()
-            .join(", ")
+            .join("\n")
     }
 
     /// Formats the raw query result using the AI provider if an instruction is given.

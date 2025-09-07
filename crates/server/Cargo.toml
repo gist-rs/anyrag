@@ -43,10 +43,11 @@ config = { version = "0.15.15", features = ["yaml"] }
 uuid = { workspace = true }
 
 [features]
-default = ["bigquery", "graph_db", "rss"]
+default = ["bigquery", "graph_db", "rss", "firebase"]
 bigquery = ["anyrag/bigquery"]
 graph_db = ["anyrag/graph_db"]
 rss = ["anyrag/rss"]
+firebase = ["anyrag/firebase"]
 
 [dev-dependencies]
 chrono = { workspace = true }

@@ -164,4 +164,12 @@ impl Storage for BigQueryProvider {
 
         Ok(schema_arc)
     }
+
+    /// Lists all tables in the BigQuery project.
+    /// Note: This is a placeholder implementation.
+    async fn list_tables(&self) -> Result<Vec<String>, PromptError> {
+        // This is a complex operation in BigQuery, requiring iterating through datasets.
+        // For now, we return an empty list as it's not critical for the SQLite-focused feature.
+        Ok(Vec::new())
+    }
 }

@@ -82,6 +82,10 @@ impl Storage for MockStorageProvider {
     ) -> Result<Arc<TableSchema>, anyrag::PromptError> {
         Ok(Arc::new(TableSchema::default()))
     }
+
+    async fn list_tables(&self) -> Result<Vec<String>, anyrag::PromptError> {
+        Ok(vec!["mock_table".to_string()])
+    }
 }
 
 /// Creates a "real" AI provider based on environment variables.
