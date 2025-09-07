@@ -19,7 +19,7 @@ pub fn create_router(app_state: AppState) -> Router {
             get(handlers::google_auth_callback_handler),
         )
         .route("/auth/me", get(handlers::get_me_handler))
-        .route("/users", get(handlers::get_users_handler)) // --- Admin Route ---
+        .route("/users", get(handlers::get_users_handler))
         .route("/prompt", post(handlers::prompt_handler))
         .route("/ingest/text", post(handlers::ingest_text_handler))
         .route(
