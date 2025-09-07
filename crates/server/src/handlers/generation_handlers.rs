@@ -5,6 +5,9 @@
 
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptResponse};
 use crate::auth::middleware::AuthenticatedUser;
+use anyrag::{
+    providers::db::sqlite::SqliteProvider, types::ExecutePromptOptions, PromptClientBuilder,
+};
 use axum::{
     extract::{Query, State},
     Json,
@@ -64,20 +67,20 @@ pub async fn gen_text_handler(
 
     // Create a dynamic SQLite client for the specified project DB.
     let db_path = format!("db/{}.db", payload.db);
-    let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
-    let context_client = anyrag::PromptClientBuilder::new()
+    let sqlite_provider = SqliteProvider::new(&db_path).await?;
+    let context_client = PromptClientBuilder::new()
         .ai_provider(context_provider.clone())
         .storage_provider(Box::new(sqlite_provider))
         .build()?;
 
     // The user's `context_prompt` is treated as a full-fledged prompt for the text-to-SQL engine.
-    // We don't need a specific table_name because the prompt itself mentions the table, and
-    // the model should be able to infer it.
-    let context_options = anyrag::ExecutePromptOptions {
+    // The model should infer the table name from the prompt, so we don't specify it.
+    // **Crucially**, we apply the prompt templates from our configuration to this internal call.
+    let context_options = ExecutePromptOptions {
         prompt: payload.context_prompt.clone(),
-        // We set `db` here to ensure the logic knows which DB it's working with,
-        // although the client is already pointing to the correct file.
         db: Some(payload.db.clone()),
+        system_prompt_template: Some(context_task_config.system_prompt.clone()),
+        user_prompt_template: Some(context_task_config.user_prompt.clone()),
         ..Default::default()
     };
 
@@ -117,7 +120,7 @@ pub async fn gen_text_handler(
 
     // Construct the final prompt for the generation provider.
     let final_user_prompt = format!(
-        "# User's Goal\n{}\n\n# Inspirational Context\nUse the following JSON data as inspiration. Do not simply copy it.\n---\n{}",
+        "# User's Goal\n{}\n# Inspirational Context\nDraw inspiration from the following JSON data of real online posts about relationships. Blend elements creatively—such as debt from gambling, the role of money in attraction, dowry disputes, rejecting suitors due to poverty, or hidden feelings in friendships—without copying directly. Weave these into a cohesive, original narrative that feels genuine and relatable.JSON Data:\n---\n{}",
         payload.generation_prompt,
         retrieved_context
     );

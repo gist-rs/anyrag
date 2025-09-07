@@ -418,8 +418,8 @@ curl -X POST http://localhost:9090/gen/text \
   -H "Content-Type: application/json" \
   -d '{
     "db": "kratooded",
-    "generation_prompt": "Write a short, romantic story in the style of a modern Thai drama, told from a first-person perspective (using ''I'', ''me'', ''my'').",
-    "context_prompt": "Use themes and characters from the highest-rated stories about ''love'' (ความรัก) in the `pantip_topics_samples` table as inspiration."
+    "generation_prompt": "User''s GoalWrite a short, romantic story in the style of a modern Thai drama. The story must be in Thai language (ภาษาไทย) only, told from a first-person perspective using \"ผม\" or \"เรา\" to make it feel personal and intimate. Aim for 800-1500 characters to keep it concise yet engaging.The story should feel authentic and raw, like a real personal anecdote shared on an online forum such as Pantip. Incorporate everyday language, emotional confessions, twists, and reflections that mirror real-life relationship struggles. Avoid overly dramatic or scripted dialogue; make it conversational and heartfelt, as if the narrator is venting or sharing their story online.Key Elements to IncludeRomantic Theme: Focus on a bittersweet romance involving themes like unexpected love, betrayal, financial hardships in relationships, jealousy, unrequited feelings, or personal growth through love.\nFirst-Person Perspective: Use \"ผม\" for a male narrator to add authenticity, sharing inner thoughts, regrets, and hopes.\nModern Thai Drama Style: Include elements like urban settings (e.g., Bangkok nightlife, apartments, workplaces), family pressures, social media influences, and emotional highs/lows typical in Thai series (e.g., love triangles, sacrifices, redemptions).\n\n",
+    "context_prompt": "Use themes and characters from the highest-rated stories where the topic_detail contains ''love'' (ความรัก) in the `pantip_topics_samples` table as inspiration."
   }'
 ```
 

@@ -31,7 +31,8 @@ tasks:
       5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
       6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
       7. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
-      8. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
+      8. **Compatibility Constraint**: You MUST NOT use subqueries (e.g., `SELECT ... FROM (SELECT ...)` or `WHERE col IN (SELECT ...)`). Use `JOIN`s or simplified `WHERE` clauses instead.
+      9. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
 
   direct_generation:
     provider: "gemini_default"
