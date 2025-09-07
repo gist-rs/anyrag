@@ -14,6 +14,7 @@ hyper-util = { version = "0.1.16", features = ["full"] }
 
 # Data & Serialization
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde_urlencoded = "0.7.1"
 
 # Auth & System Interaction

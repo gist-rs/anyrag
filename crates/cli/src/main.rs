@@ -11,11 +11,34 @@ use anyrag::{
 };
 use clap::{Parser, Subcommand};
 use keyring::Entry;
-use std::fs::File;
+use std::fs;
 use std::path::Path;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 use turso::Value as TursoValue;
+
+// --- Helper Functions ---
+
+/// Resolves the GCP Project ID.
+///
+/// It prioritizes the explicitly provided ID, then falls back to inferring
+/// it from a `gcp_creds.json` file.
+fn resolve_project_id(project_id_arg: Option<&str>) -> Result<String> {
+    if let Some(id) = project_id_arg {
+        return Ok(id.to_string());
+    }
+
+    if let Ok(file_content) = fs::read_to_string("gcp_creds.json") {
+        let json: serde_json::Value = serde_json::from_str(&file_content)
+            .map_err(|e| anyhow::anyhow!("Failed to parse gcp_creds.json: {e}"))?;
+        if let Some(project_id) = json["project_id"].as_str() {
+            println!("Inferred project ID '{project_id}' from gcp_creds.json.");
+            return Ok(project_id.to_string());
+        }
+    }
+
+    bail!("Project ID not provided and could not be inferred from gcp_creds.json. Please use the --project-id flag.")
+}
 
 // --- CLI Definition ---
 
@@ -58,7 +81,7 @@ enum DumpCommands {
 
 #[derive(Parser, Debug)]
 struct FirebaseArgs {
-    /// The Google Cloud Project ID for Firestore. If omitted, it will be inferred from `gcp_creds.json`.
+    /// The Google Cloud Project ID. If omitted, it will be inferred from `gcp_creds.json`.
     #[arg(long)]
     project_id: Option<String>,
     /// The name of the Firestore collection to dump
@@ -73,6 +96,9 @@ struct FirebaseArgs {
     /// Limit the number of documents to dump, useful for testing
     #[arg(long)]
     limit: Option<i32>,
+    /// Comma-separated list of specific fields to select. If omitted, all fields are dumped.
+    #[arg(long, value_delimiter = ',')]
+    fields: Option<Vec<String>>,
 }
 
 #[derive(Parser, Debug)]
@@ -80,12 +106,18 @@ struct ProcessArgs {}
 
 #[derive(Parser, Debug)]
 struct ListArgs {
+    /// The Google Cloud Project ID. If omitted, it will be inferred from `gcp_creds.json`.
+    #[arg(long)]
+    project_id: Option<String>,
     /// The name of the table to list items from
     table_name: String,
 }
 
 #[derive(Parser, Debug)]
 struct CountArgs {
+    /// The Google Cloud Project ID. If omitted, it will be inferred from `gcp_creds.json`.
+    #[arg(long)]
+    project_id: Option<String>,
     /// The name of the table to count items in
     table_name: String,
 }
@@ -95,7 +127,7 @@ struct CountArgs {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Setup logging to a file
-    let log_file = File::create("anyrag-cli.log")?;
+    let log_file = fs::File::create("anyrag-cli.log")?;
     let subscriber = fmt::Subscriber::builder()
         .with_writer(log_file)
         .with_env_filter(EnvFilter::from_default_env())
@@ -157,25 +189,26 @@ async fn handle_dump(args: &DumpArgs) -> Result<()> {
 }
 
 async fn handle_dump_firebase(args: &FirebaseArgs) -> Result<()> {
-    // The CLI's responsibility is now just to set up the provider and call the library.
-    let db_path = "db/anyrag.db";
-    let sqlite_provider = SqliteProvider::new(db_path).await?;
+    let project_id = resolve_project_id(args.project_id.as_deref())?;
+    let db_path = format!("db/{project_id}.db");
+    fs::create_dir_all("db")?;
+
+    let sqlite_provider = SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?;
     info!("Local database at '{db_path}' is ready.");
 
-    // Prepare options for the library function from the CLI arguments.
     let options = DumpFirestoreOptions {
-        project_id: args.project_id.as_deref(),
+        project_id: &project_id,
         collection: &args.collection,
         incremental: args.incremental,
         timestamp_field: args.timestamp_field.as_deref(),
         limit: args.limit,
+        fields: args.fields.as_deref(),
     };
 
-    // Call the library function to perform the actual work.
     dump_firestore_collection(&sqlite_provider, options)
         .await
-        .map_err(|e| anyhow::anyhow!("Firebase dump failed: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Firebase dump failed: {e}"))?;
 
     Ok(())
 }
@@ -186,11 +219,12 @@ async fn handle_process(_args: &ProcessArgs) -> Result<()> {
 }
 
 async fn handle_list(args: &ListArgs) -> Result<()> {
-    let db_path = "db/anyrag.db";
-    if !Path::new(db_path).exists() {
-        bail!("Database file not found. Run a `dump` command first.");
+    let project_id = resolve_project_id(args.project_id.as_deref())?;
+    let db_path = format!("db/{project_id}.db");
+    if !Path::new(&db_path).exists() {
+        bail!("Database file '{db_path}' not found. Run a `dump` command first for project '{project_id}'.");
     }
-    let sqlite_provider = SqliteProvider::new(db_path).await?;
+    let sqlite_provider = SqliteProvider::new(&db_path).await?;
     let conn = sqlite_provider.db.connect()?;
 
     let sql = format!("SELECT * FROM {} LIMIT 10", args.table_name);
@@ -209,7 +243,6 @@ async fn handle_list(args: &ListArgs) -> Result<()> {
         return Ok(());
     }
 
-    // Print headers
     let headers = column_names.join(" | ");
     println!("{headers}");
     println!("{}", "-".repeat(headers.len()));
@@ -246,11 +279,12 @@ async fn handle_list(args: &ListArgs) -> Result<()> {
 }
 
 async fn handle_count(args: &CountArgs) -> Result<()> {
-    let db_path = "db/anyrag.db";
-    if !Path::new(db_path).exists() {
-        bail!("Database file not found. Run a `dump` command first.");
+    let project_id = resolve_project_id(args.project_id.as_deref())?;
+    let db_path = format!("db/{project_id}.db");
+    if !Path::new(&db_path).exists() {
+        bail!("Database file '{db_path}' not found. Run a `dump` command first for project '{project_id}'.");
     }
-    let sqlite_provider = SqliteProvider::new(db_path).await?;
+    let sqlite_provider = SqliteProvider::new(&db_path).await?;
     let conn = sqlite_provider.db.connect()?;
 
     let sql = format!("SELECT COUNT(*) FROM {}", args.table_name);
@@ -261,7 +295,6 @@ async fn handle_count(args: &CountArgs) -> Result<()> {
         let count: i64 = row.get(0)?;
         println!("Table '{}' has {} rows.", args.table_name, count);
     } else {
-        // This case should be unlikely with COUNT(*) but good to have.
         bail!("Could not count rows in table '{}'.", args.table_name);
     }
 

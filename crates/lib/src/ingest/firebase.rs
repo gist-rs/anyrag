@@ -38,11 +38,12 @@ pub enum FirebaseIngestError {
 
 /// Options for configuring a Firestore dump operation.
 pub struct DumpFirestoreOptions<'a> {
-    pub project_id: Option<&'a str>,
+    pub project_id: &'a str,
     pub collection: &'a str,
     pub incremental: bool,
     pub timestamp_field: Option<&'a str>,
     pub limit: Option<i32>,
+    pub fields: Option<&'a [String]>,
 }
 
 // --- Public API ---
@@ -66,9 +67,7 @@ pub async fn dump_firestore_collection(
     sqlite_provider: &SqliteProvider,
     options: DumpFirestoreOptions<'_>,
 ) -> Result<usize, FirebaseIngestError> {
-    // 1. Resolve Project ID and set up authentication
-    let project_id = resolve_project_id(options.project_id)?;
-
+    // 1. Set up authentication
     if Path::new("gcp_creds.json").exists() {
         println!("Found gcp_creds.json, using service account for authentication.");
         info!("Setting GOOGLE_APPLICATION_CREDENTIALS to use gcp_creds.json");
@@ -81,14 +80,21 @@ pub async fn dump_firestore_collection(
     }
 
     // 2. Setup clients
-    let firestore_db = FirestoreDb::new(&project_id).await?;
+    let firestore_db = FirestoreDb::new(options.project_id).await?;
     let table_name = sanitize_table_name(options.collection);
 
     // 3. Build Firestore Request
-    let mut query = firestore_db.fluent().select().from(options.collection);
+    let query_builder = firestore_db.fluent().select();
+    let mut query = match options.fields {
+        Some(fields) if !fields.is_empty() => {
+            info!("Selecting specific fields: {:?}", fields);
+            query_builder.fields(fields).from(options.collection)
+        }
+        _ => query_builder.from(options.collection),
+    };
 
     let last_timestamp = if options.incremental {
-        state_manager::read_last_timestamp(&project_id, &table_name)
+        state_manager::read_last_timestamp(options.project_id, &table_name)
             .map_err(|e| FirebaseIngestError::Internal(e.to_string()))?
             .map(|s| s.parse::<DateTime<Utc>>())
             .transpose()?
@@ -151,7 +157,7 @@ pub async fn dump_firestore_collection(
     if options.incremental {
         if let Some(ts_to_save) = newest_timestamp_seen {
             state_manager::write_last_timestamp(
-                &project_id,
+                options.project_id,
                 &table_name,
                 &ts_to_save.0.to_rfc3339(),
             )
@@ -166,26 +172,29 @@ pub async fn dump_firestore_collection(
 
 // --- Implementation Details (private functions) ---
 
-fn resolve_project_id(project_id_arg: Option<&str>) -> Result<String, FirebaseIngestError> {
-    if let Some(id) = project_id_arg {
-        return Ok(id.to_string());
-    }
-
-    if let Ok(file_content) = std::fs::read_to_string("gcp_creds.json") {
-        let json: serde_json::Value = serde_json::from_str(&file_content)?;
-        if let Some(project_id) = json["project_id"].as_str() {
-            println!("Inferred project ID '{project_id}' from gcp_creds.json.");
-            return Ok(project_id.to_string());
-        }
-    }
-
-    Err(FirebaseIngestError::Auth(
-        "Project ID not provided and could not be inferred from gcp_creds.json. Please use the --project-id flag."
-            .to_string(),
-    ))
-}
-
 // --- Helper Functions for Firebase Dump ---
+
+/// Converts a string from camelCase or PascalCase to snake_case, handling acronyms.
+fn to_snake_case(s: &str) -> String {
+    let mut snake = String::new();
+    let mut chars = s.chars().enumerate().peekable();
+
+    while let Some((i, ch)) = chars.next() {
+        if i > 0 && ch.is_uppercase() {
+            let prev = s.chars().nth(i - 1).unwrap();
+            // Add `_` if previous is lowercase OR if next is lowercase and previous is also uppercase
+            if prev.is_lowercase() {
+                snake.push('_');
+            } else if let Some(&(_, next_ch)) = chars.peek() {
+                if next_ch.is_lowercase() && prev.is_uppercase() {
+                    snake.push('_');
+                }
+            }
+        }
+        snake.push(ch.to_ascii_lowercase());
+    }
+    snake
+}
 
 fn get_timestamp_from_doc(doc: &FirestoreDocument, ts_field: &str) -> Option<FirestoreTimestamp> {
     use chrono::TimeZone;
@@ -251,7 +260,7 @@ async fn create_sqlite_table(
 
     let mut columns_def: Vec<String> = schema
         .iter()
-        .map(|(name, dtype)| format!("\"{name}\" {dtype}"))
+        .map(|(name, dtype)| format!("\"{}\" {}", to_snake_case(name), dtype))
         .collect();
     columns_def.sort();
     columns_def.insert(0, "\"_id\" TEXT PRIMARY KEY".to_string());
@@ -276,21 +285,27 @@ async fn insert_documents(
     let conn = provider.db.connect()?;
     conn.execute("BEGIN TRANSACTION", ()).await?;
 
-    let mut columns: Vec<String> = schema.keys().cloned().collect();
-    columns.sort();
+    // Create a sorted map from snake_case to camelCase to ensure consistent column order.
+    let mut column_map: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    for camel_case_name in schema.keys() {
+        column_map.insert(to_snake_case(camel_case_name), camel_case_name.clone());
+    }
 
-    let columns_list = columns
+    let snake_case_columns: Vec<String> = column_map.keys().cloned().collect();
+
+    let columns_list = snake_case_columns
         .iter()
         .map(|c| format!("\"{c}\""))
         .collect::<Vec<_>>()
         .join(", ");
 
-    let values_placeholders = (0..columns.len() + 1)
+    let values_placeholders = (0..snake_case_columns.len() + 1)
         .map(|_| "?")
         .collect::<Vec<_>>()
         .join(", ");
 
-    let update_set_clause = columns
+    let update_set_clause = snake_case_columns
         .iter()
         .map(|c| format!("\"{c}\" = excluded.\"{c}\""))
         .collect::<Vec<_>>()
@@ -312,8 +327,11 @@ async fn insert_documents(
             .to_string();
         let mut params: Vec<TursoValue> = vec![doc_id.into()];
 
-        for col_name in &columns {
-            let firestore_value = doc.fields.get(col_name);
+        // Iterate through the sorted snake_case columns to ensure parameter order.
+        for snake_case_name in &snake_case_columns {
+            // Get the original camelCase name to look up in the Firestore document.
+            let camel_case_name = column_map.get(snake_case_name).unwrap();
+            let firestore_value = doc.fields.get(camel_case_name);
             let turso_val = convert_firestore_value_to_turso(firestore_value.cloned())?;
             params.push(turso_val);
         }

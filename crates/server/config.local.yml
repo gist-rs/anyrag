@@ -10,7 +10,23 @@ providers:
     api_key: null
     model_name: "gemma-2-9b-it-mlx"
 
-# tasks section is intentionally left blank.
-# The default prompts are loaded from `config.prompt.yml`.
-# You can override specific tasks by creating a `prompt.yml` file.
-tasks: {}
+# Override all default tasks to use the local provider.
+# The prompts for these tasks are inherited from `config.prompt.yml`
+# unless you create a `prompt.yml` file to override them.
+tasks:
+  query_generation:
+    provider: "local_default"
+  direct_generation:
+    provider: "local_default"
+  rag_synthesis:
+    provider: "local_default"
+  knowledge_distillation:
+    provider: "local_default"
+  query_analysis:
+    provider: "local_default"
+  llm_rerank:
+    provider: "local_default"
+  knowledge_augmentation:
+    provider: "local_default"
+  knowledge_metadata_extraction:
+    provider: "local_default"

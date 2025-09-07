@@ -87,18 +87,28 @@ pub async fn prompt_handler(
         serde_json::from_value(payload).map_err(anyrag::PromptError::from)?;
 
     // --- Task-based Configuration Loading ---
+    // This logic determines which set of prompts and which AI provider to use.
     let task_name = match options.content_type {
+        // 1. If a specific content_type is provided, use its dedicated task.
         #[cfg(feature = "rss")]
         Some(ContentType::Rss) => "rss_summarization",
         Some(ContentType::Knowledge) => "rag_synthesis",
-        _ => "query_generation",
+        // 2. If no content_type, decide based on whether it's a query or direct generation.
+        _ => {
+            if options.table_name.is_some() || options.project_id.is_some() {
+                // If a table or project is specified, it's a query task.
+                "query_generation"
+            } else {
+                // Otherwise, it's a general-purpose text generation task.
+                "direct_generation"
+            }
+        }
     };
-    info!("Selected task '{}' based on content type.", task_name);
+    info!("Selected task '{task_name}' based on request payload.");
 
     let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
-            "Configuration for task '{}' not found.",
-            task_name
+            "Configuration for task '{task_name}' not found."
         ))
     })?;
 
@@ -106,9 +116,7 @@ pub async fn prompt_handler(
     let provider_name = &task_config.provider;
     let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
-            "Provider '{}' for task '{}' not found in providers map.",
-            provider_name,
-            task_name
+            "Provider '{provider_name}' for task '{task_name}' not found in providers map."
         ))
     })?;
 

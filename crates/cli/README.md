@@ -48,6 +48,7 @@ This is the primary command for fetching data from a Google Firestore collection
 *   `--incremental`: (Optional) Enables incremental sync mode. When used, the CLI will only fetch documents that are newer than the last sync point.
 *   `--timestamp-field <FIELD_NAME>`: (Required if `--incremental` is used) The name of the document field that contains the update/creation timestamp (e.g., `updatedAt`, `createdAt`). This field is used to determine which documents are new.
 *   `--limit <NUMBER>`: (Optional) Limits the number of documents to fetch. This is very useful for testing a dump without fetching the entire collection.
+*   `--fields <FIELDS>`: (Optional) A comma-separated list of specific fields to select from the documents (e.g., `title,author,rating`). If omitted, all fields are dumped. Firestore field names with camelCase (like `topicDetail`) will be automatically converted to snake_case (`topic_detail`) in the database.
 
 **Examples:**
 
@@ -79,6 +80,15 @@ cargo run -p cli -- dump firebase \
   --collection posts \
   --incremental \
   --timestamp-field updatedAt
+```
+
+**5. Dump specific fields from a collection:**
+This will fetch only the `title`, `topicDetail`, and `rating` fields from each document. The `topicDetail` field will be saved as `topic_detail` in the local database.
+```sh
+cargo run -p cli -- dump firebase \
+  --collection pantip_topics_samples \
+  --fields title,topicDetail,rating \
+  --limit 50
 ```
 
 ### `process`

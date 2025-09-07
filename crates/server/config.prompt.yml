@@ -33,6 +33,13 @@ tasks:
       7. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
       8. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
 
+  direct_generation:
+    provider: "gemini_default"
+    system_prompt: |
+      You are a helpful AI assistant. Follow the user's instructions carefully and provide a direct, concise response.
+    user_prompt: |
+      {prompt}
+
   rag_synthesis:
     provider: "gemini_default"
     system_prompt: |
