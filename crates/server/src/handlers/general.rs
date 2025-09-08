@@ -22,7 +22,7 @@ use tracing::info;
 
 /// A server-specific version of `ExecutePromptOptions` that includes the `db` field
 /// for selecting a project database.
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct ServerExecutePromptOptions {
     // All fields from the library struct
     pub prompt: String,

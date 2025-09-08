@@ -9,7 +9,11 @@ use super::{
 };
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
-    providers::db::sqlite::SqliteProvider, types::ExecutePromptOptions as LibExecutePromptOptions,
+    providers::{
+        ai::{gemini::GeminiProvider, local::LocalAiProvider, AiProvider},
+        db::sqlite::SqliteProvider,
+    },
+    types::ExecutePromptOptions as LibExecutePromptOptions,
     PromptClientBuilder,
 };
 use axum::{
@@ -24,9 +28,13 @@ use tracing::info;
 
 #[derive(Deserialize, Debug)]
 pub struct GenTextRequest {
-    pub db: String,
+    #[serde(default)]
+    pub db: Option<String>,
     pub generation_prompt: String,
-    pub context_prompt: String,
+    #[serde(default)]
+    pub context_prompt: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 // --- Generation Handlers ---
@@ -45,93 +53,162 @@ pub async fn gen_text_handler(
     debug_params: Query<DebugParams>,
     Json(payload): Json<GenTextRequest>,
 ) -> Result<Json<ApiResponse<PromptResponse>>, AppError> {
-    info!("Received text generation request for db: '{}'", payload.db);
+    // Determine the database name, falling back to the default from config.
+    let db_name = payload.db.clone().unwrap_or_else(|| {
+        std::path::Path::new(&app_state.config.db_url)
+            .file_stem()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or("anyrag")
+            .to_string()
+    });
+    info!("Received text generation request for db: '{}'", db_name);
 
-    // --- 1. Context Retrieval via Text-to-SQL ---
-    // This step executes the `context_prompt` against the specified project database.
-    let context_task_name = "query_generation";
-    let context_task_config = app_state.tasks.get(context_task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Task '{context_task_name}' not found in config"
-        ))
-    })?;
-    let context_provider_name = &context_task_config.provider;
-    let context_provider = app_state
-        .ai_providers
-        .get(context_provider_name)
-        .ok_or_else(|| {
+    let mut retrieved_context = String::new();
+    let mut context_sql: Option<String> = None;
+
+    // --- 1. Context Retrieval via Text-to-SQL (Optional) ---
+    if let Some(context_prompt) = payload.context_prompt.as_ref().filter(|s| !s.is_empty()) {
+        info!("Context prompt provided. Retrieving context from DB.");
+        let context_task_name = "query_generation";
+        let context_task_config = app_state.tasks.get(context_task_name).ok_or_else(|| {
             AppError::Internal(anyhow::anyhow!(
-                "Provider '{context_provider_name}' not found"
+                "Task '{context_task_name}' not found in config"
             ))
         })?;
+        let context_provider_name = &context_task_config.provider;
+        let context_provider = app_state
+            .ai_providers
+            .get(context_provider_name)
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Provider '{context_provider_name}' not found"
+                ))
+            })?;
 
-    // Create a dynamic SQLite client for the specified project DB.
-    let db_path = format!("db/{}.db", payload.db);
-    let sqlite_provider = SqliteProvider::new(&db_path).await?;
-    let context_client = PromptClientBuilder::new()
-        .ai_provider(context_provider.clone())
-        .storage_provider(Box::new(sqlite_provider))
-        .build()?;
+        let db_path = format!("db/{db_name}.db");
+        let sqlite_provider = SqliteProvider::new(&db_path).await?;
+        let context_client = PromptClientBuilder::new()
+            .ai_provider(context_provider.clone())
+            .storage_provider(Box::new(sqlite_provider))
+            .build()?;
 
-    // The user's `context_prompt` is treated as a full-fledged prompt for the text-to-SQL engine.
-    // The model should infer the table name from the prompt, so we don't specify it.
-    // **Crucially**, we apply the prompt templates from our configuration to this internal call.
-    let server_options = ServerExecutePromptOptions {
-        prompt: payload.context_prompt.clone(),
-        db: Some(payload.db.clone()),
-        system_prompt_template: Some(context_task_config.system_prompt.clone()),
-        user_prompt_template: Some(context_task_config.user_prompt.clone()),
-        table_name: None,
-        project_id: None,
-        content_type: None,
-        context: None,
-        instruction: None,
-        answer_key: None,
-        format_system_prompt_template: None,
-        format_user_prompt_template: None,
-    };
-    let context_options: LibExecutePromptOptions = server_options.into();
+        let server_options = ServerExecutePromptOptions {
+            prompt: context_prompt.clone(),
+            db: Some(db_name.clone()),
+            system_prompt_template: Some(context_task_config.system_prompt.clone()),
+            user_prompt_template: Some(context_task_config.user_prompt.clone()),
+            ..Default::default()
+        };
+        let context_options: LibExecutePromptOptions = server_options.into();
 
-    let context_result = context_client
-        .execute_prompt_with_options(context_options)
-        .await?;
+        let context_result = context_client
+            .execute_prompt_with_options(context_options)
+            .await?;
 
-    let retrieved_context = context_result.database_result.ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "The context prompt did not produce a database result. Prompt: '{}'",
-            payload.context_prompt
-        ))
-    })?;
+        retrieved_context = context_result.database_result.unwrap_or_default();
+        context_sql = context_result.generated_sql;
 
-    if retrieved_context.trim() == "[]" {
-        return Err(AppError::Internal(anyhow::anyhow!(
-            "Could not find any context for the prompt '{}'. The query returned no results.",
-            payload.context_prompt
-        )));
+        if retrieved_context.trim() == "[]" || retrieved_context.trim().is_empty() {
+            info!("Context prompt executed but returned no results.");
+            retrieved_context.clear(); // Ensure it's an empty string if no results found
+        }
+    } else {
+        info!("No context_prompt provided, skipping context retrieval.");
     }
-    info!("--> Retrieved context from DB:\n{}", retrieved_context);
 
     // --- 2. Content Generation ---
-    let gen_task_name = "direct_generation";
-    let gen_task_config = app_state.tasks.get(gen_task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Configuration for task '{gen_task_name}' not found."
-        ))
-    })?;
-    let gen_provider_name = &gen_task_config.provider;
-    let generation_provider =
-        app_state.ai_providers.get(gen_provider_name).ok_or_else(|| {
+    let (model_used_name, generation_provider, gen_task_config): (
+        String,
+        Box<dyn AiProvider>,
+        crate::state::ResolvedTask,
+    ) = if let Some(model_name) = &payload.model {
+        // User has specified a model, override the provider.
+        info!("User specified model override: '{}'", model_name);
+
+        let provider: Box<dyn AiProvider> = if model_name.starts_with("gemini") {
+            // It's a Gemini model.
+            let api_key = std::env::var("AI_API_KEY").map_err(|_| {
+                AppError::Internal(anyhow::anyhow!(
+                    "AI_API_KEY must be set for dynamic Gemini provider"
+                ))
+            })?;
+            let api_url = format!(
+                "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+            );
+            info!(
+                "Dynamically configuring Gemini provider with URL: {}",
+                api_url
+            );
+            Box::new(GeminiProvider::new(api_url, api_key)?)
+        } else {
+            // Default to a local provider.
+            info!("Model is not a Gemini model, falling back to local provider configuration for URL.");
+            // Find a provider named 'local_default' in the config to get its base URL.
+            let local_provider_config = app_state
+                .config
+                .providers
+                .get("local_default")
+                .ok_or_else(|| {
+                    AppError::Internal(anyhow::anyhow!(
+                        "A 'local_default' provider was not found in configuration for fallback."
+                    ))
+                })?;
+
+            Box::new(LocalAiProvider::new(
+                local_provider_config.api_url.clone(),
+                local_provider_config.api_key.clone(),
+                Some(model_name.clone()), // Use the specified model name
+            )?)
+        };
+
+        // We still need a task config for the prompts. Let's use the default `direct_generation` task for that.
+        let task_config = app_state.tasks.get("direct_generation").ok_or_else(|| {
             AppError::Internal(anyhow::anyhow!(
-                "Provider '{gen_provider_name}' for task '{gen_task_name}' not found in providers map."
+                "Configuration for task 'direct_generation' not found."
             ))
         })?;
 
+        (model_name.clone(), provider, task_config.clone())
+    } else {
+        // No model override, use the configured provider.
+        let gen_task_name = "direct_generation";
+        let gen_task_config = app_state.tasks.get(gen_task_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Configuration for task '{gen_task_name}' not found."
+            ))
+        })?;
+        let gen_provider_name = &gen_task_config.provider;
+        let generation_provider =
+            app_state.ai_providers.get(gen_provider_name).ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Provider '{gen_provider_name}' for task '{gen_task_name}' not found in providers map."
+                ))
+            })?;
+
+        // Get the model name from the provider's config
+        let provider_config = app_state
+            .config
+            .providers
+            .get(gen_provider_name)
+            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Provider config not found")))?;
+
+        (
+            provider_config.model_name.clone(),
+            generation_provider.clone(),
+            gen_task_config.clone(),
+        )
+    };
+
     // Construct the final prompt for the generation provider.
-    let final_user_prompt = format!(
+    let final_user_prompt = if retrieved_context.is_empty() {
+        payload.generation_prompt.clone()
+    } else {
+        format!(
         "# User's Goal\n{}\n\n# Inspirational Context\nDraw inspiration from the following JSON data of real online posts but don't copying directly\n---\n{}",
         payload.generation_prompt,
         retrieved_context
-    );
+    )
+    };
     info!(
         "--> Sending final prompt for generation:\n{}",
         final_user_prompt
@@ -156,13 +233,15 @@ pub async fn gen_text_handler(
     };
 
     let debug_info = json!({
-        "db": payload.db,
+        "db": db_name,
         "generation_prompt": payload.generation_prompt,
         "context_prompt": payload.context_prompt,
-        "generated_sql_for_context": context_result.generated_sql,
+        "generated_sql_for_context": context_sql,
         "retrieved_context": retrieved_context,
         "final_prompt_sent_to_ai": final_user_prompt,
         "raw_ai_response": raw_response,
+        "model_override": payload.model,
+        "model_used": model_used_name,
     });
 
     Ok(wrap_response(
