@@ -57,16 +57,28 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
                 let api_key = provider_config.api_key.clone().ok_or_else(|| {
                     anyhow::anyhow!("api_key is required for gemini provider '{name}'")
                 })?;
-                Box::new(GeminiProvider::new(
-                    provider_config.api_url.clone(),
-                    api_key,
+                // If api_url is not provided in config, construct it from the model name.
+                let api_url = provider_config.api_url.clone().unwrap_or_else(|| {
+                    format!(
+                        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+                        provider_config.model_name
+                    )
+                });
+                Box::new(GeminiProvider::new(api_url, api_key)?)
+            }
+            "local" => {
+                // For local providers, the URL is always required.
+                let api_url = provider_config.api_url.clone().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "api_url is required for local provider '{name}'. Please set LOCAL_AI_API_URL in your .env file."
+                    )
+                })?;
+                Box::new(LocalAiProvider::new(
+                    api_url,
+                    provider_config.api_key.clone(),
+                    Some(provider_config.model_name.clone()),
                 )?)
             }
-            "local" => Box::new(LocalAiProvider::new(
-                provider_config.api_url.clone(),
-                provider_config.api_key.clone(),
-                Some(provider_config.model_name.clone()),
-            )?),
             _ => {
                 return Err(anyhow::anyhow!(
                     "Unsupported AI provider type '{}' for provider '{}'",

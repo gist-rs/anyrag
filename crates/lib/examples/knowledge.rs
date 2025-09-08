@@ -72,7 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Configuration from environment variables ---
     let ai_provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "gemini".to_string());
-    let ai_api_url = env::var("AI_API_URL").expect("AI_API_URL environment variable not set");
+    let local_ai_api_url =
+        env::var("LOCAL_AI_API_URL").expect("LOCAL_AI_API_URL environment variable not set");
     let ai_api_key = env::var("AI_API_KEY").ok();
     let ai_model = env::var("AI_MODEL").ok();
     let embeddings_api_url =
@@ -84,11 +85,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ai_provider = match ai_provider_name.as_str() {
         "gemini" => {
             let key = ai_api_key.expect("AI_API_KEY is required for gemini provider");
-            Box::new(GeminiProvider::new(ai_api_url, key)?)
+            let gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
+            Box::new(GeminiProvider::new(gemini_url.to_string(), key)?)
                 as Box<dyn anyrag::providers::ai::AiProvider>
         }
-        "local" => Box::new(LocalAiProvider::new(ai_api_url, ai_api_key, ai_model)?)
-            as Box<dyn anyrag::providers::ai::AiProvider>,
+        "local" => Box::new(LocalAiProvider::new(
+            local_ai_api_url,
+            ai_api_key,
+            ai_model,
+        )?) as Box<dyn anyrag::providers::ai::AiProvider>,
         _ => return Err(format!("Unsupported AI provider: {ai_provider_name}").into()),
     };
 

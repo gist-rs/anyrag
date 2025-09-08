@@ -82,7 +82,7 @@ The `.env` file is used for secrets and environment-specific settings that you d
 **Core Environment Variables:**
 
 -   `AI_API_KEY`: **(Required for cloud providers)** Your secret API key.
--   `AI_API_URL`: The base URL for your primary AI provider.
+-   `LOCAL_AI_API_URL`: The URL for your self-hosted or local AI provider (e.g., Ollama, LM Studio). The Gemini provider URL is now hardcoded in the config and does not need to be set here.
 -   `EMBEDDINGS_API_URL`: The URL for your text embedding model.
 -   `PORT`: The port for the server to listen on. Defaults to `9090`.
 -   `DB_URL`: The path to the SQLite database file. Defaults to `db/anyrag.db`.

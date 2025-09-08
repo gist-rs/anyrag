@@ -6,7 +6,7 @@
 
 use crate::{errors::AppError, state::AppState};
 use anyrag::providers::ai::{gemini::GeminiProvider, local::LocalAiProvider, AiProvider};
-use tracing::{info, warn};
+use tracing::info;
 
 /// A tuple containing the instantiated provider and the name of the model it's configured for.
 pub type DynamicProviderResult = (Box<dyn AiProvider>, String);
@@ -16,8 +16,7 @@ pub type DynamicProviderResult = (Box<dyn AiProvider>, String);
 /// This function handles the logic for:
 /// - Differentiating between Gemini and local models.
 /// - Sourcing API keys and URLs from the environment and configuration.
-/// - **Providing a robust fallback for the local AI provider's URL** if it's not
-///   explicitly configured, preventing "builder errors".
+/// - **Ensuring** that the local AI provider's URL is configured to prevent runtime errors.
 pub async fn create_dynamic_provider(
     app_state: &AppState,
     model_name: &str,
@@ -47,16 +46,11 @@ pub async fn create_dynamic_provider(
             AppError::Internal(anyhow::anyhow!("A 'local_default' provider must be defined in config.yml for local model overrides."))
         })?;
 
-        let api_url = if local_provider_config.api_url.is_empty() {
-            let fallback_url = "http://localhost:1234/v1/chat/completions";
-            warn!(
-                "LOCAL_AI_API_URL is not set in .env. Falling back to default: {}",
-                fallback_url
-            );
-            fallback_url.to_string()
-        } else {
-            local_provider_config.api_url.clone()
-        };
+        let api_url = local_provider_config.api_url.as_ref().cloned().ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "api_url is not set for local_default provider in config.yml. Please set LOCAL_AI_API_URL in your .env file."
+            ))
+        })?;
 
         info!(
             "Dynamically configuring Local AI provider with URL: {}",

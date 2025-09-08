@@ -85,7 +85,8 @@ pub struct EmbeddingConfig {
 pub struct ProviderConfig {
     /// The type of provider (e.g., "gemini", "local").
     pub provider: String,
-    pub api_url: String,
+    /// The API URL. Optional for providers like Gemini where it can be derived.
+    pub api_url: Option<String>,
     /// The API key, which can be null for local providers.
     pub api_key: Option<String>,
     pub model_name: String,

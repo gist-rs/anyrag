@@ -57,7 +57,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // --- Configuration from environment variables ---
     let ai_provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "gemini".to_string());
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL environment variable not set");
+    // Use LOCAL_AI_API_URL for local providers, AI_API_KEY for Gemini.
+    let local_api_url =
+        env::var("LOCAL_AI_API_URL").expect("LOCAL_AI_API_URL must be set for this example");
     let api_key = env::var("AI_API_KEY").ok();
     let ai_model = env::var("AI_MODEL").ok();
     let project_id =
@@ -67,10 +69,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ai_provider = match ai_provider_name.as_str() {
         "gemini" => {
             let key = api_key.expect("AI_API_KEY is required for gemini provider");
-            Box::new(GeminiProvider::new(api_url, key)?)
+            // The Gemini URL is now hardcoded in the provider, so we don't pass it here.
+            Box::new(GeminiProvider::new("".to_string(), key)?)
                 as Box<dyn anyrag::providers::ai::AiProvider>
         }
-        "local" => Box::new(LocalAiProvider::new(api_url, api_key, ai_model)?)
+        "local" => Box::new(LocalAiProvider::new(local_api_url, api_key, ai_model)?)
             as Box<dyn anyrag::providers::ai::AiProvider>,
         _ => return Err(format!("Unsupported AI provider: {ai_provider_name}").into()),
     };

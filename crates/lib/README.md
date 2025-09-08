@@ -58,8 +58,8 @@ The library is configured using environment variables. You can create a `.env` f
 
 **Required Environment Variables:**
 
-*   `AI_API_KEY`: Your API key for the chosen AI provider. Required for the default `gemini` provider.
-*   `AI_API_URL`: The full API endpoint URL for the AI provider.
+*   `AI_API_KEY`: Your API key for a cloud-based AI provider (e.g., Google Gemini). Required if using the `gemini` provider.
+*   `LOCAL_AI_API_URL`: The full API endpoint URL for a local AI provider (e.g., Ollama). Required if `AI_PROVIDER` is `local`.
 *   `BIGQUERY_PROJECT_ID`: The ID of your Google Cloud project where BigQuery is enabled.
 *   `EMBEDDINGS_API_URL`: The API endpoint for the text embeddings model (used for RAG).
 *   `EMBEDDINGS_MODEL`: The name of the text embeddings model to use.
