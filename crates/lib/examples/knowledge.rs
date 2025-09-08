@@ -80,6 +80,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env::var("EMBEDDINGS_API_URL").expect("EMBEDDINGS_API_URL environment variable not set");
     let embeddings_model =
         env::var("EMBEDDINGS_MODEL").expect("EMBEDDINGS_MODEL environment variable not set");
+    // Read the Jina API key from the environment. It is optional.
+    let jina_api_key = env::var("JINA_API_KEY").ok();
 
     // --- Build AI Provider ---
     let ai_provider = match ai_provider_name.as_str() {
@@ -123,6 +125,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ingest_url,
         Some(&user.id),
         prompts,
+        jina_api_key.as_deref(), // Pass the Jina API key here.
     )
     .await
     {

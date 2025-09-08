@@ -53,6 +53,9 @@ pub struct AppConfig {
     /// The path to the SQLite database file. Loaded from `DB_URL` env var.
     #[serde(default = "default_db_url")]
     pub db_url: String,
+    /// An optional API key for the Jina Reader service. Loaded from `JINA_API_KEY` env var.
+    #[serde(default)]
+    pub jina_api_key: Option<String>,
 
     /// Configuration for the text embedding model.
     pub embedding: EmbeddingConfig,
@@ -273,5 +276,17 @@ pub fn get_config(config_path_override: Option<&str>) -> Result<AppConfig, Confi
         .build()?;
 
     // Deserialize the fully resolved configuration into our `AppConfig` struct.
-    settings.try_deserialize::<AppConfig>().map_err(Into::into)
+    let mut config: AppConfig = settings.try_deserialize()?;
+
+    // After all layers, explicitly check for the JINA_API_KEY from the environment
+    // if it hasn't been set by file substitution. This makes loading the key robust.
+    if config.jina_api_key.is_none() {
+        if let Ok(key) = env::var("JINA_API_KEY") {
+            if !key.is_empty() {
+                config.jina_api_key = Some(key);
+            }
+        }
+    }
+
+    Ok(config)
 }

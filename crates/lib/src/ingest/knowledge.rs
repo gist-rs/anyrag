@@ -119,15 +119,17 @@ pub async fn run_ingestion_pipeline(
     url: &str,
     owner_id: Option<&str>,
     prompts: IngestionPrompts<'_>,
+    jina_api_key: Option<&str>,
 ) -> Result<usize, KnowledgeError> {
-    let (document_id, ingested_document) = match ingest_and_cache_url(db, url, owner_id).await {
-        Ok(content) => content,
-        Err(KnowledgeError::ContentUnchanged(url)) => {
-            info!("Content for {} is unchanged, pipeline finished.", url);
-            return Ok(0);
-        }
-        Err(e) => return Err(e),
-    };
+    let (document_id, ingested_document) =
+        match ingest_and_cache_url(db, url, owner_id, jina_api_key).await {
+            Ok(content) => content,
+            Err(KnowledgeError::ContentUnchanged(url)) => {
+                info!("Content for {} is unchanged, pipeline finished.", url);
+                return Ok(0);
+            }
+            Err(e) => return Err(e),
+        };
 
     // Run FAQ generation and metadata extraction concurrently.
     let (faq_result, metadata_result) = tokio::join!(
@@ -157,7 +159,10 @@ pub async fn run_ingestion_pipeline(
 
 // --- Stage 1: Ingestion & Caching ---
 
-pub async fn fetch_markdown_from_url(url: &str) -> Result<String, KnowledgeError> {
+pub async fn fetch_markdown_from_url(
+    url: &str,
+    jina_api_key: Option<&str>,
+) -> Result<String, KnowledgeError> {
     let fetch_url = if url.ends_with(".md") {
         info!("Fetching raw markdown directly from: {url}");
         url.to_string()
@@ -167,7 +172,19 @@ pub async fn fetch_markdown_from_url(url: &str) -> Result<String, KnowledgeError
         jina_url
     };
 
-    let response = reqwest::get(&fetch_url).await?;
+    let client = reqwest::Client::new();
+    let mut request_builder = client.get(&fetch_url);
+
+    if let Some(key) = jina_api_key {
+        if !key.is_empty() {
+            info!("Using Jina API key for request.");
+            request_builder = request_builder.header("Authorization", format!("Bearer {key}"));
+        }
+    } else {
+        warn!("No Jina API key provided. You may be subject to a 20 RPM rate limit.");
+    }
+
+    let response = request_builder.send().await?;
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let body = response.text().await.unwrap_or_default();
@@ -180,10 +197,11 @@ pub async fn ingest_and_cache_url(
     db: &Database,
     url: &str,
     owner_id: Option<&str>,
+    jina_api_key: Option<&str>,
 ) -> Result<(String, IngestedDocument), KnowledgeError> {
     let conn = db.connect()?;
 
-    let markdown_content = fetch_markdown_from_url(url).await?;
+    let markdown_content = fetch_markdown_from_url(url, jina_api_key).await?;
     let new_content_hash = format!("{:x}", md5::compute(markdown_content.as_bytes()));
 
     // Extract a cleaner title from the markdown content.

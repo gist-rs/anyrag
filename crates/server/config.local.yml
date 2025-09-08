@@ -1,4 +1,7 @@
 # Configuration for a local AI provider (e.g., Ollama, LM Studio)
+# Optional, but recommended to avoid rate limits on the web reader.
+jina_api_key: "${JINA_API_KEY}"
+
 embedding:
   api_url: "${EMBEDDINGS_API_URL}"
   model_name: "text-embedding-qwen3-embedding-8b"

@@ -453,12 +453,15 @@ pub async fn ingest_web_handler(
         metadata_extraction_system_prompt: &meta_task_config.system_prompt,
     };
 
+    let jina_api_key = app_state.config.jina_api_key.as_deref();
+
     let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
         ai_provider.as_ref(),
         &payload.url,
         owner_id.as_deref(),
         prompts,
+        jina_api_key,
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;

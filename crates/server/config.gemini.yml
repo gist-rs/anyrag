@@ -1,4 +1,6 @@
 # Configuration for the Google Gemini API
+jina_api_key: "${JINA_API_KEY}"
+
 embedding:
   api_url: "${EMBEDDINGS_API_URL}"
   model_name: "gemini-embedding-001"
