@@ -257,7 +257,7 @@ impl Storage for SqliteProvider {
     }
 
     async fn list_tables(&self) -> Result<Vec<String>, PromptError> {
-        info!("Listing all tables in SQLite database.");
+        info!("Listing all non-empty tables in SQLite database.");
         let conn = self
             .db
             .connect()
@@ -271,17 +271,35 @@ impl Storage for SqliteProvider {
             .await
             .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
 
-        let mut tables = Vec::new();
+        let mut all_tables = Vec::new();
         while let Some(row) = rows
             .next()
             .await
             .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
         {
             if let Ok(TursoValue::Text(name)) = row.get_value(0) {
-                tables.push(name);
+                all_tables.push(name);
             }
         }
-        Ok(tables)
+
+        let mut non_empty_tables = Vec::new();
+        for table_name in all_tables {
+            let count_query = format!("SELECT 1 FROM \"{table_name}\" LIMIT 1");
+            let has_rows = conn
+                .query(&count_query, ())
+                .await
+                .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
+                .next()
+                .await
+                .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
+                .is_some();
+
+            if has_rows {
+                non_empty_tables.push(table_name);
+            }
+        }
+
+        Ok(non_empty_tables)
     }
 }
 

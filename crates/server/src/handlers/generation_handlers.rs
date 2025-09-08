@@ -7,13 +7,9 @@ use super::{
     wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptResponse,
     ServerExecutePromptOptions,
 };
-use crate::auth::middleware::AuthenticatedUser;
+use crate::{auth::middleware::AuthenticatedUser, providers::create_dynamic_provider};
 use anyrag::{
-    providers::{
-        ai::{gemini::GeminiProvider, local::LocalAiProvider, AiProvider},
-        db::sqlite::SqliteProvider,
-    },
-    types::ExecutePromptOptions as LibExecutePromptOptions,
+    providers::db::sqlite::SqliteProvider, types::ExecutePromptOptions as LibExecutePromptOptions,
     PromptClientBuilder,
 };
 use axum::{
@@ -93,10 +89,11 @@ pub async fn gen_text_handler(
             .build()?;
 
         let server_options = ServerExecutePromptOptions {
-            prompt: context_prompt.clone(),
+            prompt: context_prompt.to_string(),
             db: Some(db_name.clone()),
             system_prompt_template: Some(context_task_config.system_prompt.clone()),
             user_prompt_template: Some(context_task_config.user_prompt.clone()),
+            table_name: None, // Let the library handle fetching all schemas
             ..Default::default()
         };
         let context_options: LibExecutePromptOptions = server_options.into();
@@ -117,86 +114,40 @@ pub async fn gen_text_handler(
     }
 
     // --- 2. Content Generation ---
-    let (model_used_name, generation_provider, gen_task_config): (
-        String,
-        Box<dyn AiProvider>,
-        crate::state::ResolvedTask,
-    ) = if let Some(model_name) = &payload.model {
-        // User has specified a model, override the provider.
-        info!("User specified model override: '{}'", model_name);
+    let gen_task_name = "direct_generation";
+    let gen_task_config = app_state.tasks.get(gen_task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Configuration for task '{gen_task_name}' not found."
+        ))
+    })?;
 
-        let provider: Box<dyn AiProvider> = if model_name.starts_with("gemini") {
-            // It's a Gemini model.
-            let api_key = std::env::var("AI_API_KEY").map_err(|_| {
-                AppError::Internal(anyhow::anyhow!(
-                    "AI_API_KEY must be set for dynamic Gemini provider"
-                ))
-            })?;
-            let api_url = format!(
-                "https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
-            );
-            info!(
-                "Dynamically configuring Gemini provider with URL: {}",
-                api_url
-            );
-            Box::new(GeminiProvider::new(api_url, api_key)?)
-        } else {
-            // Default to a local provider.
-            info!("Model is not a Gemini model, falling back to local provider configuration for URL.");
-            // Find a provider named 'local_default' in the config to get its base URL.
-            let local_provider_config = app_state
-                .config
-                .providers
-                .get("local_default")
-                .ok_or_else(|| {
-                    AppError::Internal(anyhow::anyhow!(
-                        "A 'local_default' provider was not found in configuration for fallback."
-                    ))
-                })?;
-
-            Box::new(LocalAiProvider::new(
-                local_provider_config.api_url.clone(),
-                local_provider_config.api_key.clone(),
-                Some(model_name.clone()), // Use the specified model name
-            )?)
-        };
-
-        // We still need a task config for the prompts. Let's use the default `direct_generation` task for that.
-        let task_config = app_state.tasks.get("direct_generation").ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!(
-                "Configuration for task 'direct_generation' not found."
-            ))
-        })?;
-
-        (model_name.clone(), provider, task_config.clone())
+    let (generation_provider, model_used_name) = if let Some(model_name) = &payload.model {
+        // User has specified a model, create a provider dynamically using the new helper.
+        create_dynamic_provider(&app_state, model_name).await?
     } else {
-        // No model override, use the configured provider.
-        let gen_task_name = "direct_generation";
-        let gen_task_config = app_state.tasks.get(gen_task_name).ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!(
-                "Configuration for task '{gen_task_name}' not found."
-            ))
-        })?;
-        let gen_provider_name = &gen_task_config.provider;
-        let generation_provider =
-            app_state.ai_providers.get(gen_provider_name).ok_or_else(|| {
+        // No model override, use the provider configured for the task.
+        let provider_name = &gen_task_config.provider;
+        let provider = app_state
+            .ai_providers
+            .get(provider_name)
+            .ok_or_else(|| {
                 AppError::Internal(anyhow::anyhow!(
-                    "Provider '{gen_provider_name}' for task '{gen_task_name}' not found in providers map."
+                    "Provider '{provider_name}' for task '{gen_task_name}' not found."
                 ))
-            })?;
+            })?
+            .clone();
 
-        // Get the model name from the provider's config
+        // Get the configured model name for debug logging.
         let provider_config = app_state
             .config
             .providers
-            .get(gen_provider_name)
-            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Provider config not found")))?;
-
-        (
-            provider_config.model_name.clone(),
-            generation_provider.clone(),
-            gen_task_config.clone(),
-        )
+            .get(provider_name)
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Provider config for '{provider_name}' not found."
+                ))
+            })?;
+        (provider, provider_config.model_name.clone())
     };
 
     // Construct the final prompt for the generation provider.

@@ -4,11 +4,17 @@ embedding:
   model_name: "text-embedding-qwen3-embedding-8b"
 
 providers:
+  gemini_default:
+    provider: "gemini"
+    api_url: "${AI_API_URL}"
+    api_key: "${AI_API_KEY}"
+    model_name: "gemini-2.5-flash-lite"
+
   local_default:
     provider: "local"
-    api_url: "${AI_API_URL}"
+    api_url: "http://localhost:1234/v1/chat/completions"
     api_key: null
-    model_name: "gemma-2-9b-it-mlx"
+    model_name: "qwen3-coder-30b-a3b-instruct-mlx"
 
 # Override all default tasks to use the local provider.
 # The prompts for these tasks are inherited from `config.prompt.yml`

@@ -71,7 +71,7 @@ This layered approach allows you to customize providers and prompts independentl
     # prompt.yml
     tasks:
       rag_synthesis:
-        provider: "local_fast" # You can even change the provider for a specific task
+        provider: "local_default" # You can even change the provider for a specific task
         system_prompt: "You are a pirate AI. Answer the user's question based on the scrolls."
     ```
 

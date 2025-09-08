@@ -4,6 +4,7 @@
 //! including the root, health check, and the main Text-to-SQL prompt endpoint.
 
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
+use crate::providers::create_dynamic_provider;
 use anyrag::{
     ingest::{ingest_from_google_sheet_url, sheet_url_to_export_url_and_table_name},
     providers::{ai::AiProvider, db::storage::Storage},
@@ -50,6 +51,8 @@ pub struct ServerExecutePromptOptions {
     // The server-specific field
     #[serde(default)]
     pub db: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl From<ServerExecutePromptOptions> for LibExecutePromptOptions {
@@ -176,18 +179,29 @@ pub async fn prompt_handler(
 
         // --- Execute the transformed prompt directly, bypassing main logic ---
 
-        // Get the AI provider for query generation.
+        // Get the AI provider, allowing for a model override from the request.
         let task_config = app_state.tasks.get("query_generation").ok_or_else(|| {
             AppError::Internal(anyhow::anyhow!(
                 "Configuration for task 'query_generation' not found."
             ))
         })?;
-        let provider_name = &task_config.provider;
-        let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!(
-                "Provider '{provider_name}' for task 'query_generation' not found."
-            ))
-        })?;
+
+        let (ai_provider, model_used_name) = if let Some(model_name) = &server_options.model {
+            create_dynamic_provider(&app_state, model_name).await?
+        } else {
+            let provider_name = &task_config.provider;
+            let provider = app_state
+                .ai_providers
+                .get(provider_name)
+                .ok_or_else(|| {
+                    AppError::Internal(anyhow::anyhow!(
+                        "Provider '{provider_name}' for task 'query_generation' not found."
+                    ))
+                })?
+                .clone();
+            let provider_config = app_state.config.providers.get(provider_name).unwrap();
+            (provider, provider_config.model_name.clone())
+        };
 
         // Create a dynamic SQLite client for the specified project DB.
         let db_path = format!("db/{db_name}.db");
@@ -203,7 +217,7 @@ pub async fn prompt_handler(
         let debug_info = if debug_params.debug.unwrap_or(false) {
             Some(json!({
                 "options": server_options,
-                "options": server_options,
+                "model_used": model_used_name,
                 "generated_sql": prompt_result.generated_sql,
                 "database_result": prompt_result.database_result,
             }))
@@ -256,13 +270,23 @@ pub async fn prompt_handler(
         ))
     })?;
 
-    // Get the specified AI provider for this task.
-    let provider_name = &task_config.provider;
-    let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Provider '{provider_name}' for task '{task_name}' not found in providers map."
-        ))
-    })?;
+    // Get the AI provider, allowing for a model override from the request.
+    let (ai_provider, model_used_name) = if let Some(model_name) = &server_options.model {
+        create_dynamic_provider(&app_state, model_name).await?
+    } else {
+        let provider_name = &task_config.provider;
+        let provider = app_state
+            .ai_providers
+            .get(provider_name)
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Provider '{provider_name}' for task '{task_name}' not found in providers map."
+                ))
+            })?
+            .clone();
+        let provider_config = app_state.config.providers.get(provider_name).unwrap();
+        (provider, provider_config.model_name.clone())
+    };
 
     // Apply the task's default prompts, allowing the request to override them.
     if server_options.system_prompt_template.is_none() {
@@ -328,6 +352,7 @@ pub async fn prompt_handler(
     let debug_info = if debug_params.debug.unwrap_or(false) {
         Some(json!({
             "options": server_options,
+            "model_used": model_used_name,
             "generated_sql": prompt_result.generated_sql,
             "database_result": prompt_result.database_result,
         }))

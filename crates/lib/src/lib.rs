@@ -208,7 +208,7 @@ impl PromptClient {
             info!("[get_query_from_prompt] Using table-based query generation.");
 
             // If a specific table is named, get its schema.
-            if let Some(table) = &options.table_name {
+            if let Some(table) = options.table_name.as_deref().filter(|s| !s.is_empty()) {
                 let schema = self.storage_provider.get_table_schema(table).await?;
                 let schema_str = Self::format_schema_for_prompt(&schema);
                 context.push_str(&format!("# Schema for `{table}`\n{schema_str}\n\n"));
