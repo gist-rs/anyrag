@@ -13,7 +13,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 use tracing::info;
 
 // --- API Payloads for Generation Handlers ---
@@ -120,7 +120,7 @@ pub async fn gen_text_handler(
 
     // Construct the final prompt for the generation provider.
     let final_user_prompt = format!(
-        "# User's Goal\n{}\n# Inspirational Context\nDraw inspiration from the following JSON data of real online posts about relationships. Blend elements creatively—such as debt from gambling, the role of money in attraction, dowry disputes, rejecting suitors due to poverty, or hidden feelings in friendships—without copying directly. Weave these into a cohesive, original narrative that feels genuine and relatable.JSON Data:\n---\n{}",
+        "# User's Goal\n{}\n\n# Inspirational Context\nDraw inspiration from the following JSON data of real online posts but don't copying directly\n---\n{}",
         payload.generation_prompt,
         retrieved_context
     );
@@ -129,9 +129,23 @@ pub async fn gen_text_handler(
         final_user_prompt
     );
 
-    let generated_text = generation_provider
+    let raw_response = generation_provider
         .generate(&gen_task_config.system_prompt, &final_user_prompt)
         .await?;
+
+    // Clean the response and attempt to parse it as JSON.
+    let cleaned_response = raw_response
+        .trim()
+        .strip_prefix("```json")
+        .unwrap_or(&raw_response)
+        .strip_suffix("```")
+        .unwrap_or(&raw_response)
+        .trim();
+
+    let final_value = match serde_json::from_str(cleaned_response) {
+        Ok(json_value) => json_value,
+        Err(_) => Value::String(raw_response.clone()), // Fallback to the original string
+    };
 
     let debug_info = json!({
         "db": payload.db,
@@ -140,12 +154,11 @@ pub async fn gen_text_handler(
         "generated_sql_for_context": context_result.generated_sql,
         "retrieved_context": retrieved_context,
         "final_prompt_sent_to_ai": final_user_prompt,
+        "raw_ai_response": raw_response,
     });
 
     Ok(wrap_response(
-        PromptResponse {
-            text: generated_text,
-        },
+        PromptResponse { text: final_value },
         debug_params,
         Some(debug_info),
     ))

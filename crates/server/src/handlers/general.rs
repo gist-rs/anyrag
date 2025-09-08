@@ -22,7 +22,7 @@ use tracing::info;
 
 #[derive(Serialize, Deserialize)]
 pub struct PromptResponse {
-    pub text: String,
+    pub text: Value,
 }
 
 // --- General-Purpose Handlers ---
@@ -165,7 +165,7 @@ pub async fn prompt_handler(
 
         return Ok(wrap_response(
             PromptResponse {
-                text: prompt_result.text,
+                text: Value::String(prompt_result.text),
             },
             debug_params,
             debug_info,
@@ -276,7 +276,7 @@ pub async fn prompt_handler(
 
     Ok(wrap_response(
         PromptResponse {
-            text: prompt_result.text,
+            text: Value::String(prompt_result.text),
         },
         debug_params,
         debug_info,

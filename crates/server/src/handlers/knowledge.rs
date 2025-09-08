@@ -19,7 +19,7 @@ use axum::{
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use tracing::{error, info};
 use turso::params;
 
@@ -234,7 +234,9 @@ pub async fn knowledge_search_handler(
         let debug_info =
             json!({ "query": payload.query, "limit": limit, "status": "No results found" });
         return Ok(wrap_response(
-            PromptResponse { text },
+            PromptResponse {
+                text: Value::String(text),
+            },
             debug_params,
             Some(debug_info),
         ));
@@ -282,7 +284,7 @@ pub async fn knowledge_search_handler(
     };
     Ok(wrap_response(
         PromptResponse {
-            text: prompt_result.text,
+            text: Value::String(prompt_result.text),
         },
         debug_params,
         debug_info,

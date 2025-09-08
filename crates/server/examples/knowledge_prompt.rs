@@ -69,7 +69,7 @@ async fn ask_question(
     .await;
 
     match result {
-        Ok(Json(response)) => Ok(response.result.text),
+        Ok(Json(response)) => Ok(response.result.text.to_string()),
         Err(e) => anyhow::bail!("Error occurred while asking question: {:?}", e),
     }
 }
