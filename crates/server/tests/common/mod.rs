@@ -101,6 +101,14 @@ impl TestApp {
                     },
                 ),
                 (
+                    "direct_generation".to_string(),
+                    TaskConfig {
+                        provider: "mock_provider".to_string(),
+                        system_prompt: "You are a helpful AI assistant.".to_string(),
+                        user_prompt: "{prompt}".to_string(),
+                    },
+                ),
+                (
                     "rag_synthesis".to_string(),
                     TaskConfig {
                         provider: "mock_provider".to_string(),

@@ -66,8 +66,21 @@ async fn handle_sheet_url_in_prompt(
         info!("Table '{}' already exists. Skipping ingestion.", table_name);
     }
 
-    // Update options with the ingested table name and execute the prompt.
+    // Update options with the ingested table name.
     options.table_name = Some(table_name);
+
+    // After ingestion, the task is now a query generation task.
+    // We must load the correct prompts for it, overriding any previous ones.
+    let task_name = "query_generation";
+    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Configuration for task '{task_name}' not found."
+        ))
+    })?;
+
+    options.system_prompt_template = Some(task_config.system_prompt.clone());
+    options.user_prompt_template = Some(task_config.user_prompt.clone());
+
     let client = PromptClientBuilder::new()
         .ai_provider(ai_provider)
         .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
