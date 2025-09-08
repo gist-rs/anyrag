@@ -66,21 +66,8 @@ async fn handle_sheet_url_in_prompt(
         info!("Table '{}' already exists. Skipping ingestion.", table_name);
     }
 
-    // Update options with the ingested table name.
+    // Update options with the ingested table name and execute the prompt.
     options.table_name = Some(table_name);
-
-    // After ingestion, the task is now a query generation task.
-    // We must load the correct prompts for it, overriding any previous ones.
-    let task_name = "query_generation";
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Configuration for task '{task_name}' not found."
-        ))
-    })?;
-
-    options.system_prompt_template = Some(task_config.system_prompt.clone());
-    options.user_prompt_template = Some(task_config.user_prompt.clone());
-
     let client = PromptClientBuilder::new()
         .ai_provider(ai_provider)
         .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
@@ -185,49 +172,6 @@ pub async fn prompt_handler(
         ));
     }
 
-    // --- Task-based Configuration Loading ---
-    // This logic determines which set of prompts and which AI provider to use.
-    let task_name = match options.content_type {
-        // 1. If a specific content_type is provided, use its dedicated task.
-        #[cfg(feature = "rss")]
-        Some(ContentType::Rss) => "rss_summarization",
-        Some(ContentType::Knowledge) => "rag_synthesis",
-        // 2. If no content_type, decide based on whether it's a query or direct generation.
-        _ => {
-            if options.table_name.is_some() || options.project_id.is_some() || options.db.is_some()
-            {
-                // If a table, project, or db is specified, it's a query task.
-                "query_generation"
-            } else {
-                // Otherwise, it's a general-purpose text generation task.
-                "direct_generation"
-            }
-        }
-    };
-    info!("Selected task '{task_name}' based on request payload.");
-
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Configuration for task '{task_name}' not found."
-        ))
-    })?;
-
-    // Get the specified AI provider for this task.
-    let provider_name = &task_config.provider;
-    let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Provider '{provider_name}' for task '{task_name}' not found in providers map."
-        ))
-    })?;
-
-    // Apply the task's default prompts, allowing the request to override them.
-    if options.system_prompt_template.is_none() {
-        options.system_prompt_template = Some(task_config.system_prompt.clone());
-    }
-    if options.user_prompt_template.is_none() {
-        options.user_prompt_template = Some(task_config.user_prompt.clone());
-    }
-
     // Detect if a Google Sheet URL is present in the prompt.
     let sheet_url = options
         .prompt
@@ -235,46 +179,115 @@ pub async fn prompt_handler(
         .find(|word| word.contains("/spreadsheets/d/"));
 
     let prompt_result = if let Some(url) = sheet_url {
+        // This is a query generation task by definition.
+        let task_name = "query_generation";
+        let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Configuration for task '{task_name}' not found."
+            ))
+        })?;
+        let provider_name = &task_config.provider;
+        let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Provider '{provider_name}' for task '{task_name}' not found in providers map."
+            ))
+        })?;
+
+        // Apply task prompts to options if they aren't already set by the user.
+        if options.system_prompt_template.is_none() {
+            options.system_prompt_template = Some(task_config.system_prompt.clone());
+        }
+        if options.user_prompt_template.is_none() {
+            options.user_prompt_template = Some(task_config.user_prompt.clone());
+        }
+
         handle_sheet_url_in_prompt(&app_state, url, ai_provider.clone(), options.clone()).await?
-    } else if let Some(project_id) = options.project_id.as_deref() {
-        // --- Dynamic BigQuery Client Creation ---
-        info!("'project_id' provided. Creating a dynamic BigQuery client for this request.");
-        #[cfg(feature = "bigquery")]
-        {
-            let bq_client = PromptClientBuilder::new()
-                .ai_provider(ai_provider.clone())
-                .bigquery_storage(project_id.to_string())
-                .await?
-                .build()?;
-            bq_client
-                .execute_prompt_with_options(options.clone())
-                .await?
-        }
-        #[cfg(not(feature = "bigquery"))]
-        {
-            return Err(anyrag::PromptError::BigQueryFeatureNotEnabled.into());
-        }
-    } else if let Some(db_name) = options.db.as_deref() {
-        // --- Dynamic SQLite Client Creation for a specific project DB ---
-        info!(
-            "'db' provided: '{}'. Creating a dynamic SQLite client for this request.",
-            db_name
-        );
-        let db_path = format!("db/{db_name}.db");
-        let provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
-        let client = PromptClientBuilder::new()
-            .ai_provider(ai_provider.clone())
-            .storage_provider(Box::new(provider))
-            .build()?;
-        client.execute_prompt_with_options(options.clone()).await?
     } else {
-        // --- Standard Querying Logic (Default SQLite for non-db tasks) ---
-        info!("No 'project_id', 'db', or sheet URL. Using default SQLite provider.");
-        let client = PromptClientBuilder::new()
-            .ai_provider(ai_provider.clone())
-            .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
-            .build()?;
-        client.execute_prompt_with_options(options.clone()).await?
+        // --- Standard Logic (No Sheet URL) ---
+        // This logic determines which set of prompts and which AI provider to use.
+        let task_name = match options.content_type {
+            // 1. If a specific content_type is provided, use its dedicated task.
+            #[cfg(feature = "rss")]
+            Some(ContentType::Rss) => "rss_summarization",
+            Some(ContentType::Knowledge) => "rag_synthesis",
+            // 2. If no content_type, decide based on whether it's a query or direct generation.
+            _ => {
+                if options.table_name.is_some()
+                    || options.project_id.is_some()
+                    || options.db.is_some()
+                {
+                    // If a table, project, or db is specified, it's a query task.
+                    "query_generation"
+                } else {
+                    // Otherwise, it's a general-purpose text generation task.
+                    "direct_generation"
+                }
+            }
+        };
+        info!("Selected task '{task_name}' based on request payload.");
+
+        let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Configuration for task '{task_name}' not found."
+            ))
+        })?;
+
+        // Get the specified AI provider for this task.
+        let provider_name = &task_config.provider;
+        let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Provider '{provider_name}' for task '{task_name}' not found in providers map."
+            ))
+        })?;
+
+        // Apply the task's default prompts, allowing the request to override them.
+        if options.system_prompt_template.is_none() {
+            options.system_prompt_template = Some(task_config.system_prompt.clone());
+        }
+        if options.user_prompt_template.is_none() {
+            options.user_prompt_template = Some(task_config.user_prompt.clone());
+        }
+
+        if let Some(project_id) = options.project_id.as_deref() {
+            // --- Dynamic BigQuery Client Creation ---
+            info!("'project_id' provided. Creating a dynamic BigQuery client for this request.");
+            #[cfg(feature = "bigquery")]
+            {
+                let bq_client = PromptClientBuilder::new()
+                    .ai_provider(ai_provider.clone())
+                    .bigquery_storage(project_id.to_string())
+                    .await?
+                    .build()?;
+                bq_client
+                    .execute_prompt_with_options(options.clone())
+                    .await?
+            }
+            #[cfg(not(feature = "bigquery"))]
+            {
+                return Err(anyrag::PromptError::BigQueryFeatureNotEnabled.into());
+            }
+        } else if let Some(db_name) = options.db.as_deref() {
+            // --- Dynamic SQLite Client Creation for a specific project DB ---
+            info!(
+                "'db' provided: '{}'. Creating a dynamic SQLite client for this request.",
+                db_name
+            );
+            let db_path = format!("db/{db_name}.db");
+            let provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
+            let client = PromptClientBuilder::new()
+                .ai_provider(ai_provider.clone())
+                .storage_provider(Box::new(provider))
+                .build()?;
+            client.execute_prompt_with_options(options.clone()).await?
+        } else {
+            // --- Standard Querying Logic (Default SQLite for non-db tasks) ---
+            info!("No 'project_id', 'db', or sheet URL. Using default SQLite provider.");
+            let client = PromptClientBuilder::new()
+                .ai_provider(ai_provider.clone())
+                .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
+                .build()?;
+            client.execute_prompt_with_options(options.clone()).await?
+        }
     };
 
     let debug_info = if debug_params.debug.unwrap_or(false) {
