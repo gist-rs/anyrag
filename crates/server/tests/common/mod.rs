@@ -21,8 +21,7 @@ use anyrag::{
 };
 use anyrag_server::{
     auth::middleware::Claims,
-    config::{AppConfig, EmbeddingConfig, ProviderConfig, TaskConfig},
-    router,
+    config, router,
     state::{build_app_state, AppState},
 };
 use axum::serve;
@@ -30,13 +29,14 @@ use httpmock::MockServer;
 use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest::Client;
 use std::{
-    collections::HashMap,
+    fs::File,
+    io::Write,
     net::SocketAddr,
     path::PathBuf,
     sync::{Arc, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tempfile::NamedTempFile;
+use tempfile::{tempdir, NamedTempFile, TempDir};
 use tokio::{net::TcpListener, task::JoinHandle};
 
 // --- Full Application Test Harness ---
@@ -51,8 +51,10 @@ pub struct TestApp {
     pub client: Client,
     pub mock_server: MockServer,
     pub db_path: PathBuf,
+    pub app_state: AppState,
     pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
     _db_file: NamedTempFile,
+    _config_dir: TempDir,
     _server_handle: JoinHandle<()>,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
@@ -74,103 +76,45 @@ impl TestApp {
         let sqlite_provider = SqliteProvider::new(db_path.to_str().unwrap()).await?;
         sqlite_provider.initialize_schema().await?;
 
-        // Create a mock AppConfig that points to our mock server
-        let mock_config = AppConfig {
-            port: 0,
-            db_url: db_path.to_str().unwrap().to_string(),
-            embedding: EmbeddingConfig {
-                api_url: mock_server.url("/v1/embeddings"),
-                model_name: "mock-embedding-model".to_string(),
-            },
-            providers: HashMap::from([(
-                "mock_provider".to_string(),
-                ProviderConfig {
-                    provider: "local".to_string(),
-                    api_url: mock_server.url("/v1/chat/completions"),
-                    api_key: None,
-                    model_name: "mock-chat-model".to_string(),
-                },
-            )]),
-            tasks: HashMap::from([
-                (
-                    "query_generation".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are an SQL expert for MockDB.".to_string(),
-                        user_prompt: "Context: {context}\nQuestion: {prompt}".to_string(),
-                    },
-                ),
-                (
-                    "direct_generation".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are a helpful AI assistant.".to_string(),
-                        user_prompt: "{prompt}".to_string(),
-                    },
-                ),
-                (
-                    "rag_synthesis".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are a strict, factual AI.".to_string(),
-                        user_prompt: "User Question: {prompt}\nContext: {context}".to_string(),
-                    },
-                ),
-                (
-                    "knowledge_distillation".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are an expert data extraction agent.".to_string(),
-                        user_prompt: "Content: {markdown_content}".to_string(),
-                    },
-                ),
-                (
-                    "query_analysis".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are an expert query analyst.".to_string(),
-                        user_prompt: "Query: {prompt}".to_string(),
-                    },
-                ),
-                (
-                    "llm_rerank".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are an expert search result re-ranker.".to_string(),
-                        user_prompt: "Query: {query_text}\nArticles: {articles_context}"
-                            .to_string(),
-                    },
-                ),
-                (
-                    "rss_summarization".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are an AI assistant that specializes in analyzing and summarizing content from RSS feeds. Answer the user's question based on the provided article snippets.".to_string(),
-                        user_prompt: "# User Question\n{prompt}\n\n# Article Content\n{context}".to_string(),
-                    },
-                ),
-                (
-                    "knowledge_augmentation".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are an expert content analyst.".to_string(),
-                        user_prompt: "Content Chunks to Analyze: {batched_content}".to_string(),
-                    },
-                ),
-                (
-                    "knowledge_metadata_extraction".to_string(),
-                    TaskConfig {
-                        provider: "mock_provider".to_string(),
-                        system_prompt: "You are an expert document analyst.".to_string(),
-                        user_prompt: "Document Content: {content}".to_string(),
-                    },
-                ),
-            ])
-        };
+        // --- Create a temporary config file for the test ---
+        let config_dir = tempdir()?;
+        let config_path = config_dir.path().join("config.yml");
+        let config_content = format!(
+            r#"
+port: 0
+db_url: "{}"
+embedding:
+  api_url: "{}"
+  model_name: "mock-embedding-model"
+providers:
+  # This provider will be used by the default tasks.
+  gemini_default:
+    provider: "local"
+    api_url: "{}"
+    api_key: null
+    model_name: "mock-chat-model"
+  # Define a second one in case some tests override to use it.
+  mock_provider:
+    provider: "local"
+    api_url: "{}"
+    api_key: null
+    model_name: "mock-chat-model"
+"#,
+            db_path.to_str().unwrap(),
+            mock_server.url("/v1/embeddings"),
+            mock_server.url("/v1/chat/completions"),
+            mock_server.url("/v1/chat/completions")
+        );
+        let mut file = File::create(&config_path)?;
+        file.write_all(config_content.as_bytes())?;
 
-        // Build the application state from the mock config.
-        let app_state = build_app_state(mock_config).await?;
+        // Use the real config loader with our temporary file.
+        // This correctly loads defaults and merges our test-specific provider URLs.
+        let config = config::get_config(Some(config_path.to_str().unwrap()))?;
+        let app_state = build_app_state(config).await?;
+
         let knowledge_graph_clone = app_state.knowledge_graph.clone();
+        let app_state_for_harness = app_state.clone();
 
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr: SocketAddr = listener.local_addr()?;
@@ -195,8 +139,10 @@ impl TestApp {
             client: Client::new(),
             mock_server,
             db_path,
+            app_state: app_state_for_harness,
             knowledge_graph: knowledge_graph_clone,
             _db_file: db_file,
+            _config_dir: config_dir,
             _server_handle: server_handle,
             shutdown_tx: Some(shutdown_tx),
         })

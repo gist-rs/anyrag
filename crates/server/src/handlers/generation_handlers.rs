@@ -3,10 +3,14 @@
 //! This module contains handlers for endpoints that generate new content
 //! based on context from the database.
 
-use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptResponse};
+use super::{
+    wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptResponse,
+    ServerExecutePromptOptions,
+};
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
-    providers::db::sqlite::SqliteProvider, types::ExecutePromptOptions, PromptClientBuilder,
+    providers::db::sqlite::SqliteProvider, types::ExecutePromptOptions as LibExecutePromptOptions,
+    PromptClientBuilder,
 };
 use axum::{
     extract::{Query, State},
@@ -46,15 +50,11 @@ pub async fn gen_text_handler(
     // --- 1. Context Retrieval via Text-to-SQL ---
     // This step executes the `context_prompt` against the specified project database.
     let context_task_name = "query_generation";
-    let context_task_config = app_state
-        .config
-        .tasks
-        .get(context_task_name)
-        .ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!(
-                "Task '{context_task_name}' not found in config"
-            ))
-        })?;
+    let context_task_config = app_state.tasks.get(context_task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Task '{context_task_name}' not found in config"
+        ))
+    })?;
     let context_provider_name = &context_task_config.provider;
     let context_provider = app_state
         .ai_providers
@@ -76,13 +76,21 @@ pub async fn gen_text_handler(
     // The user's `context_prompt` is treated as a full-fledged prompt for the text-to-SQL engine.
     // The model should infer the table name from the prompt, so we don't specify it.
     // **Crucially**, we apply the prompt templates from our configuration to this internal call.
-    let context_options = ExecutePromptOptions {
+    let server_options = ServerExecutePromptOptions {
         prompt: payload.context_prompt.clone(),
         db: Some(payload.db.clone()),
         system_prompt_template: Some(context_task_config.system_prompt.clone()),
         user_prompt_template: Some(context_task_config.user_prompt.clone()),
-        ..Default::default()
+        table_name: None,
+        project_id: None,
+        content_type: None,
+        context: None,
+        instruction: None,
+        answer_key: None,
+        format_system_prompt_template: None,
+        format_user_prompt_template: None,
     };
+    let context_options: LibExecutePromptOptions = server_options.into();
 
     let context_result = context_client
         .execute_prompt_with_options(context_options)
@@ -105,7 +113,7 @@ pub async fn gen_text_handler(
 
     // --- 2. Content Generation ---
     let gen_task_name = "direct_generation";
-    let gen_task_config = app_state.config.tasks.get(gen_task_name).ok_or_else(|| {
+    let gen_task_config = app_state.tasks.get(gen_task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
             "Configuration for task '{gen_task_name}' not found."
         ))

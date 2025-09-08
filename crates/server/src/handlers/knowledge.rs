@@ -166,7 +166,7 @@ pub async fn knowledge_search_handler(
 
     // --- Get AI provider for query analysis ---
     let task_name = "query_analysis";
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+    let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
     })?;
     let provider_name = &task_config.provider;
@@ -246,7 +246,7 @@ pub async fn knowledge_search_handler(
 
     // --- Get AI provider for RAG synthesis ---
     let task_name = "rag_synthesis";
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+    let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
     })?;
     let provider_name = &task_config.provider;

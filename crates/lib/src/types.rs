@@ -1,5 +1,5 @@
 #[cfg(feature = "rss")]
-use crate::prompts::rss::{RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT};
+use crate::prompts::tasks::{RSS_SUMMARIZATION_SYSTEM_PROMPT, RSS_SUMMARIZATION_USER_PROMPT};
 #[cfg(feature = "bigquery")]
 use crate::providers::db::bigquery::BigQueryProvider;
 use crate::{
@@ -50,7 +50,10 @@ impl ContentType {
     pub fn get_prompt_templates(&self) -> (&'static str, &'static str) {
         match self {
             #[cfg(feature = "rss")]
-            ContentType::Rss => (RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT),
+            ContentType::Rss => (
+                RSS_SUMMARIZATION_SYSTEM_PROMPT,
+                RSS_SUMMARIZATION_USER_PROMPT,
+            ),
             ContentType::Knowledge => (KNOWLEDGE_RAG_SYSTEM_PROMPT, KNOWLEDGE_RAG_USER_PROMPT),
             // Default to standard SQL prompts for other types for now.
             ContentType::Sql | ContentType::Json | ContentType::Text => {
@@ -74,9 +77,6 @@ pub struct ExecutePromptOptions {
     /// For BigQuery, the project ID. If provided, the query will run against BigQuery instead of the default provider.
     #[serde(default)]
     pub project_id: Option<String>,
-    /// The name of the local project database to use (e.g., "kratooded"). This triggers the use of the SQLite provider.
-    #[serde(default)]
-    pub db: Option<String>,
     /// An optional hint about the content type to guide prompt selection.
     #[serde(default)]
     pub content_type: Option<ContentType>,

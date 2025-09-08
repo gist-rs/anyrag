@@ -347,7 +347,7 @@ pub async fn ingest_pdf_handler(
     }
 
     let task_name = "knowledge_distillation";
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+    let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
             "Configuration for task '{task_name}' not found."
         ))
@@ -359,15 +359,15 @@ pub async fn ingest_pdf_handler(
         ))
     })?;
 
-    let augmentation_task_config = app_state
-        .config
-        .tasks
-        .get("knowledge_augmentation")
-        .ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!(
-                "Task 'knowledge_augmentation' not found in config"
-            ))
-        })?;
+    let augmentation_task_config =
+        app_state
+            .tasks
+            .get("knowledge_augmentation")
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Task 'knowledge_augmentation' not found in config"
+                ))
+            })?;
 
     let extractor_strategy = match extractor_choice {
         ExtractorChoice::Local => PdfSyncExtractor::Local,
@@ -423,7 +423,7 @@ pub async fn ingest_web_handler(
 
     // --- Get AI provider for knowledge distillation ---
     let task_name = "knowledge_distillation";
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+    let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
     })?;
     let provider_name = &task_config.provider;
@@ -433,14 +433,14 @@ pub async fn ingest_web_handler(
 
     // --- Get prompts for augmentation and metadata sub-tasks ---
     let aug_task_name = "knowledge_augmentation";
-    let aug_task_config = app_state.config.tasks.get(aug_task_name).ok_or_else(|| {
+    let aug_task_config = app_state.tasks.get(aug_task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
             "Task '{aug_task_name}' not found in config"
         ))
     })?;
 
     let meta_task_name = "knowledge_metadata_extraction";
-    let meta_task_config = app_state.config.tasks.get(meta_task_name).ok_or_else(|| {
+    let meta_task_config = app_state.tasks.get(meta_task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
             "Task '{meta_task_name}' not found in config"
         ))

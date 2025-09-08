@@ -5,7 +5,11 @@
 //! variables. This approach allows for a structured, flexible, and maintainable
 //! configuration setup.
 
-use config::{Config as ConfigBuilder, Environment, File, FileFormat};
+use anyrag::prompts::tasks::*;
+use config::{
+    Config as ConfigBuilder, Environment, File, FileFormat, Value as ConfigValue,
+    ValueKind as ConfigValueKind,
+};
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -88,13 +92,113 @@ pub struct ProviderConfig {
 }
 
 /// Defines the prompts and provider for a specific application task.
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 #[allow(dead_code)]
 pub struct TaskConfig {
     /// The key of the provider to use from the `providers` map.
-    pub provider: String,
-    pub system_prompt: String,
-    pub user_prompt: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub user_prompt: Option<String>,
+}
+
+/// Constructs a `config::Value` map of the default, hardcoded tasks from the library.
+/// This serves as the base layer of configuration.
+fn build_default_tasks() -> HashMap<String, ConfigValue> {
+    let mut tasks = vec![
+        (
+            "query_generation",
+            (
+                "gemini_default",
+                QUERY_GENERATION_SYSTEM_PROMPT,
+                QUERY_GENERATION_USER_PROMPT,
+            ),
+        ),
+        (
+            "direct_generation",
+            (
+                "gemini_default",
+                DIRECT_GENERATION_SYSTEM_PROMPT,
+                DIRECT_GENERATION_USER_PROMPT,
+            ),
+        ),
+        (
+            "rag_synthesis",
+            (
+                "gemini_default",
+                RAG_SYNTHESIS_SYSTEM_PROMPT,
+                RAG_SYNTHESIS_USER_PROMPT,
+            ),
+        ),
+        (
+            "knowledge_distillation",
+            (
+                "gemini_default",
+                KNOWLEDGE_DISTILLATION_SYSTEM_PROMPT,
+                KNOWLEDGE_DISTILLATION_USER_PROMPT,
+            ),
+        ),
+        (
+            "query_analysis",
+            (
+                "gemini_default",
+                QUERY_ANALYSIS_SYSTEM_PROMPT,
+                QUERY_ANALYSIS_USER_PROMPT,
+            ),
+        ),
+        (
+            "llm_rerank",
+            (
+                "gemini_default",
+                LLM_RERANK_SYSTEM_PROMPT,
+                LLM_RERANK_USER_PROMPT,
+            ),
+        ),
+        (
+            "knowledge_augmentation",
+            (
+                "gemini_default",
+                KNOWLEDGE_AUGMENTATION_SYSTEM_PROMPT,
+                KNOWLEDGE_AUGMENTATION_USER_PROMPT,
+            ),
+        ),
+        (
+            "knowledge_metadata_extraction",
+            (
+                "gemini_default",
+                KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT,
+                KNOWLEDGE_METADATA_EXTRACTION_USER_PROMPT,
+            ),
+        ),
+    ];
+
+    #[cfg(feature = "rss")]
+    {
+        tasks.push((
+            "rss_summarization",
+            (
+                "gemini_default",
+                RSS_SUMMARIZATION_SYSTEM_PROMPT,
+                RSS_SUMMARIZATION_USER_PROMPT,
+            ),
+        ));
+    }
+
+    tasks
+        .into_iter()
+        .map(|(name, (provider, sys, user))| {
+            let mut table = HashMap::new();
+            table.insert("provider".to_string(), ConfigValue::from(provider));
+            table.insert("system_prompt".to_string(), ConfigValue::from(sys));
+            table.insert("user_prompt".to_string(), ConfigValue::from(user));
+            (
+                name.to_string(),
+                ConfigValue::new(None, ConfigValueKind::Table(table)),
+            )
+        })
+        .collect()
 }
 
 // Helper to read a file, substitute env vars, and return its content.
@@ -124,13 +228,9 @@ fn read_and_substitute(path: &str) -> Result<Option<String>, ConfigError> {
 /// - Nested keys are overridden by `ANYRAG_...` variables (e.g., `ANYRAG_EMBEDDING__API_URL`).
 pub fn get_config(config_path_override: Option<&str>) -> Result<AppConfig, ConfigError> {
     let base_path = env!("CARGO_MANIFEST_DIR");
-    let mut builder = ConfigBuilder::builder();
-
-    // Layer 1: Base Prompts (Required)
-    let prompt_path = format!("{base_path}/config.prompt.yml");
-    let prompts_content = read_and_substitute(&prompt_path)?
-        .ok_or_else(|| ConfigError::NotFound(format!("Base prompt file not found at '{prompt_path}'. This file is a required part of the application.")))?;
-    builder = builder.add_source(File::from_str(&prompts_content, FileFormat::Yaml));
+    let mut builder = ConfigBuilder::builder()
+        // Layer 1: Programmatic defaults from the library.
+        .set_default("tasks", build_default_tasks())?;
 
     // Layer 2: Main Config (with Fallback)
     let main_config_path = if let Some(override_path) = config_path_override {

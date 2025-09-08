@@ -21,10 +21,12 @@ pub use types::{
     ExecutePromptOptions, PromptClient, PromptClientBuilder, PromptResult, SearchResult,
 };
 
-use crate::prompts::core::{
-    get_alias_instruction, get_select_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT,
-    DEFAULT_FORMAT_USER_PROMPT, DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT,
-    SQLITE_QUERY_USER_PROMPT,
+use crate::prompts::{
+    core::{get_alias_instruction, get_select_instruction, SQLITE_QUERY_USER_PROMPT},
+    tasks::{
+        QUERY_GENERATION_SYSTEM_PROMPT, QUERY_GENERATION_USER_PROMPT,
+        RESPONSE_FORMATTING_SYSTEM_PROMPT, RESPONSE_FORMATTING_USER_PROMPT,
+    },
 };
 use crate::types::TableSchema;
 use chrono::Utc;
@@ -201,7 +203,7 @@ impl PromptClient {
                 .replace("{alias_instruction}", &alias_instruction);
 
             (system_prompt, user_prompt)
-        } else if options.table_name.is_some() || options.db.is_some() {
+        } else if options.table_name.is_some() {
             // --- Logic for Query Generation ---
             info!("[get_query_from_prompt] Using table-based query generation.");
 
@@ -233,7 +235,7 @@ impl PromptClient {
             }
 
             let system_prompt = options.system_prompt_template.clone().unwrap_or_else(|| {
-                DEFAULT_QUERY_SYSTEM_PROMPT
+                QUERY_GENERATION_SYSTEM_PROMPT
                     .replace("{language}", language)
                     .replace("{db_name}", self.storage_provider.name())
             });
@@ -254,7 +256,7 @@ impl PromptClient {
                     .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
             } else {
-                DEFAULT_QUERY_USER_PROMPT
+                QUERY_GENERATION_USER_PROMPT
                     .replace("{language}", language)
                     .replace("{context}", &context)
                     .replace("{prompt}", &options.prompt)
@@ -380,7 +382,7 @@ impl PromptClient {
         let system_prompt = options
             .format_system_prompt_template
             .clone()
-            .unwrap_or_else(|| DEFAULT_FORMAT_SYSTEM_PROMPT.to_string());
+            .unwrap_or_else(|| RESPONSE_FORMATTING_SYSTEM_PROMPT.to_string());
 
         let user_prompt = if let Some(template) = &options.format_user_prompt_template {
             template
@@ -388,7 +390,7 @@ impl PromptClient {
                 .replace("{instruction}", instruction)
                 .replace("{content}", content)
         } else {
-            DEFAULT_FORMAT_USER_PROMPT
+            RESPONSE_FORMATTING_USER_PROMPT
                 .replace("{prompt}", &options.prompt)
                 .replace("{instruction}", instruction)
                 .replace("{content}", content)

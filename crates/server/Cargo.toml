@@ -115,3 +115,8 @@ harness = true
 name = "faq_ingestion_test"
 path = "tests/faq_ingestion_test.rs"
 harness = true
+
+[[test]]
+name = "prompt_override_test"
+path = "tests/prompt_override_test.rs"
+harness = true

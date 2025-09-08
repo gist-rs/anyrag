@@ -80,7 +80,6 @@ pub async fn graph_build_handler(
 
     // 3. Use an LLM to determine the column mapping
     let task_config = app_state
-        .config
         .tasks
         .get("direct_generation")
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Task 'direct_generation' not found")))?;

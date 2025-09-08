@@ -37,7 +37,7 @@ async fn test_e2e_prompt_execution() -> Result<()> {
     let query_gen_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert for"); // Differentiate from the format call
+            .body_contains("intelligent data assistant"); // Differentiate from the format call
         then.status(200).json_body(
             // Return a valid SQLite query. The alias is important so the
             // JSON result sent to the next step is predictable.
