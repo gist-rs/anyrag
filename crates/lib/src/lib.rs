@@ -55,7 +55,8 @@ impl PromptClient {
         options: ExecutePromptOptions,
     ) -> Result<PromptResult, PromptError> {
         info!("[execute_prompt] Starting query generation pipeline.");
-        let query_or_answer = self.get_query_from_prompt_internal(&options).await?;
+        let (query_or_answer, system_prompt, user_prompt) =
+            self.get_query_from_prompt_internal(&options).await?;
 
         match query_or_answer {
             QueryOrAnswer::Query(query) => {
@@ -81,6 +82,8 @@ impl PromptClient {
                     text: final_result,
                     generated_sql: Some(query),
                     database_result: Some(database_result),
+                    system_prompt: Some(system_prompt),
+                    user_prompt: Some(user_prompt),
                 })
             }
             QueryOrAnswer::Answer(answer) => {
@@ -92,6 +95,8 @@ impl PromptClient {
                 }
                 Ok(PromptResult {
                     text: answer,
+                    system_prompt: Some(system_prompt),
+                    user_prompt: Some(user_prompt),
                     ..Default::default()
                 })
             }
@@ -136,13 +141,22 @@ impl PromptClient {
         &self,
         options: &ExecutePromptOptions,
     ) -> Result<PromptResult, PromptError> {
-        match self.get_query_from_prompt_internal(options).await? {
+        let (query_or_answer, system_prompt, user_prompt) =
+            self.get_query_from_prompt_internal(options).await?;
+        match query_or_answer {
             QueryOrAnswer::Query(q) => Ok(PromptResult {
                 text: q,
+                system_prompt: Some(system_prompt),
+                user_prompt: Some(user_prompt),
                 ..Default::default()
             }),
             // For backward compatibility and simple testing, return empty string for non-queries.
-            QueryOrAnswer::Answer(_) => Ok(PromptResult::default()),
+            QueryOrAnswer::Answer(answer) => Ok(PromptResult {
+                text: answer,
+                system_prompt: Some(system_prompt),
+                user_prompt: Some(user_prompt),
+                ..Default::default()
+            }),
         }
     }
 
@@ -150,7 +164,7 @@ impl PromptClient {
     async fn get_query_from_prompt_internal(
         &self,
         options: &ExecutePromptOptions,
-    ) -> Result<QueryOrAnswer, PromptError> {
+    ) -> Result<(QueryOrAnswer, String, String), PromptError> {
         info!(
             "[get_query_from_prompt] received prompt: {:?}",
             options.prompt
@@ -234,6 +248,7 @@ impl PromptClient {
                 }
             }
 
+            info!(context = %context, "Final context with schema prepared for AI.");
             let system_prompt = options.system_prompt_template.clone().unwrap_or_else(|| {
                 QUERY_GENERATION_SYSTEM_PROMPT
                     .replace("{language}", language)
@@ -329,7 +344,11 @@ impl PromptClient {
         {
             // If not, it's a direct answer. The answer is the *original* raw response.
             info!("[get_query_from_prompt] Response is a direct answer, not a query.");
-            return Ok(QueryOrAnswer::Answer(raw_response.to_string()));
+            return Ok((
+                QueryOrAnswer::Answer(raw_response.to_string()),
+                system_prompt,
+                user_prompt,
+            ));
         }
 
         info!("[get_query_from_prompt] Successfully generated query.");
@@ -341,7 +360,7 @@ impl PromptClient {
             query = query.replace("your_table_name", table);
         }
 
-        Ok(QueryOrAnswer::Query(query))
+        Ok((QueryOrAnswer::Query(query), system_prompt, user_prompt))
     }
 
     /// Formats a `TableSchema` into a markdown-like string for the AI prompt.

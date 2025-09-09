@@ -61,6 +61,8 @@ pub async fn gen_text_handler(
 
     let mut retrieved_context = String::new();
     let mut context_sql: Option<String> = None;
+    let mut context_system_prompt: Option<String> = None;
+    let mut context_user_prompt: Option<String> = None;
 
     // --- 1. Context Retrieval via Text-to-SQL (Optional) ---
     if let Some(context_prompt) = payload.context_prompt.as_ref().filter(|s| !s.is_empty()) {
@@ -93,7 +95,7 @@ pub async fn gen_text_handler(
             db: Some(db_name.clone()),
             system_prompt_template: Some(context_task_config.system_prompt.clone()),
             user_prompt_template: Some(context_task_config.user_prompt.clone()),
-            table_name: None, // Let the library handle fetching all schemas
+            table_name: Some("".to_string()), // HACK: Pass an empty string to trigger schema fetching for all tables
             ..Default::default()
         };
         let context_options: LibExecutePromptOptions = server_options.into();
@@ -104,6 +106,8 @@ pub async fn gen_text_handler(
 
         retrieved_context = context_result.database_result.unwrap_or_default();
         context_sql = context_result.generated_sql;
+        context_system_prompt = context_result.system_prompt;
+        context_user_prompt = context_result.user_prompt;
 
         if retrieved_context.trim() == "[]" || retrieved_context.trim().is_empty() {
             info!("Context prompt executed but returned no results.");
@@ -187,6 +191,8 @@ pub async fn gen_text_handler(
         "db": db_name,
         "generation_prompt": payload.generation_prompt,
         "context_prompt": payload.context_prompt,
+        "context_system_prompt": context_system_prompt,
+        "context_user_prompt": context_user_prompt,
         "generated_sql_for_context": context_sql,
         "retrieved_context": retrieved_context,
         "final_prompt_sent_to_ai": final_user_prompt,

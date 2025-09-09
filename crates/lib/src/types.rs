@@ -117,6 +117,12 @@ pub struct PromptResult {
     /// The raw, unprocessed result from the database query.
     #[serde(default)]
     pub database_result: Option<String>,
+    /// The system prompt sent to the AI for query generation.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// The user prompt sent to the AI for query generation.
+    #[serde(default)]
+    pub user_prompt: Option<String>,
 }
 
 /// A builder for creating `PromptClient` instances.
