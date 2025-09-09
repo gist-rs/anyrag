@@ -316,14 +316,13 @@ impl VectorSearch for SqliteProvider {
         info!("Executing SQLite vector search on documents.");
         let conn = self.db.connect()?;
 
-        let vector_str = format!(
-            "vector('[{}]')",
-            query_vector
-                .iter()
-                .map(|f| f.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
+        let vector_numbers_str = query_vector
+            .iter()
+            .map(|f| f.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let vector_str = format!("vector('[{}]')", &vector_numbers_str);
 
         let distance_calculation =
             format!("(1.0 - (vector_distance_cos(de.embedding, {vector_str}) / 2.0))");
@@ -386,7 +385,12 @@ impl VectorSearch for SqliteProvider {
         sql.push_str(&format!(" WHERE {}", conditions.join(" AND ")));
         sql.push_str(&format!(" ORDER BY similarity DESC LIMIT {limit};"));
 
-        info!(sql = %sql, params = ?query_params, "Executing vector search SQL");
+        let log_sql = if vector_numbers_str.len() > 256 {
+            sql.replace(&vector_numbers_str, "[...vector truncated...]")
+        } else {
+            sql.clone()
+        };
+        info!(sql = %log_sql, params = ?query_params, "Executing vector search SQL");
 
         let mut results = if query_params.is_empty() {
             conn.query(&sql, ()).await?

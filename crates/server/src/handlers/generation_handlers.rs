@@ -112,6 +112,11 @@ pub async fn gen_text_handler(
         if retrieved_context.trim() == "[]" || retrieved_context.trim().is_empty() {
             info!("Context prompt executed but returned no results.");
             retrieved_context.clear(); // Ensure it's an empty string if no results found
+        } else {
+            // Attempt to parse the JSON and log the count of items in the array.
+            if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&retrieved_context) {
+                info!("Context query returned {} results.", arr.len());
+            }
         }
     } else {
         info!("No context_prompt provided, skipping context retrieval.");

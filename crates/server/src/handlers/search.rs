@@ -58,6 +58,8 @@ pub async fn vector_search_handler(
         .vector_search(query_vector, limit, owner_id.as_deref(), None)
         .await?;
 
+    info!("Vector search found {} results.", results.len());
+
     let debug_info = json!({ "query": payload.query, "limit": limit, "owner_id": owner_id });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
@@ -76,6 +78,7 @@ pub async fn keyword_search_handler(
         .sqlite_provider
         .keyword_search(&payload.query, limit, owner_id.as_deref())
         .await?;
+    info!("Keyword search found {} results.", results.len());
     let debug_info = json!({ "query": payload.query, "limit": limit, "owner_id": owner_id });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
 }
@@ -114,6 +117,12 @@ pub async fn hybrid_search_handler(
 
     let vector_results = vector_results?;
     let keyword_results = keyword_results?;
+
+    info!(
+        "Hybrid search candidates: {} vector, {} keyword.",
+        vector_results.len(),
+        keyword_results.len()
+    );
 
     // --- Stage 2: Re-rank using the specified mode ---
     let mut ranked_results = match payload.mode {
@@ -156,6 +165,11 @@ pub async fn hybrid_search_handler(
     };
 
     ranked_results.truncate(limit as usize);
+
+    info!(
+        "Hybrid search returning {} final results after re-ranking and truncation.",
+        ranked_results.len()
+    );
 
     let debug_info = json!({ "query": payload.query, "limit": limit, "mode": payload.mode, "owner_id": owner_id });
     Ok(wrap_response(
