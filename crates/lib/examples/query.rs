@@ -16,7 +16,7 @@
 //! # Prerequisites
 //!
 //! - A valid `.env` file in the `crates/lib` directory with credentials for the
-//!   AI provider (`AI_API_URL`, `AI_API_KEY`) and BigQuery (`BIGQUERY_PROJECT_ID`).
+//!   AI provider (`AI_API_KEY`) and BigQuery (`BIGQUERY_PROJECT_ID`).
 //! - Local Google Cloud authentication. Run `gcloud auth application-default login`.
 //!
 //! # Usage

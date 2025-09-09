@@ -94,20 +94,26 @@ impl Storage for MockStorageProvider {
 /// a `GeminiProvider` or a `LocalAiProvider`, using other environment variables
 /// for configuration. Panics if required variables are not set.
 pub fn create_real_ai_provider() -> Box<dyn AiProvider> {
-    let provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "gemini".to_string());
-    let api_url = env::var("AI_API_URL").expect("AI_API_URL environment variable not set");
+    let provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "local".to_string());
     let api_key = env::var("AI_API_KEY").ok();
     let model = env::var("AI_MODEL").ok();
 
     match provider_name.as_str() {
         "gemini" => {
+            let api_url =
+                env::var("AI_API_URL").expect("AI_API_URL is required for gemini provider");
             let key = api_key.expect("AI_API_KEY is required for the gemini provider");
             Box::new(GeminiProvider::new(api_url, key).expect("Failed to create GeminiProvider"))
         }
-        "local" => Box::new(
-            LocalAiProvider::new(api_url, api_key, model)
-                .expect("Failed to create LocalAiProvider"),
-        ),
+        "local" => {
+            let api_url = env::var("LOCAL_AI_API_URL")
+                .or_else(|_| env::var("AI_API_URL"))
+                .expect("LOCAL_AI_API_URL or AI_API_URL must be set for local provider");
+            Box::new(
+                LocalAiProvider::new(api_url, api_key, model)
+                    .expect("Failed to create LocalAiProvider"),
+            )
+        }
         _ => panic!("Unsupported AI provider specified: {provider_name}"),
     }
 }
