@@ -27,7 +27,7 @@ async fn test_prompt_execution_with_sqlite() {
     let query_gen_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert for SQL"); // The prompt for SQLite uses "SQL"
+            .body_contains("intelligent data assistant"); // The prompt for SQLite uses "SQL"
         then.status(200).json_body(
             // The AI's "response" is the generated SQL query.
             json!({"choices": [{"message": {"role": "assistant", "content": "SELECT name FROM test_table WHERE id = 1;"}}]}),

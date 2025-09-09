@@ -1,3 +1,5 @@
+#[cfg(feature = "rss")]
+use crate::prompts::tasks::{RSS_SUMMARIZATION_SYSTEM_PROMPT, RSS_SUMMARIZATION_USER_PROMPT};
 #[cfg(feature = "bigquery")]
 use crate::providers::db::bigquery::BigQueryProvider;
 use crate::{
@@ -5,7 +7,6 @@ use crate::{
     prompts::{
         core::{DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT},
         knowledge::{KNOWLEDGE_RAG_SYSTEM_PROMPT, KNOWLEDGE_RAG_USER_PROMPT},
-        rss::{RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT},
     },
     providers::{ai::AiProvider, db::storage::Storage},
     rerank::Rerankable,
@@ -36,6 +37,7 @@ impl Debug for PromptClient {
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ContentType {
+    #[cfg(feature = "rss")]
     Rss,
     Sql,
     Json,
@@ -47,7 +49,11 @@ impl ContentType {
     /// Returns the appropriate system and user prompt templates for the content type.
     pub fn get_prompt_templates(&self) -> (&'static str, &'static str) {
         match self {
-            ContentType::Rss => (RSS_QUERY_SYSTEM_PROMPT, RSS_QUERY_USER_PROMPT),
+            #[cfg(feature = "rss")]
+            ContentType::Rss => (
+                RSS_SUMMARIZATION_SYSTEM_PROMPT,
+                RSS_SUMMARIZATION_USER_PROMPT,
+            ),
             ContentType::Knowledge => (KNOWLEDGE_RAG_SYSTEM_PROMPT, KNOWLEDGE_RAG_USER_PROMPT),
             // Default to standard SQL prompts for other types for now.
             ContentType::Sql | ContentType::Json | ContentType::Text => {
@@ -111,6 +117,12 @@ pub struct PromptResult {
     /// The raw, unprocessed result from the database query.
     #[serde(default)]
     pub database_result: Option<String>,
+    /// The system prompt sent to the AI for query generation.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// The user prompt sent to the AI for query generation.
+    #[serde(default)]
+    pub user_prompt: Option<String>,
 }
 
 /// A builder for creating `PromptClient` instances.

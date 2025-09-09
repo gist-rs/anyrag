@@ -21,10 +21,12 @@ pub use types::{
     ExecutePromptOptions, PromptClient, PromptClientBuilder, PromptResult, SearchResult,
 };
 
-use crate::prompts::core::{
-    get_alias_instruction, get_select_instruction, DEFAULT_FORMAT_SYSTEM_PROMPT,
-    DEFAULT_FORMAT_USER_PROMPT, DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT,
-    SQLITE_QUERY_USER_PROMPT,
+use crate::prompts::{
+    core::{get_alias_instruction, get_select_instruction, SQLITE_QUERY_USER_PROMPT},
+    tasks::{
+        QUERY_GENERATION_SYSTEM_PROMPT, QUERY_GENERATION_USER_PROMPT,
+        RESPONSE_FORMATTING_SYSTEM_PROMPT, RESPONSE_FORMATTING_USER_PROMPT,
+    },
 };
 use crate::types::TableSchema;
 use chrono::Utc;
@@ -53,7 +55,8 @@ impl PromptClient {
         options: ExecutePromptOptions,
     ) -> Result<PromptResult, PromptError> {
         info!("[execute_prompt] Starting query generation pipeline.");
-        let query_or_answer = self.get_query_from_prompt_internal(&options).await?;
+        let (query_or_answer, system_prompt, user_prompt) =
+            self.get_query_from_prompt_internal(&options).await?;
 
         match query_or_answer {
             QueryOrAnswer::Query(query) => {
@@ -79,6 +82,8 @@ impl PromptClient {
                     text: final_result,
                     generated_sql: Some(query),
                     database_result: Some(database_result),
+                    system_prompt: Some(system_prompt),
+                    user_prompt: Some(user_prompt),
                 })
             }
             QueryOrAnswer::Answer(answer) => {
@@ -90,6 +95,8 @@ impl PromptClient {
                 }
                 Ok(PromptResult {
                     text: answer,
+                    system_prompt: Some(system_prompt),
+                    user_prompt: Some(user_prompt),
                     ..Default::default()
                 })
             }
@@ -134,13 +141,22 @@ impl PromptClient {
         &self,
         options: &ExecutePromptOptions,
     ) -> Result<PromptResult, PromptError> {
-        match self.get_query_from_prompt_internal(options).await? {
+        let (query_or_answer, system_prompt, user_prompt) =
+            self.get_query_from_prompt_internal(options).await?;
+        match query_or_answer {
             QueryOrAnswer::Query(q) => Ok(PromptResult {
                 text: q,
+                system_prompt: Some(system_prompt),
+                user_prompt: Some(user_prompt),
                 ..Default::default()
             }),
             // For backward compatibility and simple testing, return empty string for non-queries.
-            QueryOrAnswer::Answer(_) => Ok(PromptResult::default()),
+            QueryOrAnswer::Answer(answer) => Ok(PromptResult {
+                text: answer,
+                system_prompt: Some(system_prompt),
+                user_prompt: Some(user_prompt),
+                ..Default::default()
+            }),
         }
     }
 
@@ -148,7 +164,7 @@ impl PromptClient {
     async fn get_query_from_prompt_internal(
         &self,
         options: &ExecutePromptOptions,
-    ) -> Result<QueryOrAnswer, PromptError> {
+    ) -> Result<(QueryOrAnswer, String, String), PromptError> {
         info!(
             "[get_query_from_prompt] received prompt: {:?}",
             options.prompt
@@ -204,14 +220,37 @@ impl PromptClient {
         } else if options.table_name.is_some() {
             // --- Logic for Query Generation ---
             info!("[get_query_from_prompt] Using table-based query generation.");
-            if let Some(table) = &options.table_name {
+
+            // If a specific table is named, get its schema.
+            if let Some(table) = options.table_name.as_deref().filter(|s| !s.is_empty()) {
                 let schema = self.storage_provider.get_table_schema(table).await?;
                 let schema_str = Self::format_schema_for_prompt(&schema);
-                context.push_str(&format!("Schema for `{table}`: ({schema_str}). "));
+                context.push_str(&format!("# Schema for `{table}`\n{schema_str}\n\n"));
+            } else {
+                // If no specific table is named, but a DB is context, get all table schemas.
+                info!("[get_query_from_prompt] No table_name provided; fetching all schemas for the current DB.");
+                let tables = self.storage_provider.list_tables().await?;
+                for table in tables {
+                    // It's possible for schema fetching to fail for a specific table.
+                    // We'll log the error but continue, so the AI gets as much context as possible.
+                    match self.storage_provider.get_table_schema(&table).await {
+                        Ok(schema) => {
+                            let schema_str = Self::format_schema_for_prompt(&schema);
+                            context.push_str(&format!("# Schema for `{table}`\n{schema_str}\n\n"));
+                        }
+                        Err(e) => {
+                            error!(
+                                "[get_query_from_prompt] Failed to get schema for table '{}': {}",
+                                table, e
+                            );
+                        }
+                    }
+                }
             }
 
+            info!(context = %context, "Final context with schema prepared for AI.");
             let system_prompt = options.system_prompt_template.clone().unwrap_or_else(|| {
-                DEFAULT_QUERY_SYSTEM_PROMPT
+                QUERY_GENERATION_SYSTEM_PROMPT
                     .replace("{language}", language)
                     .replace("{db_name}", self.storage_provider.name())
             });
@@ -232,7 +271,7 @@ impl PromptClient {
                     .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
             } else {
-                DEFAULT_QUERY_USER_PROMPT
+                QUERY_GENERATION_USER_PROMPT
                     .replace("{language}", language)
                     .replace("{context}", &context)
                     .replace("{prompt}", &options.prompt)
@@ -305,7 +344,11 @@ impl PromptClient {
         {
             // If not, it's a direct answer. The answer is the *original* raw response.
             info!("[get_query_from_prompt] Response is a direct answer, not a query.");
-            return Ok(QueryOrAnswer::Answer(raw_response.to_string()));
+            return Ok((
+                QueryOrAnswer::Answer(raw_response.to_string()),
+                system_prompt,
+                user_prompt,
+            ));
         }
 
         info!("[get_query_from_prompt] Successfully generated query.");
@@ -317,26 +360,29 @@ impl PromptClient {
             query = query.replace("your_table_name", table);
         }
 
-        Ok(QueryOrAnswer::Query(query))
+        Ok((QueryOrAnswer::Query(query), system_prompt, user_prompt))
     }
 
+    /// Formats a `TableSchema` into a markdown-like string for the AI prompt.
     fn format_schema_for_prompt(schema: &TableSchema) -> String {
         schema
             .fields
             .iter()
             .map(|field| {
                 let mut field_str = format!(
-                    "{field_name} {field_type:?}",
+                    "- {field_name}: {field_type:?}",
                     field_name = field.name,
                     field_type = field.r#type
                 );
                 if let Some(desc) = &field.description {
-                    field_str.push_str(&format!(" ({desc})"));
+                    if !desc.is_empty() {
+                        field_str.push_str(&format!(" ({desc})"));
+                    }
                 }
                 field_str
             })
             .collect::<Vec<String>>()
-            .join(", ")
+            .join("\n")
     }
 
     /// Formats the raw query result using the AI provider if an instruction is given.
@@ -355,7 +401,7 @@ impl PromptClient {
         let system_prompt = options
             .format_system_prompt_template
             .clone()
-            .unwrap_or_else(|| DEFAULT_FORMAT_SYSTEM_PROMPT.to_string());
+            .unwrap_or_else(|| RESPONSE_FORMATTING_SYSTEM_PROMPT.to_string());
 
         let user_prompt = if let Some(template) = &options.format_user_prompt_template {
             template
@@ -363,7 +409,7 @@ impl PromptClient {
                 .replace("{instruction}", instruction)
                 .replace("{content}", content)
         } else {
-            DEFAULT_FORMAT_USER_PROMPT
+            RESPONSE_FORMATTING_USER_PROMPT
                 .replace("{prompt}", &options.prompt)
                 .replace("{instruction}", instruction)
                 .replace("{content}", content)

@@ -1,3 +1,5 @@
+#[cfg(feature = "firebase")]
+use firestore::errors::FirestoreError;
 #[cfg(feature = "bigquery")]
 use gcp_bigquery_client::error::BQError;
 use thiserror::Error;
@@ -27,6 +29,13 @@ pub enum PromptError {
     Regex(#[from] regex::Error),
     #[error("Failed to serialize result to JSON: {0}")]
     JsonSerialization(#[from] serde_json::Error),
+}
+
+#[cfg(feature = "firebase")]
+impl From<FirestoreError> for PromptError {
+    fn from(err: FirestoreError) -> Self {
+        PromptError::StorageOperationFailed(err.to_string())
+    }
 }
 
 #[cfg(feature = "bigquery")]

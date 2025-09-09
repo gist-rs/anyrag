@@ -21,7 +21,7 @@ use anyhow::{bail, Result};
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
-    handlers::{self, EmbedNewRequest, IngestSheetFaqRequest, SearchRequest},
+    handlers::{self, EmbedNewRequest, IngestParams, IngestSheetRequest, SearchRequest},
     state,
     types::DebugParams,
 };
@@ -88,15 +88,20 @@ async fn main() -> Result<()> {
     // --- 2. Ingest FAQs from Google Sheet ---
     info!("--- Starting Google Sheet FAQ Ingestion ---");
     let sheet_url = "https://docs.google.com/spreadsheets/d/1Upsr6r6ufkYougDFVBQOQNgNf9Syrwv2CTNhFbVNu2w/edit?usp=sharing";
-    let ingest_payload = IngestSheetFaqRequest {
+    let ingest_payload = IngestSheetRequest {
         url: sheet_url.to_string(),
         gid: Some(856666263.to_string()),
         skip_header: true,
     };
+    let ingest_params = IngestParams {
+        faq: true,
+        embed: true,
+    };
 
-    match handlers::ingest_sheet_faq_handler(
+    match handlers::ingest_sheet_handler(
         axum::extract::State(app_state.clone()),
         auth_user.clone(),
+        Query(ingest_params),
         Query(DebugParams::default()),
         Json(ingest_payload),
     )
@@ -105,9 +110,9 @@ async fn main() -> Result<()> {
         Ok(Json(response)) => {
             info!(
                 "Ingestion successful. Stored {} new FAQs.",
-                response.result.ingested_faqs
+                response.result.ingested_rows
             );
-            if response.result.ingested_faqs == 0 {
+            if response.result.ingested_rows == 0 {
                 bail!("No FAQs were ingested. The sheet might be empty or already processed.");
             }
         }

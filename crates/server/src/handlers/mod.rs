@@ -5,14 +5,26 @@
 //! (e.g., `ingest`, `search`, `knowledge`).
 
 // Sub-modules for different handler categories.
+pub mod admin_handlers;
+pub mod auth_handlers;
+pub mod db_handlers;
+pub mod document_handlers;
 pub mod general;
+pub mod generation_handlers;
+pub mod graph_handlers;
 pub mod ingest;
 pub mod knowledge;
 pub mod search;
 
 // Re-export all handlers from the sub-modules to make them easily accessible
 // to the router under a single `handlers::` path.
+pub use admin_handlers::*;
+pub use auth_handlers::*;
+pub use db_handlers::*;
+pub use document_handlers::*;
 pub use general::*;
+pub use generation_handlers::*;
+pub use graph_handlers::*;
 pub use ingest::*;
 pub use knowledge::*;
 pub use search::*;

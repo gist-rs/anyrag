@@ -3,13 +3,16 @@
 //! This module contains all the Axum handlers for data ingestion endpoints,
 //! such as ingesting from RSS, text, files, and Google Sheets.
 
-use super::knowledge::KnowledgeIngestResponse;
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use crate::auth::middleware::AuthenticatedUser;
+#[cfg(feature = "rss")]
+use anyrag::ingest::ingest_from_url;
 use anyrag::ingest::{
-    ingest_faq_from_google_sheet, ingest_from_url, run_pdf_ingestion_pipeline,
+    dump_firestore_collection, ingest_faq_from_google_sheet, ingest_from_google_sheet_url,
+    knowledge::IngestionPrompts,
+    run_ingestion_pipeline, run_pdf_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
     text::{chunk_text, ingest_chunks_as_documents},
-    PdfSyncExtractor,
+    DumpFirestoreOptions, PdfSyncExtractor,
 };
 use axum::{
     extract::{Query, State},
@@ -18,23 +21,44 @@ use axum::{
 use axum_extra::extract::Multipart;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::info;
+use tracing::{info, warn};
 
 // --- API Payloads for Ingestion ---
 
+#[derive(Deserialize, Serialize, Debug)]
+pub struct IngestParams {
+    #[serde(default)]
+    pub faq: bool,
+    #[serde(default = "default_true")]
+    pub embed: bool,
+}
+
+#[cfg(feature = "rss")]
 #[derive(Deserialize)]
-pub struct IngestRequest {
+pub struct IngestRssRequest {
     pub url: String,
 }
 
+#[cfg(feature = "rss")]
 #[derive(Serialize)]
-pub struct IngestResponse {
+pub struct IngestRssResponse {
     message: String,
     ingested_articles: usize,
 }
 
 #[derive(Deserialize)]
-pub struct IngestSheetFaqRequest {
+pub struct IngestWebRequest {
+    pub url: String,
+}
+
+#[derive(Serialize)]
+pub struct IngestWebResponse {
+    pub message: String,
+    pub ingested_faqs: usize,
+}
+
+#[derive(Deserialize)]
+pub struct IngestSheetRequest {
     pub url: String,
     #[serde(default)]
     pub gid: Option<String>,
@@ -47,9 +71,10 @@ fn default_true() -> bool {
 }
 
 #[derive(Serialize)]
-pub struct IngestSheetFaqResponse {
+pub struct IngestSheetResponse {
     pub message: String,
-    pub ingested_faqs: usize,
+    pub ingested_rows: usize,
+    pub table_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -78,21 +103,32 @@ pub enum ExtractorChoice {
 }
 
 #[derive(Deserialize)]
-pub struct IngestPdfUrlRequest {
-    pub url: String,
+pub struct IngestFirebaseRequest {
+    pub project_id: String,
+    pub collection: String,
     #[serde(default)]
-    pub extractor: ExtractorChoice,
+    pub incremental: bool,
+    pub timestamp_field: Option<String>,
+    pub limit: Option<i32>,
+    pub fields: Option<Vec<String>>,
+}
+
+#[derive(Serialize)]
+pub struct IngestFirebaseResponse {
+    pub message: String,
+    pub ingested_documents: usize,
 }
 
 // --- Ingestion Handlers ---
 
 /// Handler for ingesting content from an RSS feed URL.
-pub async fn ingest_handler(
+#[cfg(feature = "rss")]
+pub async fn ingest_rss_handler(
     State(app_state): State<AppState>,
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
-    Json(payload): Json<IngestRequest>,
-) -> Result<Json<ApiResponse<IngestResponse>>, AppError> {
+    Json(payload): Json<IngestRssRequest>,
+) -> Result<Json<ApiResponse<IngestRssResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     info!(
         "User '{:?}' initiating ingest for URL: {}",
@@ -104,7 +140,7 @@ pub async fn ingest_handler(
         owner_id.as_deref(),
     )
     .await?;
-    let response = IngestResponse {
+    let response = IngestRssResponse {
         message: "Ingestion successful".to_string(),
         ingested_articles: ingested_count,
     };
@@ -112,37 +148,62 @@ pub async fn ingest_handler(
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
-/// Handler for ingesting structured FAQs from a Google Sheet.
-pub async fn ingest_sheet_faq_handler(
+/// Unified handler for ingesting a Google Sheet as a generic table or as structured FAQs.
+pub async fn ingest_sheet_handler(
     State(app_state): State<AppState>,
     user: AuthenticatedUser,
+    Query(params): Query<IngestParams>,
     debug_params: Query<DebugParams>,
-    Json(payload): Json<IngestSheetFaqRequest>,
-) -> Result<Json<ApiResponse<IngestSheetFaqResponse>>, AppError> {
+    Json(payload): Json<IngestSheetRequest>,
+) -> Result<Json<ApiResponse<IngestSheetResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     info!(
-        "User '{:?}' initiating Sheet FAQ ingest for URL: {} with gid: {:?}",
-        owner_id, payload.url, payload.gid
+        "User '{:?}' initiating Sheet ingest for URL: {} with params: faq={}, embed={}",
+        owner_id, payload.url, params.faq, params.embed
     );
-    let ingested_count = ingest_faq_from_google_sheet(
-        &app_state.sqlite_provider.db,
-        &payload.url,
-        owner_id.as_deref(),
-        payload.gid.as_deref(),
-        payload.skip_header,
-    )
-    .await?;
 
-    let response = IngestSheetFaqResponse {
-        message: "Sheet FAQ ingestion successful".to_string(),
-        ingested_faqs: ingested_count,
+    let (ingested_count, table_name, message) = if params.faq {
+        // --- FAQ Ingestion Path ---
+        let count = ingest_faq_from_google_sheet(
+            &app_state.sqlite_provider.db,
+            &payload.url,
+            owner_id.as_deref(),
+            payload.gid.as_deref(),
+            payload.skip_header,
+        )
+        .await?;
+        (count, None, "Sheet FAQ ingestion successful".to_string())
+    } else {
+        // --- Generic Table Ingestion Path ---
+        let (export_url, table_name) =
+            sheet_url_to_export_url_and_table_name(&payload.url).map_err(anyhow::Error::from)?;
+        let count =
+            ingest_from_google_sheet_url(&app_state.sqlite_provider.db, &export_url, &table_name)
+                .await
+                .map_err(|e| {
+                    AppError::Internal(anyhow::anyhow!("Generic sheet ingestion failed: {e}"))
+                })?;
+        (
+            count,
+            Some(table_name.clone()),
+            format!("Generic sheet ingested successfully into table '{table_name}'."),
+        )
     };
+
+    let response = IngestSheetResponse {
+        message,
+        ingested_rows: ingested_count,
+        table_name,
+    };
+
     let debug_info = json!({
         "url": payload.url,
         "gid": payload.gid,
         "skip_header": payload.skip_header,
-        "owner_id": owner_id
+        "owner_id": owner_id,
+        "params": params,
     });
+
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
@@ -189,18 +250,25 @@ pub async fn ingest_text_handler(
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
-/// Handler for ingesting a file (e.g., PDF) via multipart form data.
-pub async fn ingest_file_handler(
+/// Consolidated handler for ingesting a PDF from an upload or a URL.
+pub async fn ingest_pdf_handler(
     State(app_state): State<AppState>,
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
+    Query(ingest_params): Query<IngestParams>,
     mut multipart: Multipart,
-) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
+) -> Result<Json<ApiResponse<IngestWebResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     let mut pdf_data: Option<Vec<u8>> = None;
     let mut source_identifier: Option<String> = None;
     let mut extractor_choice = ExtractorChoice::default();
 
+    info!(
+        "PDF ingest request received with params: faq={}, embed={}",
+        ingest_params.faq, ingest_params.embed
+    );
+
+    // --- 1. Get PDF data from either `file` or `url` part ---
     while let Some(field) = multipart.next_field().await.map_err(anyhow::Error::from)? {
         let name = field.name().unwrap_or("").to_string();
 
@@ -215,6 +283,33 @@ pub async fn ingest_file_handler(
                     source_identifier.as_deref().unwrap()
                 );
             }
+            "url" => {
+                let url = field.text().await.map_err(anyhow::Error::from)?;
+                info!("User '{:?}' provided PDF URL: {}", owner_id, url);
+                let response = reqwest::get(&url).await.map_err(|e| {
+                    AppError::Internal(anyhow::anyhow!("Failed to download PDF from URL: {e}"))
+                })?;
+
+                if !response.status().is_success() {
+                    return Err(AppError::Internal(anyhow::anyhow!(
+                        "Failed to download PDF, received status: {}",
+                        response.status()
+                    )));
+                }
+                pdf_data = Some(
+                    response
+                        .bytes()
+                        .await
+                        .map_err(anyhow::Error::from)?
+                        .to_vec(),
+                );
+                source_identifier = Some(
+                    url.split('/')
+                        .next_back()
+                        .unwrap_or("downloaded.pdf")
+                        .to_string(),
+                );
+            }
             "extractor" => {
                 let extractor_str = field.text().await.map_err(anyhow::Error::from)?;
                 extractor_choice =
@@ -223,18 +318,36 @@ pub async fn ingest_file_handler(
                     })?;
                 info!("Extractor choice set to: {:?}", extractor_choice);
             }
-            _ => {}
+            _ => warn!("Ignoring unknown multipart field: {}", name),
         }
     }
 
-    let pdf_data = pdf_data
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("File data not found in request.")))?;
-    let source_identifier = source_identifier
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("File name not found in request.")))?;
+    let pdf_data = pdf_data.ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "PDF data not found in request. Provide 'file' or 'url' part."
+        ))
+    })?;
+    let source_identifier = source_identifier.ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Could not determine source identifier for PDF."
+        ))
+    })?;
 
-    // --- Task-based AI Provider Loading ---
+    // --- 2. Run the ingestion pipeline (currently defaults to FAQ generation) ---
+    // TODO: Implement the logic to switch between "Light Ingest" and "FAQ Generation"
+    // based on the `ingest_params.faq` flag.
+    if !ingest_params.faq {
+        warn!(
+            "'faq=false' is not fully implemented. Running full FAQ generation pipeline for now."
+        );
+    }
+    // TODO: Pass the `ingest_params.embed` flag down to the library layer.
+    if !ingest_params.embed {
+        warn!("'embed=false' is not implemented. Embeddings will be generated.");
+    }
+
     let task_name = "knowledge_distillation";
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+    let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
             "Configuration for task '{task_name}' not found."
         ))
@@ -246,15 +359,15 @@ pub async fn ingest_file_handler(
         ))
     })?;
 
-    let augmentation_task_config = app_state
-        .config
-        .tasks
-        .get("knowledge_augmentation")
-        .ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!(
-                "Task 'knowledge_augmentation' not found in config"
-            ))
-        })?;
+    let augmentation_task_config =
+        app_state
+            .tasks
+            .get("knowledge_augmentation")
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Task 'knowledge_augmentation' not found in config"
+                ))
+            })?;
 
     let extractor_strategy = match extractor_choice {
         ExtractorChoice::Local => PdfSyncExtractor::Local,
@@ -269,7 +382,7 @@ pub async fn ingest_file_handler(
 
     let ingested_count = run_pdf_ingestion_pipeline(
         &app_state.sqlite_provider.db,
-        ai_provider.as_ref(), // Pass the dynamically selected provider
+        ai_provider.as_ref(),
         pdf_data.clone(),
         &source_identifier,
         owner_id.as_deref(),
@@ -278,120 +391,129 @@ pub async fn ingest_file_handler(
     )
     .await?;
 
-    let response = KnowledgeIngestResponse {
+    let response = IngestWebResponse {
         message: "PDF ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,
     };
 
     let debug_info = json!({
-        "filename": source_identifier,
+        "source": source_identifier,
         "size": pdf_data.len(),
         "extractor": extractor_choice,
         "owner_id": owner_id,
+        "faq_enabled": ingest_params.faq,
+        "embed_enabled": ingest_params.embed,
     });
 
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
-/// Handler for ingesting a PDF from a direct URL.
-pub async fn ingest_pdf_url_handler(
+/// Handler for the knowledge base ingestion pipeline from a web URL.
+pub async fn ingest_web_handler(
     State(app_state): State<AppState>,
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
-    Json(payload): Json<IngestPdfUrlRequest>,
-) -> Result<Json<ApiResponse<KnowledgeIngestResponse>>, AppError> {
+    Json(payload): Json<IngestWebRequest>,
+) -> Result<Json<super::ApiResponse<IngestWebResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     info!(
-        "User '{:?}' requesting PDF ingest from URL: {}",
-        owner_id, payload.url
+        "Received web ingest request for URL: {} by user {:?}",
+        payload.url, owner_id
     );
 
-    let response = reqwest::get(&payload.url)
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to download PDF from URL: {e}")))?;
-
-    if !response.status().is_success() {
-        return Err(AppError::Internal(anyhow::anyhow!(
-            "Failed to download PDF, received status: {}",
-            response.status()
-        )));
-    }
-    let pdf_data = response
-        .bytes()
-        .await
-        .map_err(anyhow::Error::from)?
-        .to_vec();
-
-    let source_identifier = payload
-        .url
-        .split('/')
-        .next_back()
-        .unwrap_or("downloaded.pdf")
-        .to_string();
-
-    info!(
-        "PDF downloaded successfully. Size: {} bytes. Identifier: {}",
-        pdf_data.len(),
-        source_identifier
-    );
-
-    // --- Task-based AI Provider Loading ---
+    // --- Get AI provider for knowledge distillation ---
     let task_name = "knowledge_distillation";
-    let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Configuration for task '{task_name}' not found."
-        ))
+    let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
     })?;
     let provider_name = &task_config.provider;
     let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+    })?;
+
+    // --- Get prompts for augmentation and metadata sub-tasks ---
+    let aug_task_name = "knowledge_augmentation";
+    let aug_task_config = app_state.tasks.get(aug_task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
-            "Provider '{provider_name}' for task '{task_name}' not found in providers map."
+            "Task '{aug_task_name}' not found in config"
         ))
     })?;
 
-    let augmentation_task_config = app_state
-        .config
-        .tasks
-        .get("knowledge_augmentation")
-        .ok_or_else(|| {
-            AppError::Internal(anyhow::anyhow!(
-                "Task 'knowledge_augmentation' not found in config"
-            ))
-        })?;
+    let meta_task_name = "knowledge_metadata_extraction";
+    let meta_task_config = app_state.tasks.get(meta_task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Task '{meta_task_name}' not found in config"
+        ))
+    })?;
 
-    let extractor_strategy = match payload.extractor {
-        ExtractorChoice::Local => PdfSyncExtractor::Local,
-        ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
+    let prompts = IngestionPrompts {
+        extraction_system_prompt: &task_config.system_prompt,
+        extraction_user_prompt_template: &task_config.user_prompt,
+        augmentation_system_prompt: &aug_task_config.system_prompt,
+        metadata_extraction_system_prompt: &meta_task_config.system_prompt,
     };
 
-    let prompts = anyrag::ingest::pdf::PdfIngestionPrompts {
-        distillation_system_prompt: &task_config.system_prompt,
-        distillation_user_prompt_template: &task_config.user_prompt,
-        augmentation_system_prompt: &augmentation_task_config.system_prompt,
-    };
+    let jina_api_key = app_state.config.jina_api_key.as_deref();
 
-    let ingested_count = run_pdf_ingestion_pipeline(
+    let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
-        ai_provider.as_ref(), // Pass the dynamically selected provider
-        pdf_data.clone(),
-        &source_identifier,
+        ai_provider.as_ref(),
+        &payload.url,
         owner_id.as_deref(),
-        extractor_strategy,
         prompts,
+        jina_api_key,
     )
-    .await?;
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;
 
-    let response = KnowledgeIngestResponse {
-        message: "PDF URL ingestion pipeline completed successfully.".to_string(),
+    let response = IngestWebResponse {
+        message: "Knowledge ingestion pipeline completed successfully.".to_string(),
         ingested_faqs: ingested_count,
+    };
+    let debug_info = json!({ "url": payload.url, "owner_id": owner_id });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+/// Handler for ingesting a Firestore collection into a local project database.
+#[cfg(feature = "firebase")]
+pub async fn ingest_firebase_handler(
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<IngestFirebaseRequest>,
+) -> Result<Json<ApiResponse<IngestFirebaseResponse>>, AppError> {
+    info!(
+        "Received Firestore ingest request for project: '{}', collection: '{}'",
+        payload.project_id, payload.collection
+    );
+
+    let db_path = format!("db/{}.db", payload.project_id);
+    let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
+    sqlite_provider.initialize_schema().await?;
+
+    let options = DumpFirestoreOptions {
+        project_id: &payload.project_id,
+        collection: &payload.collection,
+        incremental: payload.incremental,
+        timestamp_field: payload.timestamp_field.as_deref(),
+        limit: payload.limit,
+        fields: payload.fields.as_deref(),
+    };
+
+    let ingested_count = dump_firestore_collection(&sqlite_provider, options)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Firebase dump failed: {}", e)))?;
+
+    let response = IngestFirebaseResponse {
+        message: format!("Successfully ingested {ingested_count} documents from Firestore."),
+        ingested_documents: ingested_count,
     };
 
     let debug_info = json!({
-        "url": payload.url,
-        "filename": source_identifier,
-        "size": pdf_data.len(),
-        "extractor": payload.extractor,
-        "owner_id": owner_id,
+        "project_id": payload.project_id,
+        "collection": payload.collection,
+        "incremental": payload.incremental,
+        "timestamp_field": payload.timestamp_field,
+        "limit": payload.limit,
+        "fields": payload.fields,
     });
 
     Ok(wrap_response(response, debug_params, Some(debug_info)))

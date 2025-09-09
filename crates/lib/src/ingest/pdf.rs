@@ -7,6 +7,7 @@
 //! 2.  **Gemini Extraction**: Uploads the PDF to Google's API and uses the Gemini model
 //!     to perform multimodal extraction and refinement in one step.
 
+#[cfg(feature = "pdf")]
 use crate::{
     ingest::knowledge::{distill_and_augment, store_structured_knowledge, KnowledgeError},
     prompts::pdf::PDF_REFINEMENT_SYSTEM_PROMPT,

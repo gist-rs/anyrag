@@ -1,0 +1,31 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# CLI
+clap = { version = "4.5.47", features = ["derive"] }
+
+# Async & Networking
+tokio = { workspace = true, features = ["full"] }
+hyper = { version = "1.7.0", features = ["full"] }
+hyper-util = { version = "0.1.16", features = ["full"] }
+
+# Data & Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_urlencoded = "0.7.1"
+
+# Auth & System Interaction
+keyring = "3.6.3"
+open = "5.3.2"
+
+# Error Handling & Logging
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+anyrag = { path = "../lib" }
+turso.workspace = true
+rustls = "0.23.31"

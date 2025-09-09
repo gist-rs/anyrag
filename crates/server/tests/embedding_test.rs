@@ -40,7 +40,7 @@ async fn test_embed_and_search_flow() -> Result<()> {
     // --- 2. Act & Assert: Ingest (Authenticated) ---
     let ingest_res = app
         .client
-        .post(format!("{}/ingest", app.address))
+        .post(format!("{}/ingest/rss", app.address))
         .bearer_auth(token.clone())
         .json(&json!({ "url": app.mock_server.url("/rss") }))
         .send()

@@ -42,7 +42,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     let query_gen_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert for"); // Unique to DEFAULT_QUERY_SYSTEM_PROMPT
+            .body_contains("intelligent data assistant"); // Unique to DEFAULT_QUERY_SYSTEM_PROMPT
         then.status(200).json_body(json!({
             "choices": [{
                 "message": { "role": "assistant", "content": format!("```sql\nSELECT COUNT(*) as count FROM {};\n```", expected_table_name) }
@@ -85,7 +85,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     let result_body: ApiResponse<PromptResponse> = response.json().await?;
     let result_str = &result_body.result.text;
     assert!(
-        result_str.contains("3 records"),
+        result_str.to_string().contains("3 records"),
         "The final response did not contain the formatted text '3 records'. Got: {result_str}"
     );
     info!("[test] Server response is correct: '{}'", result_str);

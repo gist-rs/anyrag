@@ -132,7 +132,7 @@ pub async fn hybrid_search_handler(
             } else {
                 // --- Task-based AI Provider Loading for Re-ranking ---
                 let task_name = "llm_rerank";
-                let task_config = app_state.config.tasks.get(task_name).ok_or_else(|| {
+                let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
                     AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
                 })?;
                 let provider_name = &task_config.provider;

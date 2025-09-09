@@ -21,7 +21,7 @@ use anyhow::{bail, Result};
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
-    handlers::{self, EmbedNewRequest, KnowledgeIngestRequest, SearchRequest},
+    handlers::{self, EmbedNewRequest, IngestWebRequest, SearchRequest},
     state::{self, AppState},
     types::DebugParams,
 };
@@ -69,7 +69,7 @@ async fn ask_question(
     .await;
 
     match result {
-        Ok(Json(response)) => Ok(response.result.text),
+        Ok(Json(response)) => Ok(response.result.text.to_string()),
         Err(e) => anyhow::bail!("Error occurred while asking question: {:?}", e),
     }
 }
@@ -119,11 +119,11 @@ async fn main() -> Result<()> {
     // --- 2. Ingest Knowledge ---
     info!("--- Starting Knowledge Ingestion ---");
     let ingest_url = "https://www.true.th/betterliv/support/true-app-mega-campaign";
-    let ingest_payload = KnowledgeIngestRequest {
+    let ingest_payload = IngestWebRequest {
         url: ingest_url.to_string(),
     };
 
-    match handlers::knowledge_ingest_handler(
+    match handlers::ingest_web_handler(
         axum::extract::State(app_state.clone()),
         auth_user.clone(),
         Query(DebugParams::default()),

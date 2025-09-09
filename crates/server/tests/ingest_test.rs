@@ -50,7 +50,7 @@ async fn test_ingest_endpoint_success() -> Result<()> {
     // Call the /ingest endpoint on our app server with authentication.
     let response = app
         .client
-        .post(format!("{}/ingest", app.address))
+        .post(format!("{}/ingest/rss", app.address))
         .bearer_auth(token)
         .json(&json!({ "url": mock_rss_url }))
         .send()

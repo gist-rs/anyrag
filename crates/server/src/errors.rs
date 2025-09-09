@@ -1,7 +1,7 @@
+#[cfg(feature = "rss")]
+use anyrag::ingest::RssIngestError;
 use anyrag::{
-    ingest::{
-        EmbeddingError, IngestSheetFaqError, KnowledgeError, RssIngestError, TextIngestError,
-    },
+    ingest::{EmbeddingError, IngestSheetFaqError, KnowledgeError, TextIngestError},
     search::SearchError,
     PromptError,
 };
@@ -25,6 +25,7 @@ pub enum AppError {
     /// Errors from the text ingestion process.
     TextIngest(TextIngestError),
     /// Errors from the RSS ingestion process.
+    #[cfg(feature = "rss")]
     RssIngest(RssIngestError),
     /// Errors from the sheet faq ingestion process.
     SheetFaqIngest(IngestSheetFaqError),
@@ -49,6 +50,7 @@ impl From<TextIngestError> for AppError {
 }
 
 /// Conversion from `RssIngestError` to `AppError`.
+#[cfg(feature = "rss")]
 impl From<RssIngestError> for AppError {
     fn from(err: RssIngestError) -> Self {
         AppError::RssIngest(err)
@@ -114,6 +116,7 @@ impl IntoResponse for AppError {
                     format!("Failed to ingest text: {err}"),
                 )
             }
+            #[cfg(feature = "rss")]
             AppError::RssIngest(err) => {
                 error!("RssIngestError: {:?}", err);
                 (

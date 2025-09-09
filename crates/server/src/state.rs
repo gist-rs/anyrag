@@ -18,11 +18,21 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+/// A fully resolved task configuration with non-optional fields.
+#[derive(Clone, Debug)]
+pub struct ResolvedTask {
+    pub provider: String,
+    pub system_prompt: String,
+    pub user_prompt: String,
+}
+
 /// The shared application state, accessible from all request handlers.
 #[derive(Clone)]
 pub struct AppState {
     /// The application's configuration, loaded from `config.yml`.
     pub config: Arc<AppConfig>,
+    /// A map of fully resolved tasks, ready for use by handlers.
+    pub tasks: Arc<HashMap<String, ResolvedTask>>,
     /// The primary database provider for local storage and knowledge base.
     pub sqlite_provider: Arc<SqliteProvider>,
     /// A map of instantiated AI providers, keyed by their name from the config.
@@ -47,16 +57,28 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
                 let api_key = provider_config.api_key.clone().ok_or_else(|| {
                     anyhow::anyhow!("api_key is required for gemini provider '{name}'")
                 })?;
-                Box::new(GeminiProvider::new(
-                    provider_config.api_url.clone(),
-                    api_key,
+                // If api_url is not provided in config, construct it from the model name.
+                let api_url = provider_config.api_url.clone().unwrap_or_else(|| {
+                    format!(
+                        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+                        provider_config.model_name
+                    )
+                });
+                Box::new(GeminiProvider::new(api_url, api_key)?)
+            }
+            "local" => {
+                // For local providers, the URL is always required.
+                let api_url = provider_config.api_url.clone().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "api_url is required for local provider '{name}'. Please set LOCAL_AI_API_URL in your .env file."
+                    )
+                })?;
+                Box::new(LocalAiProvider::new(
+                    api_url,
+                    provider_config.api_key.clone(),
+                    Some(provider_config.model_name.clone()),
                 )?)
             }
-            "local" => Box::new(LocalAiProvider::new(
-                provider_config.api_url.clone(),
-                provider_config.api_key.clone(),
-                Some(provider_config.model_name.clone()),
-            )?),
             _ => {
                 return Err(anyhow::anyhow!(
                     "Unsupported AI provider type '{}' for provider '{}'",
@@ -68,6 +90,32 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
         ai_providers.insert(name.clone(), provider);
     }
 
+    // Validate and resolve all tasks from the configuration.
+    // The config loading ensures that all default tasks have their fields populated,
+    // so we can safely unwrap them here. A panic here indicates a misconfiguration
+    // in the static defaults or a malformed config file.
+    let mut resolved_tasks = HashMap::new();
+    for (name, task_config) in &config.tasks {
+        let provider = task_config.provider.clone().ok_or_else(|| {
+            anyhow::anyhow!("Resolved task '{name}' is missing required 'provider' field")
+        })?;
+        let system_prompt = task_config.system_prompt.clone().ok_or_else(|| {
+            anyhow::anyhow!("Resolved task '{name}' is missing required 'system_prompt' field")
+        })?;
+        let user_prompt = task_config.user_prompt.clone().ok_or_else(|| {
+            anyhow::anyhow!("Resolved task '{name}' is missing required 'user_prompt' field")
+        })?;
+
+        resolved_tasks.insert(
+            name.clone(),
+            ResolvedTask {
+                provider,
+                system_prompt,
+                user_prompt,
+            },
+        );
+    }
+
     // The provider for local ingestion, embedding, and searching.
     let sqlite_provider = SqliteProvider::new(&config.db_url).await?;
     tracing::info!(db_path = %config.db_url, "Initialized local storage provider (SQLite).");
@@ -76,6 +124,7 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
 
     Ok(AppState {
         config: Arc::new(config),
+        tasks: Arc::new(resolved_tasks),
         sqlite_provider: Arc::new(sqlite_provider),
         ai_providers: Arc::new(ai_providers),
         knowledge_graph: Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory())),

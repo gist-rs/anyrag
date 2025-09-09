@@ -255,6 +255,52 @@ impl Storage for SqliteProvider {
 
         Ok(schema)
     }
+
+    async fn list_tables(&self) -> Result<Vec<String>, PromptError> {
+        info!("Listing all non-empty tables in SQLite database.");
+        let conn = self
+            .db
+            .connect()
+            .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
+
+        let mut rows = conn
+            .query(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';",
+                (),
+            )
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+
+        let mut all_tables = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
+        {
+            if let Ok(TursoValue::Text(name)) = row.get_value(0) {
+                all_tables.push(name);
+            }
+        }
+
+        let mut non_empty_tables = Vec::new();
+        for table_name in all_tables {
+            let count_query = format!("SELECT 1 FROM \"{table_name}\" LIMIT 1");
+            let has_rows = conn
+                .query(&count_query, ())
+                .await
+                .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
+                .next()
+                .await
+                .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?
+                .is_some();
+
+            if has_rows {
+                non_empty_tables.push(table_name);
+            }
+        }
+
+        Ok(non_empty_tables)
+    }
 }
 
 #[async_trait]
@@ -504,25 +550,29 @@ impl MetadataSearch for SqliteProvider {
 
         let mut metadata_conditions = Vec::new();
         if !entities.is_empty() {
-            let placeholders = entities.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let entity_likes: Vec<String> = entities
+                .iter()
+                .map(|_| "lower(metadata_value) LIKE ?".to_string())
+                .collect();
             metadata_conditions.push(format!(
-                "(metadata_type = 'ENTITY' AND metadata_value IN ({placeholders}))"
+                "(metadata_type = 'ENTITY' AND ({}))",
+                entity_likes.join(" OR ")
             ));
             for entity in entities {
-                params.push(entity.clone().into());
+                params.push(format!("%{}%", entity.to_lowercase()).into());
             }
         }
         if !keyphrases.is_empty() {
-            let placeholders = keyphrases
+            let keyphrase_likes: Vec<String> = keyphrases
                 .iter()
-                .map(|_| "?")
-                .collect::<Vec<_>>()
-                .join(", ");
+                .map(|_| "lower(metadata_value) LIKE ?".to_string())
+                .collect();
             metadata_conditions.push(format!(
-                "((metadata_type = 'KEYPHRASE' OR metadata_type = 'KEYPHRASES') AND metadata_value IN ({placeholders}))"
+                "((metadata_type = 'KEYPHRASE' OR metadata_type = 'KEYPHRASES') AND ({}))",
+                keyphrase_likes.join(" OR ")
             ));
             for keyphrase in keyphrases {
-                params.push(keyphrase.clone().into());
+                params.push(format!("%{}%", keyphrase.to_lowercase()).into());
             }
         }
 

@@ -5,8 +5,8 @@ This crate provides a lightweight `axum` web server that exposes the `anyrag` li
 ## Features
 
 *   **RESTful API:** Exposes all core functionalities via a simple API.
-*   **Dynamic Sheet Querying:** Accepts Google Sheet URLs directly in prompts, ingesting and querying them on the fly.
-*   **Multi-Source Ingestion:** Endpoints for building a knowledge base from web pages, PDFs (via upload or URL), raw text, and structured Google Sheets.
+*   **Dynamic Source Querying:** Accepts Google Sheet URLs, PDF URLs, or web page URLs directly in prompts, ingesting and querying them on the fly.
+*   **Controllable Ingestion:** Endpoints for building a knowledge base from web pages, PDFs, raw text, and Google Sheets, with fine-grained control over AI-based FAQ generation and embedding.
 *   **RAG Endpoint:** A dedicated endpoint to ask questions against the knowledge base, using a hybrid search backend.
 *   **Containerized Deployment:** Includes a multi-stage `Dockerfile` for building a minimal, secure server image.
 *   **Asynchronous:** Built on top of Tokio for non-blocking, efficient request handling.
@@ -61,17 +61,17 @@ This layered approach allows you to customize providers and prompts independentl
 
     ```sh
     # For local models, this sets all tasks to use the 'local_default' provider
-    cp config.local.yml config.yml
+    cp crates/server/config.local.yml crates/server/config.yml
 
     # For Google Gemini
-    # cp config.gemini.yml config.yml
+    # cp crates/server/config.gemini.yml crates/server/config.yml
     ```
 2.  **(Optional) Create `prompt.yml`:** If you want to customize any of the default prompts from `config.prompt.yml`, create a `prompt.yml` file and add *only* the `tasks` you wish to override. For example:
     ```yml
     # prompt.yml
     tasks:
       rag_synthesis:
-        provider: "local_fast" # You can even change the provider for a specific task
+        provider: "local_default" # You can even change the provider for a specific task
         system_prompt: "You are a pirate AI. Answer the user's question based on the scrolls."
     ```
 
@@ -82,24 +82,38 @@ The `.env` file is used for secrets and environment-specific settings that you d
 **Core Environment Variables:**
 
 -   `AI_API_KEY`: **(Required for cloud providers)** Your secret API key.
--   `AI_API_URL`: The base URL for your primary AI provider.
+-   `LOCAL_AI_API_URL`: The URL for your self-hosted or local AI provider (e.g., Ollama, LM Studio). The Gemini provider URL is now hardcoded in the config and does not need to be set here.
 -   `EMBEDDINGS_API_URL`: The URL for your text embedding model.
 -   `PORT`: The port for the server to listen on. Defaults to `9090`.
 -   `DB_URL`: The path to the SQLite database file. Defaults to `db/anyrag.db`.
 -   `RUST_LOG`: The logging level (e.g., `info`, `debug`).
 -   `JWT_SECRET`: A secret key for signing and validating JWTs. **It is highly recommended to set this in production.**
 
-## Local Development (Without Docker)
+## Running Locally (Without Docker)
 
-For running the server directly on your machine for development.
+For running the server and CLI directly on your machine for development.
 
-1.  **Create `.env` File:** In the `anyrag/crates/server` directory, copy `.env.example` to `.env`.
-2.  **Set `AI_PROVIDER`:** Edit your new `.env` file and set `AI_PROVIDER` to `local` or `gemini`, and fill in any required secrets like `AI_API_KEY`.
-3.  **Run the Server:** From the **workspace root** (`anyrag/`), run the command:
+### 1. Running the Server
+
+The server is the backend API that the CLI connects to.
+
+1.  **Create Configuration:** Ensure you have created your `crates/server/config.yml` and `crates/server/.env` files as described in the "Configuration" section above.
+2.  **Run the Server:** From the **workspace root** (`anyrag/`), run the command:
     ```sh
-    cargo run
+    cargo run -p anyrag-server
     ```
-The server will automatically find and load the correct configuration based on your `.env` file.
+The server will start and listen on the port specified in your `.env` file (defaults to 9090).
+
+### 2. Running the CLI (TUI)
+
+The CLI is the interactive terminal user interface. The server must be running before you start the CLI.
+
+1.  **Open a New Terminal:** Keep the server running in its own terminal window.
+2.  **Run the CLI:** From the **workspace root** (`anyrag/`), run the command in the new terminal:
+    ```sh
+    cargo run -p cli
+    ```
+The interactive TUI will launch and connect to the running server.
 
 ## Docker Deployment
 
@@ -183,21 +197,35 @@ curl -X POST http://localhost:9090/prompt \
   }'
 ```
 
+**Example: Shorthand Alias**
+```sh
+# This shorthand...
+curl -X POST http://localhost:9090/prompt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "prompt": "ls pantip_topics_samples limit=20"
+  }'
+# ...is automatically translated into a full prompt for the AI.
+```
+
 ### Knowledge Base Management API
 
 These endpoints are for building and maintaining the self-improving knowledge base.
 
-#### `POST /knowledge/ingest`
+#### `POST /ingest/web`
 
-Triggers the full ingestion pipeline for a given URL. This process involves fetching the content, using an LLM to distill it into structured Q&A pairs, and storing it in the knowledge base.
+Fetches and processes content from a web URL.
+
+**Query Parameters:**
+- `faq` (boolean, optional): If `true`, runs the full AI-based pipeline to distill the content into structured Q&A pairs. Defaults to `false`.
+- `embed` (boolean, optional): If `true` (default), generates and stores vector embeddings for the ingested content, making it available for semantic search.
 
 **Request Body:** `{"url": "https://..."}`
 
-**Note:** This is an authenticated endpoint. The `owner_id` of the ingested content will be automatically assigned based on the provided JWT. If no token is provided, it will be assigned to the "Guest User".
-
-**Example:**
+**Example (Light Ingest):**
 ```sh
-curl -X POST http://localhost:9090/knowledge/ingest \
+curl -X POST http://localhost:9090/ingest/web \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <your_jwt>" \
   -d '{
@@ -205,59 +233,84 @@ curl -X POST http://localhost:9090/knowledge/ingest \
   }'
 ```
 
-#### `POST /ingest/file`
+**Example (FAQ Generation):**
+```sh
+curl -X POST "http://localhost:9090/ingest/web?faq=true" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "url": "https://www.true.th/betterliv/support/true-app-mega-campaign"
+  }'
+```
 
-Ingests a PDF file directly. The server processes the PDF, uses an LLM to refine the extracted content into structured Markdown, stores this refined content, and then distills it into Q&A pairs for the knowledge base.
+#### `POST /ingest/rss`
 
-**Request Body:** `multipart/form-data`
-- `file`: The PDF file to be ingested.
-- `extractor`: (Optional) A string specifying the extraction strategy. Can be `"local"` (default) or `"gemini"`.
+Ingests articles from an RSS feed URL, storing each item as a separate document.
 
-**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
+**Request Body:** `{"url": "https://..."}`
 
 **Example:**
 ```sh
-curl -X POST http://localhost:9090/ingest/file \
+curl -X POST http://localhost:9090/ingest/rss \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "url": "http://example.com/feed.xml"
+  }'
+```
+
+#### `POST /ingest/pdf`
+
+Processes a PDF from either a direct file upload or a URL.
+
+**Query Parameters:**
+- `faq` (boolean, optional): If `true`, runs the full AI-based pipeline to distill the content into structured Q&A pairs. Defaults to `false`.
+- `embed` (boolean, optional): If `true` (default), generates vector embeddings for the ingested content.
+
+**Request Body:** `multipart/form-data` containing either a `file` part or a `url` part.
+- `file`: The PDF file to be ingested.
+- `url`: A direct URL to a PDF file to be downloaded and ingested.
+- `extractor`: (Optional) A string specifying the extraction strategy. Can be `"local"` (default) or `"gemini"`.
+
+**Example (File Upload):**
+```sh
+curl -X POST "http://localhost:9090/ingest/pdf?faq=true" \
   -H "Authorization: Bearer <your_jwt>" \
   -F "file=@/path/to/your/document.pdf" \
   -F "extractor=local"
 ```
 
-#### `POST /ingest/pdf_url`
-
-Downloads and ingests a PDF from a given URL. The server follows redirects, downloads the file, and then processes it using the same pipeline as the `/ingest/file` endpoint.
-
-**Request Body:** `{"url": "...", "extractor": "..."}`
-- `url`: The direct URL to the PDF file.
-- `extractor`: (Optional) The extraction strategy. Can be `"local"` (default) or `"gemini"`.
-
-**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
-
-**Example:**
+**Example (URL):**
 ```sh
-curl -X POST http://localhost:9090/ingest/pdf_url \
+curl -X POST "http://localhost:9090/ingest/pdf?faq=true" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -F "url=https://arxiv.org/pdf/2403.05530.pdf" \
+  -F "extractor=local"
+```
+
+#### `POST /ingest/sheet`
+
+Ingests data from a public Google Sheet. The behavior is controlled by the `faq` query parameter.
+
+**Query Parameters:**
+- `faq` (boolean, optional): If `true`, ingests a sheet formatted with "Question" and "Answer" columns directly as Q&A pairs. If `false` (default), ingests the sheet as a generic table in the database.
+- `embed` (boolean, optional): If `true` (default), generates vector embeddings for the ingested rows or Q&A pairs.
+
+**Request Body:** `{"url": "...", "gid": "...", "skip_header": true}`
+
+**Example (Generic Table Ingest):**
+```sh
+curl -X POST http://localhost:9090/ingest/sheet \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <your_jwt>" \
   -d '{
-    "url": "https://arxiv.org/pdf/2403.05530.pdf",
-    "extractor": "local"
+    "url": "https://docs.google.com/spreadsheets/d/your_sheet_id/edit"
   }'
 ```
 
-#### `POST /ingest/sheet_faq`
-
-Ingests Q&A pairs directly from a public Google Sheet. It's designed to handle structured FAQ data and can recognize date columns (`start_at`, `end_at`) to create time-sensitive knowledge.
-
-**Request Body:** `{"url": "...", "gid": "...", "skip_header": true}`
-- `url`: The public URL of the Google Sheet.
-- `gid`: (Optional) The specific sheet/tab ID (the number after `gid=` in the URL).
-- `skip_header`: (Optional) Whether to skip the first row of the sheet. Defaults to `true`.
-
-**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
-
-**Example:**
+**Example (FAQ Ingest):**
 ```sh
-curl -X POST http://localhost:9090/ingest/sheet_faq \
+curl -X POST "http://localhost:9090/ingest/sheet?faq=true" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <your_jwt>" \
   -d '{
@@ -268,13 +321,13 @@ curl -X POST http://localhost:9090/ingest/sheet_faq \
 
 #### `POST /ingest/text`
 
-Ingests raw text directly from the request body. The server automatically chunks the text and stores each chunk as a document in the knowledge base.
+Ingests raw text directly from the request body.
+
+**Query Parameters:**
+- `faq` (boolean, optional): If `true`, runs the full AI-based pipeline on the entire text. If `false` (default), the text is automatically chunked and each chunk is stored as a separate document.
+- `embed` (boolean, optional): If `true` (default), generates vector embeddings for the ingested text.
 
 **Request Body:** `{"text": "...", "source": "..."}`
-- `text`: The raw text content to ingest.
-- `source`: (Optional) A string to identify the origin of the text. Defaults to `text_input`.
-
-**Note:** This is an authenticated endpoint. The `owner_id` is handled automatically.
 
 **Example:**
 ```sh
@@ -302,7 +355,7 @@ curl -X POST http://localhost:9090/embed/new \
 
 #### `GET /knowledge/export`
 
-Exports the entire FAQ knowledge base into a JSONL (JSON Lines) file suitable for fine-tuning a large language model. This completes the "virtuous cycle".
+Exports the entire FAQ knowledge base into a JSONL (JSON Lines) file suitable for fine-tuning a large language model.
 
 **Example:**
 ```sh
@@ -322,8 +375,6 @@ These endpoints are for searching the knowledge base.
 - `limit`: (Optional) The number of facts to retrieve for context. Defaults to 5.
 - `instruction`: (Optional) A specific instruction for the final LLM synthesis step.
 
-**Note:** This is an authenticated endpoint. The search results are automatically filtered based on the user's identity.
-
 **Example:**
 ```sh
 curl -X POST http://localhost:9090/search/knowledge \
@@ -332,5 +383,94 @@ curl -X POST http://localhost:9090/search/knowledge \
   -d '{
     "query": "ทำยังไงถึงจะได้เทสล่า",
     "instruction": "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า"
+  }'
+```
+
+### Advanced API
+
+These endpoints provide more direct control over data retrieval and generation, catering to advanced use cases.
+
+#### `POST /db/query`
+
+Executes a raw, read-only SQL query directly against a project's database. This is useful for programmatic access where you know the exact query you need to run.
+
+**Request Body:** `{"db": "...", "query": "..."}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/db/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "query": "SELECT _id, title, rating FROM pantip_topics_samples WHERE rating >= 3 ORDER BY rating DESC LIMIT 10"
+  }'
+```
+
+#### `POST /gen/text`
+
+Generates new text content by first executing the `context_prompt` as a Text-to-SQL query to retrieve structured data, and then feeding that data as context to the `generation_prompt`. This allows for creating sophisticated, data-driven content.
+
+**Request Body:** `{"db": "...", "generation_prompt": "...", "context_prompt": "..."}`
+
+**Example 1:**
+```sh
+curl -X POST http://localhost:9090/gen/text \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "generation_prompt": "User''s GoalWrite a short, romantic story in the style of a modern Thai drama. The story must be in Thai language (ภาษาไทย) only, told from a first-person perspective using \"ผม\" (male) or \"เรา\" (female) to make it feel personal and intimate. Aim for 800-1500 characters to keep it concise yet engaging.The story should feel authentic and raw, like a real personal anecdote shared on an online forum such as Pantip. Incorporate everyday language, emotional confessions, twists, and reflections that mirror real-life relationship struggles. Avoid overly dramatic or scripted dialogue; make it conversational and heartfelt, as if the narrator is venting or sharing their story online.Key Elements to IncludeRomantic Theme: Focus on a bittersweet romance involving themes like unexpected love, betrayal, financial hardships in relationships, jealousy, unrequited feelings, or personal growth through love.\nFirst-Person Perspective: Use \"ผม\" for a male narrator to add authenticity, sharing inner thoughts, regrets, and hopes.\nModern Thai Drama Style: Include elements like urban settings (e.g., Bangkok nightlife, apartments, workplaces), family pressures, social media influences, and emotional highs/lows typical in Thai series (e.g., love triangles, sacrifices, redemptions).\n\n",
+    "context_prompt": "Use themes and characters from the highest-rated stories where the topic_detail contains ''love'' (ความรัก) in the `pantip_topics_samples` table as inspiration."
+  }'
+```
+
+**Example 2:**
+```sh
+curl -X POST 'http://localhost:9090/gen/text?debug=false' \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "model": "gemini-2.5-pro",
+    "generation_prompt": "User Goal: Generate a Pantip-style post consisting of a title and a short, romantic story in the style of a modern Thai drama. The output must be in JSON format: {\"title\": \"...\", \"topic_detail\": \"...\"}. The topic_detail must be the story in Thai language (ภาษาไทย) only, maybe start with something like \"ตามหัวกท.เลยค่ะ สงสัยมาก\" (กท. stand for topic), told from a first-person perspective using \"ผม\" (male) or \"เรา\" (female) to make it feel personal and intimate. Aim for 400-600 characters in the topic_detail to keep it concise yet engaging.\n\nThe story should feel authentic and raw, like a real personal anecdote shared on an online forum such as Pantip. Incorporate everyday casual language, Thai slang (e.g., ''อะ'', ''ง่ะ'', ''เลยอะ'', ''ว่ะ'', ''ซิ่'', ''อ้าว'', ''เฮ้อ'', ''5555''), emojis (e.g., 😭, 😂, 🥺, 🤣), emotional confessions, twists, and reflections that mirror real-life relationship struggles. Avoid overly dramatic or scripted dialogue; make it conversational and heartfelt, as if the narrator is venting or sharing their story online. Focus on one main theme to keep it coherent, such as unexpected love leading to personal growth despite financial hardships, with a bittersweet or uplifting ending that includes hope or reflection. Vary the themes to include positive, heartwarming elements alongside struggles, avoiding repetitive negative tropes like gambling betrayal; blend in elements of tenderness, sacrifice, or redemption for balance. Optional end the topic_detail with 1-2 subtle open-ended questions or reflections to encourage comments and engagement, like pondering opinions or similar experiences in a natural, non-direct way e.g. \"เราคิดว่างั้นค่ะ เคยเท่าที่เจอมา\" instead of \"จริงมั้ยคะ?\".\n\nKey Elements to Include:\n- Romantic Theme: Focus on a bittersweet or positive romance involving themes like unexpected love, financial hardships in relationships, jealousy, unrequited feelings, or personal growth through love. Ensure it is romantic with moments of tenderness amid struggles, and incorporate variety to avoid similarity in outputs.\n- First-Person Perspective: Use \"ผม\" for a male narrator or \"เรา\" for a female narrator to add authenticity, sharing inner thoughts, regrets, and hopes.\n- Modern Thai Drama Style: Include elements like urban settings (e.g., Bangkok nightlife, apartments, workplaces), family pressures, social media influences, and emotional highs/lows typical in Thai series (e.g., love triangles, sacrifices, redemptions). Do not list too many problems; focus on 1-2 key conflicts for depth.\n\nEmphasize creating a focused narrative with romantic elements, drawing from real-life anecdotes like unexpected encounters in nightlife leading to deep connections, financial struggles testing love, and personal reflections on growth. Make the title short, avoiding clichés and ensuring it fits the story''s tone positively or thoughtfully but more real human expression not a book title, less drama and more realistic forums topic, .\n\nOutput exactly in the specified JSON format, with no additional text.",
+    "context_prompt": "Use highest `rating` stories where the `topic_detail` contains `รัก`,`แฟน`,`อกหัก`,`เหงา`,`ใจ` in the `pantip_topics_samples` table as inspiration."
+  }'
+```
+
+### Data Pipeline API
+
+These endpoints allow you to manage the data lifecycle, from ingesting remote data to building the local knowledge graph that powers advanced generation.
+
+#### `POST /ingest/firebase`
+
+Triggers a server-side dump of a Firestore collection into the corresponding project's local SQLite database.
+
+**Request Body:** `{"project_id": "...", "collection": "...", ...}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/ingest/firebase \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "project_id": "kratooded",
+    "collection": "pantip_topics_samples",
+    "incremental": true,
+    "timestamp_field": "created_time",
+    "limit": 100
+  }'
+```
+
+#### `POST /graph/build`
+
+Builds or updates the in-memory Knowledge Graph from a specified table in a project's local SQLite database.
+
+**Request Body:** `{"db": "...", "table_name": "..."}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/graph/build \
+  -H "Content-Type: application/json" \
+  -d '{
+    "db": "kratooded",
+    "table_name": "pantip_topics_samples"
   }'
 ```

@@ -119,15 +119,17 @@ pub async fn run_ingestion_pipeline(
     url: &str,
     owner_id: Option<&str>,
     prompts: IngestionPrompts<'_>,
+    jina_api_key: Option<&str>,
 ) -> Result<usize, KnowledgeError> {
-    let (document_id, ingested_document) = match ingest_and_cache_url(db, url, owner_id).await {
-        Ok(content) => content,
-        Err(KnowledgeError::ContentUnchanged(url)) => {
-            info!("Content for {} is unchanged, pipeline finished.", url);
-            return Ok(0);
-        }
-        Err(e) => return Err(e),
-    };
+    let (document_id, ingested_document) =
+        match ingest_and_cache_url(db, url, owner_id, jina_api_key).await {
+            Ok(content) => content,
+            Err(KnowledgeError::ContentUnchanged(url)) => {
+                info!("Content for {} is unchanged, pipeline finished.", url);
+                return Ok(0);
+            }
+            Err(e) => return Err(e),
+        };
 
     // Run FAQ generation and metadata extraction concurrently.
     let (faq_result, metadata_result) = tokio::join!(
@@ -157,10 +159,32 @@ pub async fn run_ingestion_pipeline(
 
 // --- Stage 1: Ingestion & Caching ---
 
-pub async fn fetch_markdown_from_url(url: &str) -> Result<String, KnowledgeError> {
-    let jina_url = format!("https://r.jina.ai/{url}");
-    info!("Fetching clean markdown from: {jina_url}");
-    let response = reqwest::get(&jina_url).await?;
+pub async fn fetch_markdown_from_url(
+    url: &str,
+    jina_api_key: Option<&str>,
+) -> Result<String, KnowledgeError> {
+    let fetch_url = if url.ends_with(".md") {
+        info!("Fetching raw markdown directly from: {url}");
+        url.to_string()
+    } else {
+        let jina_url = format!("https://r.jina.ai/{url}");
+        info!("Fetching clean markdown from: {jina_url}");
+        jina_url
+    };
+
+    let client = reqwest::Client::new();
+    let mut request_builder = client.get(&fetch_url);
+
+    if let Some(key) = jina_api_key {
+        if !key.is_empty() {
+            info!("Using Jina API key for request.");
+            request_builder = request_builder.header("Authorization", format!("Bearer {key}"));
+        }
+    } else {
+        warn!("No Jina API key provided. You may be subject to a 20 RPM rate limit.");
+    }
+
+    let response = request_builder.send().await?;
     if !response.status().is_success() {
         let status = response.status().as_u16();
         let body = response.text().await.unwrap_or_default();
@@ -173,11 +197,26 @@ pub async fn ingest_and_cache_url(
     db: &Database,
     url: &str,
     owner_id: Option<&str>,
+    jina_api_key: Option<&str>,
 ) -> Result<(String, IngestedDocument), KnowledgeError> {
     let conn = db.connect()?;
 
-    let markdown_content = fetch_markdown_from_url(url).await?;
+    let markdown_content = fetch_markdown_from_url(url, jina_api_key).await?;
     let new_content_hash = format!("{:x}", md5::compute(markdown_content.as_bytes()));
+
+    // Extract a cleaner title from the markdown content.
+    let title = markdown_content
+        .lines()
+        .find(|line| !line.trim().is_empty()) // Find the first non-empty line
+        .map(|line| {
+            line.trim_start_matches(|c: char| c == '#' || c.is_whitespace()) // Remove markdown headings and leading spaces
+                .trim_start_matches("Title:") // Remove "Title:" prefix
+                .trim() // Trim whitespace
+                .chars()
+                .take(150) // Take up to 150 characters for the title
+                .collect::<String>()
+        })
+        .unwrap_or_else(|| url.to_string()); // Fallback to URL
 
     // Check for existing document by source_url
     if let Some(row) = conn
@@ -197,10 +236,10 @@ pub async fn ingest_and_cache_url(
             return Err(KnowledgeError::ContentUnchanged(url.to_string()));
         }
 
-        // Content has changed, so we update it.
+        // Content has changed, so we update it, along with the title.
         conn.execute(
-            "UPDATE documents SET content = ? WHERE id = ?",
-            params![markdown_content.clone(), doc_id.clone()],
+            "UPDATE documents SET content = ?, title = ? WHERE id = ?",
+            params![markdown_content.clone(), title, doc_id.clone()],
         )
         .await?;
 
@@ -216,7 +255,6 @@ pub async fn ingest_and_cache_url(
 
     // No existing document, so create a new one.
     let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, url.as_bytes()).to_string();
-    let title: String = markdown_content.chars().take(80).collect();
 
     conn.execute(
         "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
@@ -276,6 +314,12 @@ pub async fn distill_and_augment(
             return Err(e.into());
         }
     };
+
+    // After parsing, filter out any FAQs that might have empty questions or answers.
+    extracted_data
+        .faqs
+        .retain(|faq| !faq.question.is_empty() && !faq.answer.is_empty());
+
     let original_chunk_count = extracted_data.content_chunks.len();
     extracted_data
         .content_chunks

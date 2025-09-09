@@ -9,3 +9,4 @@ output.json
 *.db-shm
 /db
 indradb
+*.log

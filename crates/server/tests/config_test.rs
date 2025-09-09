@@ -167,7 +167,8 @@ tasks:
     );
     let provider = config.providers.get("gemini").unwrap();
     assert_eq!(
-        provider.api_url, "http://env-ai.com",
+        provider.api_url,
+        Some("http://env-ai.com".to_string()),
         "Provider API URL should be overridden"
     );
     assert_eq!(

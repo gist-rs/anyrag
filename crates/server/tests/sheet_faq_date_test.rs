@@ -79,7 +79,7 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
     let token = generate_jwt(user_identifier)?;
     let ingest_res = app
         .client
-        .post(format!("{}/ingest/sheet_faq", app.address))
+        .post(format!("{}/ingest/sheet?faq=true", app.address))
         .bearer_auth(token.clone())
         .json(&json!({ "url": app.mock_server.url("/spreadsheets/d/mock_sheet_id/export?format=csv") }))
         .send()
@@ -87,7 +87,7 @@ async fn test_sheet_faq_date_sensitive_rag_workflow() -> Result<()> {
         .error_for_status()?;
 
     let ingest_body: ApiResponse<Value> = ingest_res.json().await?;
-    assert_eq!(ingest_body.result["ingested_faqs"], 2);
+    assert_eq!(ingest_body.result["ingested_rows"], 2);
 
     // --- 5. Execute Embedding for New Documents ---
     app.client

@@ -9,6 +9,7 @@
 pub const CREATE_USERS_TABLE_SQL: &str = "
     CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, -- The pseudonymized user ID
+        role TEXT NOT NULL DEFAULT 'user',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 ";

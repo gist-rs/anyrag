@@ -32,7 +32,11 @@ struct Part {
 
 #[derive(Deserialize, Debug)]
 struct GeminiResponse {
+    // It's possible for the API to return no candidates if the prompt is blocked.
+    #[serde(default)]
     candidates: Vec<Candidate>,
+    #[serde(rename = "promptFeedback")]
+    prompt_feedback: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -115,26 +119,38 @@ impl AiProvider for GeminiProvider {
             .await
             .map_err(PromptError::AiDeserialization)?;
 
-        let first_candidate = gemini_response
-            .candidates
-            .first()
-            .ok_or_else(|| PromptError::AiApi("Gemini API returned no candidates".to_string()))?;
-
-        if let Some(reason) = &first_candidate.finish_reason {
-            if reason != "STOP" {
+        if let Some(feedback) = &gemini_response.prompt_feedback {
+            if !gemini_response.candidates.is_empty() {
+                // Sometimes a non-fatal warning is returned, let's just log it.
+                debug!("Gemini API returned prompt feedback: {:?}", feedback);
+            } else {
+                // If there are no candidates, it was a hard block.
                 return Err(PromptError::AiApi(format!(
-                    "Gemini generation finished for a non-standard reason: {reason}. The response may be incomplete."
+                    "Gemini API blocked the prompt due to safety settings. Feedback: {feedback}"
                 )));
             }
         }
 
-        let raw_response = first_candidate
-            .content
-            .parts
-            .first()
-            .map(|p| p.text.clone())
-            .unwrap_or_default();
+        if let Some(first_candidate) = gemini_response.candidates.first() {
+            if let Some(reason) = &first_candidate.finish_reason {
+                if reason != "STOP" {
+                    return Err(PromptError::AiApi(format!(
+                        "Gemini generation finished for a non-standard reason: {reason}. The response may be incomplete."
+                    )));
+                }
+            }
 
-        Ok(raw_response)
+            let raw_response = first_candidate
+                .content
+                .parts
+                .first()
+                .map(|p| p.text.clone())
+                .unwrap_or_default();
+            Ok(raw_response)
+        } else {
+            Err(PromptError::AiApi(
+                "Gemini API returned no candidates and no feedback.".to_string(),
+            ))
+        }
     }
 }

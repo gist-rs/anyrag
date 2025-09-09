@@ -1,6 +1,6 @@
 //! # PDF URL Ingestion and RAG E2E Test
 //!
-//! This test verifies the entire `POST /ingest/pdf_url` workflow:
+//! This test verifies the entire `POST /ingest/pdf` workflow using a URL:
 //! 1. A mock server is set up to serve a PDF, including a redirect.
 //! 2. The server receives the URL, downloads the PDF, extracts the messy text, and sends it to a mock LLM for refinement.
 //! 3. The server takes the refined Markdown and sends it to a mock LLM for knowledge distillation (Q&A generation).
@@ -12,12 +12,11 @@
 mod common;
 
 use anyhow::Result;
+use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use pdf_writer::{Content, Finish, Name, Pdf, Rect, Ref, Str};
 use serde_json::{json, Value};
-
-use anyrag_server::types::ApiResponse;
 
 /// Generates a simple PDF with a specific messy sentence.
 fn generate_test_pdf(text: &str) -> Result<Vec<u8>> {
@@ -135,11 +134,17 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     // --- 4. Execute Ingestion from URL ---
     let user_identifier = "pdf-url-user@example.com";
     let token = generate_jwt(user_identifier)?;
+
+    let form = reqwest::multipart::Form::new().part(
+        "url",
+        reqwest::multipart::Part::text(app.mock_server.url("/redirect-to-pdf")),
+    );
+
     let ingest_res = app
         .client
-        .post(format!("{}/ingest/pdf_url", app.address))
+        .post(format!("{}/ingest/pdf?faq=true", app.address))
         .bearer_auth(token.clone())
-        .json(&json!({ "url": app.mock_server.url("/redirect-to-pdf") }))
+        .multipart(form)
         .send()
         .await?
         .error_for_status()?;

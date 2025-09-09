@@ -1,6 +1,6 @@
 //! # PDF Ingestion and RAG E2E Test
 //!
-//! This test verifies the entire `POST /ingest/file` workflow:
+//! This test verifies the entire `POST /ingest/pdf` workflow:
 //! 1. A PDF is generated in memory with a specific, messy sentence.
 //! 2. The server receives this PDF, extracts the messy text, and sends it to a mock LLM for refinement.
 //! 3. The server takes the refined Markdown and sends it to a mock LLM for knowledge distillation (Q&A generation).
@@ -74,7 +74,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     let refinement_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert technical analyst"); // More robust check
+            .body_contains("expert technical analyst");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": refined_markdown}}]}),
         );
@@ -84,7 +84,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     let distillation_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("data extraction agent"); // Check for the distillation prompt
+            .body_contains("data extraction agent");
         then.status(200)
             .json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({
                 "faqs": [{ "question": distilled_question, "answer": distilled_answer, "is_explicit": false }],
@@ -116,7 +116,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("strict, factual AI"); // Check for the RAG prompt
+            .body_contains("strict, factual AI");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
@@ -135,7 +135,7 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
 
     let ingest_res = app
         .client
-        .post(format!("{}/ingest/file", app.address))
+        .post(format!("{}/ingest/pdf?faq=true", app.address))
         .bearer_auth(token.clone())
         .multipart(form)
         .send()
@@ -170,7 +170,6 @@ async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     refinement_mock.assert();
     distillation_mock.assert();
     query_analysis_mock.assert();
-    // Embedding is called twice: once for the new FAQ, once for the search query.
     embedding_mock.assert_hits(2);
     rag_synthesis_mock.assert();
 
