@@ -188,19 +188,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let question = "ทำยังไงถึงจะได้เทสล่า";
     let instruction = "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า";
 
-    let query_vector = generate_embedding(&embeddings_api_url, &embeddings_model, question).await?;
-
     let search_results = hybrid_search(
-        &sqlite_provider,
-        ai_provider.as_ref(),
-        query_vector,
-        question,
-        Some(&user.id), // owner_id
-        5,              // limit
+        std::sync::Arc::new(sqlite_provider.clone()),
+        ai_provider.clone(),
+        question.to_string(),
+        Some(user.id.clone()),
+        5,
         anyrag::search::HybridSearchPrompts {
             analysis_system_prompt: QUERY_ANALYSIS_SYSTEM_PROMPT,
             analysis_user_prompt_template: QUERY_ANALYSIS_USER_PROMPT,
         },
+        true,
+        true,
+        &embeddings_api_url,
+        &embeddings_model,
     )
     .await?;
 

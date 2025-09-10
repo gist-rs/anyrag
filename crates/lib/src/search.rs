@@ -19,7 +19,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Defines the re-ranking strategy for hybrid search.
 #[derive(Default, Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -54,9 +54,9 @@ pub enum SearchError {
     #[error("Database error: {0}")]
     Database(#[from] turso::Error),
     #[error("Query analysis failed: {0}")]
-    QueryAnalysis(#[from] PromptError),
+    QueryAnalysis(PromptError),
     #[error("Embedding generation failed: {0}")]
-    Embedding(#[from] PromptError),
+    Embedding(PromptError),
 }
 
 /// Uses an LLM to extract entities and keyphrases from a user query.
@@ -97,9 +97,9 @@ async fn analyze_query(
 /// Performs a multi-stage hybrid search.
 pub async fn hybrid_search<P>(
     provider: Arc<P>,
-    ai_provider: &dyn AiProvider,
-    query_text: &str,
-    owner_id: Option<&str>,
+    ai_provider: Arc<dyn AiProvider>,
+    query_text: String,
+    owner_id: Option<String>,
     limit: u32,
     prompts: HybridSearchPrompts<'_>,
     use_keyword_search: bool,
@@ -110,36 +110,27 @@ pub async fn hybrid_search<P>(
 where
     P: MetadataSearch + VectorSearch + KeywordSearch + Send + Sync + 'static,
 {
-    info!("Starting multi-stage hybrid search for: '{}'", query_text);
-
-    // --- Stage 1: Query Analysis ---
     let analyzed_query = analyze_query(
-        ai_provider,
-        query_text,
+        ai_provider.as_ref(),
+        &query_text,
         prompts.analysis_system_prompt,
         prompts.analysis_user_prompt_template,
     )
-    .await?;
-    info!("Analyzed query: {:?}", analyzed_query);
+    .await
+    .map_err(SearchError::QueryAnalysis)?;
 
-    // --- Stage 2: Metadata Pre-Filtering ---
     let candidate_doc_ids = provider
         .metadata_search(
             &analyzed_query.entities,
             &analyzed_query.keyphrases,
-            owner_id,
-            limit * 5, // Fetch a larger pool of candidates
+            owner_id.as_deref(),
+            limit * 5,
         )
         .await?;
-    info!(
-        "Metadata search found {} candidate documents.",
-        candidate_doc_ids.len()
-    );
 
-    // --- Stage 3: Parallel Candidate Retrieval (Keyword + Vector) ---
     let provider_kw = Arc::clone(&provider);
-    let query_text_kw = query_text.to_string();
-    let owner_id_kw = owner_id.map(|s| s.to_string());
+    let query_text_kw = query_text.clone();
+    let owner_id_kw = owner_id.clone();
     let keyword_handle = tokio::spawn(async move {
         if use_keyword_search {
             provider_kw
@@ -151,27 +142,21 @@ where
     });
 
     let provider_vec = Arc::clone(&provider);
-    let query_text_vec = query_text.to_string();
-    let owner_id_vec = owner_id.map(|s| s.to_string());
+    let owner_id_vec = owner_id;
     let embedding_api_url = embedding_api_url.to_string();
     let embedding_model = embedding_model.to_string();
     let vector_handle = tokio::spawn(async move {
         if use_vector_search {
             let query_vector =
-                generate_embedding(&embedding_api_url, &embedding_model, &query_text_vec).await?;
-
-            let doc_ids_slice = if candidate_doc_ids.is_empty() {
-                None
-            } else {
-                Some(candidate_doc_ids.as_slice())
-            };
-
+                generate_embedding(&embedding_api_url, &embedding_model, &query_text)
+                    .await
+                    .map_err(SearchError::Embedding)?;
             provider_vec
                 .vector_search(
                     query_vector,
                     limit * 2,
                     owner_id_vec.as_deref(),
-                    doc_ids_slice,
+                    Some(&candidate_doc_ids),
                 )
                 .await
         } else {
@@ -181,38 +166,17 @@ where
 
     let (keyword_results, vector_results) = tokio::join!(keyword_handle, vector_handle);
 
-    // Soft-fail: log errors but continue with any successful results
     let keyword_candidates = match keyword_results {
         Ok(Ok(res)) => res,
-        Ok(Err(e)) => {
-            warn!("Keyword search failed: {:?}", e);
-            Vec::new()
-        }
-        Err(e) => {
-            warn!("Keyword search task panicked: {:?}", e);
-            Vec::new()
-        }
+        _ => Vec::new(),
     };
 
     let vector_candidates = match vector_results {
         Ok(Ok(res)) => res,
-        Ok(Err(e)) => {
-            warn!("Vector search failed: {:?}", e);
-            Vec::new()
-        }
-        Err(e) => {
-            warn!("Vector search task panicked: {:?}", e);
-            Vec::new()
-        }
+        _ => Vec::new(),
     };
 
-    // --- Stage 4: Re-ranking and Truncation ---
     let mut final_results = reciprocal_rank_fusion(vector_candidates, keyword_candidates);
     final_results.truncate(limit as usize);
-    info!(
-        "Hybrid search returning {} final results.",
-        final_results.len()
-    );
-
     Ok(final_results)
 }

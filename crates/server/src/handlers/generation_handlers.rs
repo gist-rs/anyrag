@@ -8,7 +8,7 @@ use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptR
 use crate::{auth::middleware::AuthenticatedUser, providers::create_dynamic_provider};
 use anyrag::{
     providers::db::sqlite::SqliteProvider,
-    search::{hybrid_search, HybridSearchPrompts},
+    search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ExecutePromptOptions as LibExecutePromptOptions, PromptClientBuilder},
 };
 use axum::{
@@ -17,7 +17,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-
+use std::sync::Arc;
 use tracing::info;
 
 // --- API Payloads for Generation Handlers ---
@@ -171,11 +171,6 @@ pub async fn gen_text_handler(
                 debug_context["generated_sql"] = json!(context_result.generated_sql);
             }
             "knowledge_search" => {
-                let api_url = &app_state.config.embedding.api_url;
-                let model = &app_state.config.embedding.model_name;
-                let query_vector =
-                    generate_embedding(api_url, model, &agent_decision.query).await?;
-
                 let analysis_task_config = app_state.tasks.get("query_analysis").unwrap();
                 let analysis_provider = app_state
                     .ai_providers
@@ -183,20 +178,23 @@ pub async fn gen_text_handler(
                     .unwrap();
 
                 let db_path = format!("db/{db_name}.db");
-                let sqlite_provider = SqliteProvider::new(&db_path).await?;
+                let sqlite_provider = Arc::new(SqliteProvider::new(&db_path).await?);
                 sqlite_provider.initialize_schema().await?;
 
                 let search_results = hybrid_search(
-                    &sqlite_provider,
-                    analysis_provider.as_ref(),
-                    query_vector,
-                    &agent_decision.query,
-                    Some(&user.0.id),
+                    sqlite_provider,
+                    Arc::from(analysis_provider.clone()),
+                    agent_decision.query,
+                    Some(user.0.id.clone()),
                     payload.rerank_limit.unwrap_or(10),
                     HybridSearchPrompts {
                         analysis_system_prompt: &analysis_task_config.system_prompt,
                         analysis_user_prompt_template: &analysis_task_config.user_prompt,
                     },
+                    payload.use_keyword_search,
+                    payload.use_vector_search,
+                    &app_state.config.embedding.api_url,
+                    &app_state.config.embedding.model_name,
                 )
                 .await?;
                 retrieved_context =

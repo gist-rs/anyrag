@@ -107,7 +107,6 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
         .expect("Database setup failed");
 
     let user_query = "Tell me about the Tesla prize";
-    let query_vector = vec![0.99, 0.01, 0.0, 0.0]; // Vector is very close to the Tesla doc
 
     // Mock the AI provider for two separate calls
     let mock_ai_responses = vec![
@@ -127,17 +126,21 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
     // This section manually replicates the logic from the server's knowledge_search_handler
     let limit = 5;
     // Call with `owner_id: None` to simulate a guest user request.
+    let query_vector = vec![0.99, 0.01, 0.0, 0.0];
     let search_results = hybrid_search(
-        &sqlite_provider,
-        &mock_ai_provider,
-        query_vector,
-        user_query,
-        None, // owner_id
+        std::sync::Arc::new(sqlite_provider.clone()),
+        std::sync::Arc::new(mock_ai_provider.clone()),
+        user_query.to_string(),
+        None,
         limit,
-        HybridSearchPrompts {
+        anyrag::search::HybridSearchPrompts {
             analysis_system_prompt: "You are an expert query analyst.",
             analysis_user_prompt_template: "USER QUERY:\n{prompt}",
         },
+        true,
+        true,
+        "http://mock.com/embeddings",
+        "mock-model",
     )
     .await?;
 

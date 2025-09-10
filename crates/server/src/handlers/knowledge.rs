@@ -20,6 +20,7 @@ use axum::{
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::sync::Arc;
 use tracing::{error, info};
 use turso::params;
 
@@ -171,7 +172,7 @@ pub async fn knowledge_search_handler(
 
     let search_results = hybrid_search(
         app_state.sqlite_provider.clone(),
-        analysis_provider.clone(),
+        Arc::from(analysis_provider.clone()),
         payload.query.clone(),
         owner_id,
         limit,
@@ -179,8 +180,8 @@ pub async fn knowledge_search_handler(
             analysis_system_prompt: &task_config.system_prompt,
             analysis_user_prompt_template: &task_config.user_prompt,
         },
-        true, // use_keyword_search
-        true, // use_vector_search
+        true,
+        true,
         &app_state.config.embedding.api_url,
         &app_state.config.embedding.model_name,
     )
