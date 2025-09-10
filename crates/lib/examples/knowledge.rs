@@ -31,16 +31,16 @@ use anyrag::{
         QUERY_ANALYSIS_SYSTEM_PROMPT, QUERY_ANALYSIS_USER_PROMPT,
     },
     providers::{
-        ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
+        ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider, AiProvider},
         db::sqlite::SqliteProvider,
     },
-    search::{hybrid_search, HybridSearchOptions},
+    search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions},
     PromptClientBuilder,
 };
 use core_access::get_or_create_user;
 use dotenvy::dotenv;
-use std::{env, fs};
+use std::{env, fs, sync::Arc};
 use tokio::time::{sleep, Duration};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -84,20 +84,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let jina_api_key = env::var("JINA_API_KEY").ok();
 
     // --- Build AI Provider ---
-    let ai_provider = match ai_provider_name.as_str() {
+    let ai_provider: Box<dyn AiProvider> = match ai_provider_name.as_str() {
         "gemini" => {
             let key = ai_api_key.expect("AI_API_KEY is required for gemini provider");
             let gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
             Box::new(GeminiProvider::new(gemini_url.to_string(), key)?)
-                as Box<dyn anyrag::providers::ai::AiProvider>
         }
         "local" => Box::new(LocalAiProvider::new(
             local_ai_api_url,
             ai_api_key,
             ai_model,
-        )?) as Box<dyn anyrag::providers::ai::AiProvider>,
+        )?),
         _ => return Err(format!("Unsupported AI provider: {ai_provider_name}").into()),
     };
+    let ai_provider: Arc<dyn AiProvider> = Arc::from(ai_provider);
 
     // --- Build Storage Provider ---
     let sqlite_provider = SqliteProvider::new(db_path).await?;
@@ -187,23 +187,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("--- Starting RAG Search & Synthesis ---");
     let question = "ทำยังไงถึงจะได้เทสล่า";
     let instruction = "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า";
+    let provider = Arc::new(sqlite_provider.clone());
 
-    let search_results = hybrid_search(
-        std::sync::Arc::new(sqlite_provider.clone()),
-        ai_provider.clone(),
-        question.to_string(),
-        Some(user.id.clone()),
-        5,
-        anyrag::search::HybridSearchPrompts {
+    let search_options = HybridSearchOptions {
+        query_text: question.to_string(),
+        owner_id: Some(user.id.clone()),
+        limit: 5,
+        prompts: HybridSearchPrompts {
             analysis_system_prompt: QUERY_ANALYSIS_SYSTEM_PROMPT,
             analysis_user_prompt_template: QUERY_ANALYSIS_USER_PROMPT,
         },
-        true,
-        true,
-        &embeddings_api_url,
-        &embeddings_model,
-    )
-    .await?;
+        use_keyword_search: true,
+        use_vector_search: true,
+        embedding_api_url: &embeddings_api_url,
+        embedding_model: &embeddings_model,
+    };
+
+    let search_results = hybrid_search(provider, ai_provider.clone(), search_options).await?;
 
     let context = search_results
         .iter()
@@ -219,7 +219,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Retrieved context for synthesis:\n---\n{}---", context);
 
     let client = PromptClientBuilder::new()
-        .ai_provider(ai_provider)
+        .ai_provider(dyn_clone::clone_box(ai_provider.as_ref()))
         // Storage provider is not used for RAG synthesis, but is required to build the client.
         .storage_provider(Box::new(sqlite_provider))
         .build()?;

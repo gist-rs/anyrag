@@ -10,7 +10,7 @@ use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
     ingest::export_for_finetuning,
     providers::ai::generate_embedding,
-    search::{hybrid_search, HybridSearchPrompts},
+    search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
 };
 use axum::{
@@ -169,21 +169,26 @@ pub async fn knowledge_search_handler(
     let analysis_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
     })?;
+    let ai_provider = Arc::from(analysis_provider.clone());
 
-    let search_results = hybrid_search(
-        app_state.sqlite_provider.clone(),
-        Arc::from(analysis_provider.clone()),
-        payload.query.clone(),
+    let search_options = HybridSearchOptions {
+        query_text: payload.query.clone(),
         owner_id,
         limit,
-        HybridSearchPrompts {
+        prompts: HybridSearchPrompts {
             analysis_system_prompt: &task_config.system_prompt,
             analysis_user_prompt_template: &task_config.user_prompt,
         },
-        true,
-        true,
-        &app_state.config.embedding.api_url,
-        &app_state.config.embedding.model_name,
+        use_keyword_search: true,
+        use_vector_search: true,
+        embedding_api_url: &app_state.config.embedding.api_url,
+        embedding_model: &app_state.config.embedding.model_name,
+    };
+
+    let search_results = hybrid_search(
+        app_state.sqlite_provider.clone(),
+        ai_provider,
+        search_options,
     )
     .await?;
 

@@ -9,9 +9,12 @@ use anyrag::providers::db::storage::Storage;
 use anyrag::types::TableSchema;
 use async_trait::async_trait;
 use dotenvy::dotenv;
+use serde_json::json;
 use std::env;
 use std::fmt::Debug;
 use std::sync::{Arc, Once, RwLock};
+use wiremock::matchers::{method, path};
+use wiremock::{Mock, MockServer, ResponseTemplate};
 
 #[cfg(test)]
 static INIT: Once = Once::new();
@@ -116,4 +119,26 @@ pub fn create_real_ai_provider() -> Box<dyn AiProvider> {
         }
         _ => panic!("Unsupported AI provider specified: {provider_name}"),
     }
+}
+
+/// Sets up a mock server to respond to embedding API requests.
+/// The vector returned is designed to be very similar to the "Tesla" document's vector.
+pub async fn setup_mock_embedding_server() -> MockServer {
+    let server = MockServer::start().await;
+    let mock_embedding_response = json!({
+        "data": [
+            {
+                "embedding": [0.99, 0.01, 0.0, 0.0]
+            }
+        ]
+    });
+
+    Mock::given(method("POST"))
+        // Assuming a standard OpenAI-compatible path
+        .and(path("/v1/embeddings"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(mock_embedding_response))
+        .mount(&server)
+        .await;
+
+    server
 }

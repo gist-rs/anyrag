@@ -38,8 +38,17 @@ pub enum AppError {
     Search(SearchError),
     /// Errors from database operations.
     Database(TursoError),
+    /// Errors from parsing JSON.
+    JsonParse(serde_json::Error),
     /// Generic internal server errors.
     Internal(anyhow::Error),
+}
+
+/// Conversion from `serde_json::Error` to `AppError`.
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        AppError::JsonParse(err)
+    }
 }
 
 /// Conversion from `TextIngestError` to `AppError`.
@@ -177,7 +186,13 @@ impl IntoResponse for AppError {
                     format!("Database operation failed: {err}"),
                 )
             }
-
+            AppError::JsonParse(err) => {
+                error!("JsonParseError: {:?}", err);
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("Failed to parse JSON response or payload: {err}"),
+                )
+            }
             AppError::Prompt(err) => {
                 // Log the original error for debugging purposes
                 error!("PromptError: {:?}", err);

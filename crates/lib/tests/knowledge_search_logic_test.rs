@@ -8,12 +8,13 @@ mod common;
 use anyhow::Result;
 use anyrag::{
     providers::db::sqlite::SqliteProvider,
-    search::{hybrid_search, HybridSearchPrompts},
+    search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
 };
-use common::{setup_tracing, MockAiProvider};
+use common::{setup_mock_embedding_server, setup_tracing, MockAiProvider};
 use core_access::GUEST_USER_IDENTIFIER;
 use serde_json::json;
+use std::sync::Arc;
 use turso::params;
 use uuid::Uuid;
 
@@ -34,7 +35,7 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
 
     // --- Document 1: Tesla (owned by Guest) ---
     let doc1_id = "doc_tesla";
-    let doc1_vector: Vec<f32> = vec![1.0, 0.0, 0.0, 0.0];
+    let doc1_vector: [f32; 4] = [1.0, 0.0, 0.0, 0.0];
     let doc1_vector_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(doc1_vector.as_ptr() as *const u8, doc1_vector.len() * 4)
     };
@@ -62,7 +63,7 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
 
     // --- Document 2: Unrelated (owned by Guest) ---
     let doc2_id = "doc_unrelated";
-    let doc2_vector: Vec<f32> = vec![0.0, 1.0, 0.0, 0.0];
+    let doc2_vector: [f32; 4] = [0.0, 1.0, 0.0, 0.0];
     let doc2_vector_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(doc2_vector.as_ptr() as *const u8, doc2_vector.len() * 4)
     };
@@ -105,6 +106,9 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
     let sqlite_provider = setup_database_with_manual_data()
         .await
         .expect("Database setup failed");
+    let provider = Arc::new(sqlite_provider.clone());
+    let mock_embedding_server = setup_mock_embedding_server().await;
+    let embedding_api_url = format!("{}/v1/embeddings", mock_embedding_server.uri());
 
     let user_query = "Tell me about the Tesla prize";
 
@@ -121,28 +125,27 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
     ];
     let mock_ai_provider = MockAiProvider::new(mock_ai_responses);
     let call_history = mock_ai_provider.call_history.clone();
+    let ai_provider = Arc::new(mock_ai_provider.clone());
 
     // --- Act ---
     // This section manually replicates the logic from the server's knowledge_search_handler
-    let limit = 5;
-    // Call with `owner_id: None` to simulate a guest user request.
-    let query_vector = vec![0.99, 0.01, 0.0, 0.0];
-    let search_results = hybrid_search(
-        std::sync::Arc::new(sqlite_provider.clone()),
-        std::sync::Arc::new(mock_ai_provider.clone()),
-        user_query.to_string(),
-        None,
-        limit,
-        anyrag::search::HybridSearchPrompts {
+
+    let search_options = HybridSearchOptions {
+        query_text: user_query.to_string(),
+        // Call with `owner_id: None` to simulate a guest user request.
+        owner_id: None,
+        limit: 5,
+        prompts: HybridSearchPrompts {
             analysis_system_prompt: "You are an expert query analyst.",
             analysis_user_prompt_template: "USER QUERY:\n{prompt}",
         },
-        true,
-        true,
-        "http://mock.com/embeddings",
-        "mock-model",
-    )
-    .await?;
+        use_keyword_search: true,
+        use_vector_search: true,
+        embedding_api_url: &embedding_api_url,
+        embedding_model: "mock-model",
+    };
+
+    let search_results = hybrid_search(provider, ai_provider.clone(), search_options).await?;
 
     // --- Assert Pre-computation ---
     assert_eq!(

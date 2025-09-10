@@ -181,20 +181,24 @@ pub async fn gen_text_handler(
                 let sqlite_provider = Arc::new(SqliteProvider::new(&db_path).await?);
                 sqlite_provider.initialize_schema().await?;
 
-                let search_results = hybrid_search(
-                    sqlite_provider,
-                    Arc::from(analysis_provider.clone()),
-                    agent_decision.query,
-                    Some(user.0.id.clone()),
-                    payload.rerank_limit.unwrap_or(10),
-                    HybridSearchPrompts {
+                let search_options = HybridSearchOptions {
+                    query_text: agent_decision.query,
+                    owner_id: Some(user.0.id.clone()),
+                    limit: payload.rerank_limit.unwrap_or(10),
+                    prompts: HybridSearchPrompts {
                         analysis_system_prompt: &analysis_task_config.system_prompt,
                         analysis_user_prompt_template: &analysis_task_config.user_prompt,
                     },
-                    payload.use_keyword_search,
-                    payload.use_vector_search,
-                    &app_state.config.embedding.api_url,
-                    &app_state.config.embedding.model_name,
+                    use_keyword_search: payload.use_keyword_search,
+                    use_vector_search: payload.use_vector_search,
+                    embedding_api_url: &app_state.config.embedding.api_url,
+                    embedding_model: &app_state.config.embedding.model_name,
+                };
+
+                let search_results = hybrid_search(
+                    sqlite_provider,
+                    Arc::from(analysis_provider.clone()),
+                    search_options,
                 )
                 .await?;
                 retrieved_context =
@@ -243,10 +247,7 @@ pub async fn gen_text_handler(
     let final_user_prompt = if retrieved_context.is_empty() {
         user_goal
     } else {
-        format!(
-            "# User's Goal\n{}\n\n# Inspirational Context\nDraw inspiration from the following JSON data of real online posts but do not copy directly.\n---\n{}",
-            user_goal, retrieved_context
-        )
+        format!("# User's Goal\n{user_goal}\n\n# Inspirational Context\nDraw inspiration from the following JSON data of real online posts but do not copy directly.\n---\n{retrieved_context}")
     };
 
     let raw_response = generation_provider

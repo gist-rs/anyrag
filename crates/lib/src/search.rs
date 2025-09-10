@@ -38,6 +38,18 @@ pub struct HybridSearchPrompts<'a> {
     pub analysis_user_prompt_template: &'a str,
 }
 
+/// Encapsulates all options for a hybrid search operation.
+pub struct HybridSearchOptions<'a> {
+    pub query_text: String,
+    pub owner_id: Option<String>,
+    pub limit: u32,
+    pub prompts: HybridSearchPrompts<'a>,
+    pub use_keyword_search: bool,
+    pub use_vector_search: bool,
+    pub embedding_api_url: &'a str,
+    pub embedding_model: &'a str,
+}
+
 // --- Query Analysis ---
 
 #[derive(Deserialize, Debug)]
@@ -57,6 +69,8 @@ pub enum SearchError {
     QueryAnalysis(PromptError),
     #[error("Embedding generation failed: {0}")]
     Embedding(PromptError),
+    #[error("A search task failed or panicked.")]
+    TaskFailed,
 }
 
 /// Uses an LLM to extract entities and keyphrases from a user query.
@@ -98,23 +112,16 @@ async fn analyze_query(
 pub async fn hybrid_search<P>(
     provider: Arc<P>,
     ai_provider: Arc<dyn AiProvider>,
-    query_text: String,
-    owner_id: Option<String>,
-    limit: u32,
-    prompts: HybridSearchPrompts<'_>,
-    use_keyword_search: bool,
-    use_vector_search: bool,
-    embedding_api_url: &str,
-    embedding_model: &str,
+    options: HybridSearchOptions<'_>,
 ) -> Result<Vec<SearchResult>, SearchError>
 where
     P: MetadataSearch + VectorSearch + KeywordSearch + Send + Sync + 'static,
 {
     let analyzed_query = analyze_query(
         ai_provider.as_ref(),
-        &query_text,
-        prompts.analysis_system_prompt,
-        prompts.analysis_user_prompt_template,
+        &options.query_text,
+        options.prompts.analysis_system_prompt,
+        options.prompts.analysis_user_prompt_template,
     )
     .await
     .map_err(SearchError::QueryAnalysis)?;
@@ -123,18 +130,19 @@ where
         .metadata_search(
             &analyzed_query.entities,
             &analyzed_query.keyphrases,
-            owner_id.as_deref(),
-            limit * 5,
+            options.owner_id.as_deref(),
+            options.limit * 5,
         )
         .await?;
 
     let provider_kw = Arc::clone(&provider);
-    let query_text_kw = query_text.clone();
-    let owner_id_kw = owner_id.clone();
+    let query_text_kw = options.query_text.clone();
+    let owner_id_kw = options.owner_id.clone();
+    let limit_kw = options.limit;
     let keyword_handle = tokio::spawn(async move {
-        if use_keyword_search {
+        if options.use_keyword_search {
             provider_kw
-                .keyword_search(&query_text_kw, limit * 2, owner_id_kw.as_deref())
+                .keyword_search(&query_text_kw, limit_kw * 2, owner_id_kw.as_deref())
                 .await
         } else {
             Ok(Vec::new())
@@ -142,19 +150,21 @@ where
     });
 
     let provider_vec = Arc::clone(&provider);
-    let owner_id_vec = owner_id;
-    let embedding_api_url = embedding_api_url.to_string();
-    let embedding_model = embedding_model.to_string();
+    let owner_id_vec = options.owner_id;
+    let embedding_api_url = options.embedding_api_url.to_string();
+    let embedding_model = options.embedding_model.to_string();
+    let query_text_vec = options.query_text;
+    let limit_vec = options.limit;
     let vector_handle = tokio::spawn(async move {
-        if use_vector_search {
+        if options.use_vector_search {
             let query_vector =
-                generate_embedding(&embedding_api_url, &embedding_model, &query_text)
+                generate_embedding(&embedding_api_url, &embedding_model, &query_text_vec)
                     .await
                     .map_err(SearchError::Embedding)?;
             provider_vec
                 .vector_search(
                     query_vector,
-                    limit * 2,
+                    limit_vec * 2,
                     owner_id_vec.as_deref(),
                     Some(&candidate_doc_ids),
                 )
@@ -166,17 +176,32 @@ where
 
     let (keyword_results, vector_results) = tokio::join!(keyword_handle, vector_handle);
 
+    // Soft-fail: If a task panics or returns an error, log it and proceed with an empty result set.
     let keyword_candidates = match keyword_results {
         Ok(Ok(res)) => res,
-        _ => Vec::new(),
+        Ok(Err(e)) => {
+            warn!("Keyword search task failed: {}", e);
+            Vec::new()
+        }
+        Err(e) => {
+            warn!("Keyword search task panicked: {}", e);
+            Vec::new()
+        }
     };
 
     let vector_candidates = match vector_results {
         Ok(Ok(res)) => res,
-        _ => Vec::new(),
+        Ok(Err(e)) => {
+            warn!("Vector search task failed: {}", e);
+            Vec::new()
+        }
+        Err(e) => {
+            warn!("Vector search task panicked: {}", e);
+            Vec::new()
+        }
     };
 
     let mut final_results = reciprocal_rank_fusion(vector_candidates, keyword_candidates);
-    final_results.truncate(limit as usize);
+    final_results.truncate(options.limit as usize);
     Ok(final_results)
 }
