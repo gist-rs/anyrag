@@ -393,12 +393,11 @@ impl VectorSearch for SqliteProvider {
         sql.push_str(&format!(" WHERE {}", conditions.join(" AND ")));
         sql.push_str(&format!(" ORDER BY similarity DESC LIMIT {limit};"));
 
-        let log_sql = if vector_numbers_str.len() > 256 {
+        let _log_sql = if vector_numbers_str.len() > 256 {
             sql.replace(&vector_numbers_str, "[...vector truncated...]")
         } else {
             sql.clone()
         };
-        info!(sql = %log_sql, params = ?query_params, "Executing vector search SQL");
 
         let mut results = if query_params.is_empty() {
             conn.query(&sql, ()).await?
