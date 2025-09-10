@@ -53,8 +53,8 @@ pub struct TestApp {
     pub db_path: PathBuf,
     pub app_state: AppState,
     pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
-    _db_file: NamedTempFile,
-    _config_dir: TempDir,
+    _db_file: Option<NamedTempFile>,
+    _config_dir: Option<TempDir>,
     _server_handle: JoinHandle<()>,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
@@ -62,23 +62,13 @@ pub struct TestApp {
 impl TestApp {
     /// Spawns the application server and returns a `TestApp` instance.
     pub async fn spawn() -> Result<Self> {
-        dotenvy::dotenv().ok();
-        // `try_init` is used to prevent panic if the logger is already initialized.
-        let _ = tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .compact()
-            .try_init();
-
         let mock_server = MockServer::start();
         let db_file = NamedTempFile::new()?;
         let db_path = db_file.path().to_path_buf();
 
-        let sqlite_provider = SqliteProvider::new(db_path.to_str().unwrap()).await?;
-        sqlite_provider.initialize_schema().await?;
-
-        // --- Create a temporary config file for the test ---
         let config_dir = tempdir()?;
         let config_path = config_dir.path().join("config.yml");
+        println!("[TestApp::spawn] CONFIGURING with DB path: {db_path:?}");
         let config_content = format!(
             r#"
 port: 0
@@ -87,14 +77,7 @@ embedding:
   api_url: "{}"
   model_name: "mock-embedding-model"
 providers:
-  # This provider will be used by the default tasks.
   gemini_default:
-    provider: "local"
-    api_url: "{}"
-    api_key: null
-    model_name: "mock-chat-model"
-  # Define a second one in case some tests override to use it.
-  mock_provider:
     provider: "local"
     api_url: "{}"
     api_key: null
@@ -102,17 +85,29 @@ providers:
 "#,
             db_path.to_str().unwrap(),
             mock_server.url("/v1/embeddings"),
-            mock_server.url("/v1/chat/completions"),
             mock_server.url("/v1/chat/completions")
         );
         let mut file = File::create(&config_path)?;
         file.write_all(config_content.as_bytes())?;
 
-        // Use the real config loader with our temporary file.
-        // This correctly loads defaults and merges our test-specific provider URLs.
         let config = config::get_config(Some(config_path.to_str().unwrap()))?;
         let app_state = build_app_state(config).await?;
+        app_state.sqlite_provider.initialize_schema().await?;
 
+        let mut app = TestApp::spawn_with_state(app_state, mock_server).await?;
+        app._db_file = Some(db_file);
+        app._config_dir = Some(config_dir);
+        Ok(app)
+    }
+
+    pub async fn spawn_with_state(app_state: AppState, mock_server: MockServer) -> Result<Self> {
+        dotenvy::dotenv().ok();
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .compact()
+            .try_init();
+
+        let db_path = PathBuf::from(&app_state.config.db_url);
         let knowledge_graph_clone = app_state.knowledge_graph.clone();
         let app_state_for_harness = app_state.clone();
 
@@ -131,7 +126,6 @@ providers:
             }
         });
 
-        // Give the server a moment to start up.
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
         Ok(Self {
@@ -141,8 +135,8 @@ providers:
             db_path,
             app_state: app_state_for_harness,
             knowledge_graph: knowledge_graph_clone,
-            _db_file: db_file,
-            _config_dir: config_dir,
+            _db_file: None,
+            _config_dir: None,
             _server_handle: server_handle,
             shutdown_tx: Some(shutdown_tx),
         })

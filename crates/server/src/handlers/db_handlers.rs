@@ -42,6 +42,7 @@ pub async fn db_query_handler(
     // Dynamically create a provider for the requested project's database.
     let db_path = format!("db/{}.db", payload.db);
     let sqlite_provider = SqliteProvider::new(&db_path).await?;
+    sqlite_provider.initialize_schema().await?; // Ensure tables exist
 
     let result_json_str = sqlite_provider.execute_query(&payload.query).await?;
     let result_value: Value =

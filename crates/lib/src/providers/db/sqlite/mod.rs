@@ -601,6 +601,8 @@ impl MetadataSearch for SqliteProvider {
              LIMIT {limit}"
         );
 
+        info!(sql = %sql, params = ?params, "Executing metadata search SQL");
+
         let mut results = conn.query(&sql, params).await?;
         let mut doc_ids = Vec::new();
 

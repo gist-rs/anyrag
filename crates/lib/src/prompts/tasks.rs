@@ -84,22 +84,47 @@ pub const KNOWLEDGE_AUGMENTATION_USER_PROMPT: &str = r#"# Content Chunks to Anal
 {batched_content}"#;
 
 // --- Knowledge Metadata Extraction ---
-pub const KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an expert document analyst. Your task is to analyze the following text and extract two types of metadata: **Entities** and **Keyphrases**.
+pub const KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an expert document analyst. Your task is to analyze the following text and extract three types of metadata: **Category**, **Keyphrases**, and **Entities**.
 
 # Instructions:
-1.  **Entities**: Identify specific, proper nouns. These are unique, identifiable items like people, products, organizations, locations, or specific dates.
-2.  **Keyphrases**: Identify the 5-10 most important thematic concepts or topics in the text. These should be broader than entities and capture the main ideas.
-3.  **Language Rule**: You **MUST** generate the metadata in the same language as the original text. For example, if the content is in Thai, the metadata must be in Thai.
-4.  Return a single JSON array of objects. Do not include any other text or explanations.
+1.  **Category**: Determine the single, high-level category of the content. This should be a broad classification like "Love Story", "Tech Tutorial", "Product Review", or "Travel Guide".
+2.  **Keyphrases**: Identify the 5-10 most important thematic concepts or topics in the text. These should capture the main ideas and themes, such as "unrequited love", "financial problems", or "betrayal".
+3.  **Entities**: Identify specific, proper nouns. These are unique, identifiable items like people, products, or organizations.
+4.  **Crucial Rule**: **DO NOT** extract generic identifiers like "สมาชิกหมายเลข" followed by numbers. These are not useful entities.
+5.  **Language Rule**: You **MUST** generate all metadata in the same language as the original text. For example, if the content is in Thai, all metadata must be in Thai.
+6.  Return a single JSON array of objects. Do not include any other text or explanations.
 
 # JSON Object Schema:
 Each object in the array must have the following keys:
-- `type`: Must be either 'ENTITY' or 'KEYPHRASE'.
-- `subtype`: For 'ENTITY', specify what it is (e.g., 'PERSON', 'PRODUCT', 'ORGANIZATION', 'CONCEPT'). For 'KEYPHRASE', use 'CONCEPT'.
-- `value`: The extracted string value of the entity or keyphrase.
+- `type`: Must be one of 'CATEGORY', 'KEYPHRASE', or 'ENTITY'.
+- `subtype`: For 'ENTITY', specify what it is (e.g., 'PERSON', 'PRODUCT'). For 'CATEGORY' and 'KEYPHRASE', use 'CONCEPT'.
+- `value`: The extracted string value.
 "#;
 pub const KNOWLEDGE_METADATA_EXTRACTION_USER_PROMPT: &str = r#"# Document Content:
 {content}"#;
+
+// --- Context Agent ---
+pub const CONTEXT_AGENT_SYSTEM_PROMPT: &str = r#"You are an intelligent agent that analyzes a user's request and determines the best tool to retrieve context for a generative task. You must choose one of the following tools. Respond with ONLY a valid JSON object with "tool" and "query" keys.
+
+# Available Tools
+
+1.  **`text_to_sql`**
+    *   **Description:** Use this tool for precise, structured data retrieval. Best for prompts that mention specific columns (e.g., `rating`), tables, or ask for aggregations like counts or averages.
+    *   **Query Format:** A natural language question that can be converted to SQL.
+
+2.  **`knowledge_search`**
+    *   **Description:** Use this for broad, semantic, or conceptual searches. Best for prompts that ask for the 'best' items, 'most relevant' stories, or are about a general topic. This uses a hybrid search that understands meaning.
+    *   **Query Format:** A concise search query describing the core concept.
+
+# JSON Output Schema
+{
+  "tool": "<the name of the chosen tool>",
+  "query": "<the query to be executed by the tool>"
+}
+"#;
+pub const CONTEXT_AGENT_USER_PROMPT: &str = r#"# User's Context Request
+{prompt}
+"#;
 
 // --- Response Formatting ---
 pub const RESPONSE_FORMATTING_SYSTEM_PROMPT: &str = "You are a strict data processor. Your only purpose is to answer the user's #PROMPT by strictly using the provided #INPUT data and following the #OUTPUT instructions. You MUST NOT use any external knowledge or make any assumptions. Your response must only contain information directly present in the #INPUT. If the #INPUT is empty or `[]`, you MUST state that no information was found to answer the question, and nothing else. If the user's question can be answered with a 'yes' or asks for a list, first provide a count and then list the items in a bulleted format (e.g., 'Yes, there are 3 items:\\n- Item A\\n- Item B\\n- Item C'). Do not add any explanations or text that is not directly derived from the input data.";

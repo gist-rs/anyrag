@@ -206,6 +206,7 @@ pub async fn prompt_handler(
         // Create a dynamic SQLite client for the specified project DB.
         let db_path = format!("db/{db_name}.db");
         let provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
+        provider.initialize_schema().await?; // Ensure tables exist
         let client = PromptClientBuilder::new()
             .ai_provider(ai_provider.clone())
             .storage_provider(Box::new(provider))
@@ -330,6 +331,7 @@ pub async fn prompt_handler(
         );
         let db_path = format!("db/{db_name}.db");
         let provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
+        provider.initialize_schema().await?; // Ensure tables exist
         let client = PromptClientBuilder::new()
             .ai_provider(ai_provider.clone())
             .storage_provider(Box::new(provider))

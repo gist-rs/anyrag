@@ -176,6 +176,14 @@ fn build_default_tasks() -> HashMap<String, ConfigValue> {
                 KNOWLEDGE_METADATA_EXTRACTION_USER_PROMPT,
             ),
         ),
+        (
+            "context_agent",
+            (
+                "gemini_default",
+                CONTEXT_AGENT_SYSTEM_PROMPT,
+                CONTEXT_AGENT_USER_PROMPT,
+            ),
+        ),
     ];
 
     #[cfg(feature = "rss")]

@@ -177,19 +177,26 @@ pub async fn graph_build_handler(
         ));
     }
 
-    // 7. Add the facts to the in-memory graph
+    // 7. Add the facts to the in-memory graph. This operation is now idempotent.
     let facts_count = facts_to_add.len();
-    if facts_count > 0 {
+    {
         let mut kg = app_state
             .knowledge_graph
             .write()
             .map_err(|_| AppError::Internal(anyhow::anyhow!("Failed to acquire KG write lock")))?;
 
-        for (subject, predicate, object, start_time, end_time) in facts_to_add {
-            kg.add_fact(&subject, &predicate, &object, start_time, end_time)
-                .map_err(anyhow::Error::from)?;
+        // Clear the graph before adding new facts to ensure idempotency.
+        kg.clear()
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to clear graph: {e}")))?;
+        info!("Cleared existing knowledge graph.");
+
+        if facts_count > 0 {
+            for (subject, predicate, object, start_time, end_time) in facts_to_add {
+                kg.add_fact(&subject, &predicate, &object, start_time, end_time)
+                    .map_err(anyhow::Error::from)?;
+            }
         }
-    }
+    } // Lock is released here.
     info!("Successfully added {facts_count} facts to the Knowledge Graph.");
 
     // 8. Return the response

@@ -33,6 +33,13 @@ impl MemoryKnowledgeGraph {
             entity_map: HashMap::new(),
         }
     }
+
+    /// Clears all data from the graph and resets the local entity map.
+    pub fn clear(&mut self) -> Result<(), KnowledgeGraphError> {
+        self.db = MemoryDatastore::new_db();
+        self.entity_map.clear();
+        Ok(())
+    }
 }
 
 impl RocksdbKnowledgeGraph {

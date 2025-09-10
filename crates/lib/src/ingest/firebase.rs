@@ -211,7 +211,7 @@ fn get_timestamp_from_doc(doc: &FirestoreDocument, ts_field: &str) -> Option<Fir
 }
 
 /// Sanitizes a collection name to be a valid SQLite table name.
-fn sanitize_table_name(collection_name: &str) -> String {
+pub fn sanitize_table_name(collection_name: &str) -> String {
     collection_name
         .replace('"', "")
         .chars()

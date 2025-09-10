@@ -492,6 +492,10 @@ pub async fn extract_and_store_metadata(
             },
         };
 
+    let metadata_json = serde_json::to_string_pretty(&metadata_items)
+        .unwrap_or_else(|_| "Failed to serialize metadata".to_string());
+    info!("Extracted metadata for document {document_id}: {metadata_json}");
+
     if metadata_items.is_empty() {
         info!("No metadata extracted for document: {document_id}");
         return Ok(());
@@ -511,25 +515,24 @@ pub async fn extract_and_store_metadata(
     )
     .await?;
 
-    conn.execute("BEGIN TRANSACTION", ()).await?;
-    let mut stmt = conn
-        .prepare(
-            r#"INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value)
-               VALUES (?, ?, ?, ?, ?)"#,
-        )
-        .await?;
+    // Use a single bulk insert statement for efficiency and to avoid driver panics.
+    let values_placeholders: Vec<_> = metadata_items.iter().map(|_| "(?, ?, ?, ?, ?)").collect();
 
+    let mut query_params = Vec::with_capacity(metadata_items.len() * 5);
     for item in &metadata_items {
-        stmt.execute(params![
-            document_id,
-            owner_id,
-            item.metadata_type.to_uppercase(),
-            item.subtype.clone(),
-            item.value.clone(),
-        ])
-        .await?;
+        query_params.push(turso::Value::Text(document_id.to_string()));
+        query_params.push(owner_id.map(|s| s.to_string()).into());
+        query_params.push(turso::Value::Text(item.metadata_type.to_uppercase()));
+        query_params.push(turso::Value::Text(item.subtype.clone()));
+        query_params.push(turso::Value::Text(item.value.clone()));
     }
-    conn.execute("COMMIT", ()).await?;
+
+    let insert_sql = format!(
+        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES {}",
+        values_placeholders.join(", ")
+    );
+
+    conn.execute(&insert_sql, query_params).await?;
     info!(
         "Successfully stored {} metadata items for document: {document_id}",
         metadata_items.len()
