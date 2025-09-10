@@ -7,7 +7,7 @@
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptResponse};
 use crate::{auth::middleware::AuthenticatedUser, providers::create_dynamic_provider};
 use anyrag::{
-    providers::{ai::generate_embedding, db::sqlite::SqliteProvider},
+    providers::db::sqlite::SqliteProvider,
     search::{hybrid_search, HybridSearchPrompts},
     types::{ExecutePromptOptions as LibExecutePromptOptions, PromptClientBuilder},
 };
@@ -17,9 +17,14 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
 use tracing::info;
 
 // --- API Payloads for Generation Handlers ---
+
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Deserialize, Debug)]
 pub struct GenTextRequest {
@@ -30,12 +35,30 @@ pub struct GenTextRequest {
     pub context_prompt: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+
+    // New Control Flags
+    #[serde(default)]
+    pub use_sql: bool,
+    #[serde(default)]
+    pub use_knowledge_search: bool,
+    #[serde(default = "default_true")]
+    pub use_keyword_search: bool,
+    #[serde(default = "default_true")]
+    pub use_vector_search: bool,
+    pub rerank_limit: Option<u32>,
 }
 
 #[derive(Deserialize, Serialize, Debug)]
 struct AgentDecision {
     tool: String,
     query: String,
+}
+
+#[derive(Deserialize, Serialize, Debug)]
+struct DeconstructedQuery {
+    search_query: String,
+    #[serde(default)]
+    generative_intent: String,
 }
 
 // --- Generation Handlers ---
@@ -65,49 +88,60 @@ pub async fn gen_text_handler(
 
     let mut retrieved_context = String::new();
     let mut debug_context = json!({});
+    let mut generative_intent = String::new();
 
-    // --- Stage 1: Context Retrieval via Agent ---
+    // --- Stage 1: Context Retrieval ---
     if let Some(context_prompt) = payload.context_prompt.as_ref().filter(|s| !s.is_empty()) {
-        info!("Context prompt provided. Executing context agent.");
+        let agent_decision = if payload.use_sql || payload.use_knowledge_search {
+            // --- Path 1: Explicit User-Directed Routing ---
+            let (tool, query) = if payload.use_sql {
+                ("text_to_sql", context_prompt.clone())
+            } else {
+                ("knowledge_search", context_prompt.clone())
+            };
+            info!("User explicitly selected tool: '{}'", tool);
+            AgentDecision {
+                tool: tool.to_string(),
+                query,
+            }
+        } else {
+            // --- Path 2: Implicit Agent-Based Routing ---
+            info!("No explicit tool selected. Starting intelligent agent workflow.");
+            // --- LLM Call 1: Deconstruct the prompt ---
+            let deconstruct_task = app_state.tasks.get("query_deconstruction").unwrap();
+            let deconstruct_provider = app_state
+                .ai_providers
+                .get(&deconstruct_task.provider)
+                .unwrap();
+            let deconstruct_user_prompt = deconstruct_task
+                .user_prompt
+                .replace("{prompt}", context_prompt);
+            let deconstruct_response_raw = deconstruct_provider
+                .generate(&deconstruct_task.system_prompt, &deconstruct_user_prompt)
+                .await?;
+            let deconstructed: DeconstructedQuery =
+                serde_json::from_str(&deconstruct_response_raw)?;
+            debug_context["deconstructed_query"] = json!(deconstructed);
 
-        // --- LLM Call 1: Agent Tool Selection ---
-        let agent_task_config = app_state
-            .tasks
-            .get("context_agent")
-            .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Task 'context_agent' not found")))?;
-        let agent_provider = app_state
-            .ai_providers
-            .get(&agent_task_config.provider)
-            .ok_or_else(|| {
-                AppError::Internal(anyhow::anyhow!(
-                    "Provider '{}' for agent not found",
-                    agent_task_config.provider
-                ))
-            })?;
+            generative_intent = deconstructed.generative_intent;
+            if generative_intent.is_empty() {
+                generative_intent = context_prompt.clone();
+            }
 
-        let agent_user_prompt = agent_task_config
-            .user_prompt
-            .replace("{prompt}", context_prompt);
-        let agent_response_raw = agent_provider
-            .generate(&agent_task_config.system_prompt, &agent_user_prompt)
-            .await?;
-
-        let agent_response_str = agent_response_raw
-            .trim()
-            .strip_prefix("```json")
-            .unwrap_or(&agent_response_raw)
-            .strip_suffix("```")
-            .unwrap_or(&agent_response_raw)
-            .trim();
-
-        let agent_decision: AgentDecision =
-            serde_json::from_str(agent_response_str).map_err(|e| {
-                AppError::Internal(anyhow::anyhow!(
-                    "Failed to parse agent decision JSON: {}. Raw: '{}'",
-                    e,
-                    agent_response_raw
-                ))
-            })?;
+            // --- LLM Call 2: Select the tool for the search query ---
+            let agent_task_config = app_state.tasks.get("context_agent").unwrap();
+            let agent_provider = app_state
+                .ai_providers
+                .get(&agent_task_config.provider)
+                .unwrap();
+            let agent_user_prompt = agent_task_config
+                .user_prompt
+                .replace("{prompt}", &deconstructed.search_query);
+            let agent_response_raw = agent_provider
+                .generate(&agent_task_config.system_prompt, &agent_user_prompt)
+                .await?;
+            serde_json::from_str(&agent_response_raw)?
+        };
 
         info!(
             "Agent decided to use tool: '{}' with query: '{}'",
@@ -127,13 +161,11 @@ pub async fn gen_text_handler(
                     .ai_provider(provider.clone())
                     .storage_provider(Box::new(sqlite_provider))
                     .build()?;
-
                 let options = LibExecutePromptOptions {
                     prompt: agent_decision.query,
-                    table_name: Some("".to_string()), // Hack to fetch all schemas
+                    table_name: Some("".to_string()),
                     ..Default::default()
                 };
-
                 let context_result = client.execute_prompt_with_options(options).await?;
                 retrieved_context = context_result.database_result.unwrap_or_default();
                 debug_context["generated_sql"] = json!(context_result.generated_sql);
@@ -160,17 +192,13 @@ pub async fn gen_text_handler(
                     query_vector,
                     &agent_decision.query,
                     Some(&user.0.id),
-                    10,
+                    payload.rerank_limit.unwrap_or(10),
                     HybridSearchPrompts {
                         analysis_system_prompt: &analysis_task_config.system_prompt,
                         analysis_user_prompt_template: &analysis_task_config.user_prompt,
                     },
                 )
                 .await?;
-
-                // For now, we just serialize the search results. A future improvement
-                // could be to enrich this data with a second query for ratings if a
-                // link between documents and original tables is established.
                 retrieved_context =
                     serde_json::to_string(&search_results).map_err(anyhow::Error::from)?;
                 debug_context["search_results_count"] = json!(search_results.len());
@@ -194,11 +222,7 @@ pub async fn gen_text_handler(
     }
 
     // --- Stage 2: Content Generation ---
-    let gen_task_config = app_state
-        .tasks
-        .get("direct_generation")
-        .ok_or_else(|| AppError::Internal(anyhow::anyhow!("Task 'direct_generation' not found")))?;
-
+    let gen_task_config = app_state.tasks.get("direct_generation").unwrap();
     let (generation_provider, model_used_name) = if let Some(model_name) = &payload.model {
         create_dynamic_provider(&app_state, model_name).await?
     } else {
@@ -208,13 +232,22 @@ pub async fn gen_text_handler(
         (provider, provider_config.model_name.clone())
     };
 
-    let final_user_prompt = if retrieved_context.is_empty() {
+    let user_goal = if !generative_intent.is_empty() {
+        format!(
+            "{}\n\n{}",
+            payload.generation_prompt,
+            generative_intent.trim()
+        )
+    } else {
         payload.generation_prompt.clone()
+    };
+
+    let final_user_prompt = if retrieved_context.is_empty() {
+        user_goal
     } else {
         format!(
             "# User's Goal\n{}\n\n# Inspirational Context\nDraw inspiration from the following JSON data of real online posts but do not copy directly.\n---\n{}",
-            payload.generation_prompt,
-            retrieved_context
+            user_goal, retrieved_context
         )
     };
 

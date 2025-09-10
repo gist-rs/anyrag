@@ -431,8 +431,9 @@ curl -X POST 'http://localhost:9090/gen/text?debug=false' \
   -d '{
     "db": "kratooded",
     "model": "gemini-2.5-pro",
+    "use_graph": "true",
     "generation_prompt": "User Goal: Generate a Pantip-style post in Thai language.",
-    "context_prompt": "ใช้ graph สร้างเรื่องเกี่ยวกับความรัก"
+    "context_prompt": "สร้างเรื่องเกี่ยวกับความรัก"
   }'
 ```
 

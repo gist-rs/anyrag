@@ -159,11 +159,6 @@ pub async fn knowledge_search_handler(
         owner_id, payload.query, limit
     );
 
-    let api_url = &app_state.config.embedding.api_url;
-    let model = &app_state.config.embedding.model_name;
-
-    let query_vector = generate_embedding(api_url, model, &payload.query).await?;
-
     // --- Get AI provider for query analysis ---
     let task_name = "query_analysis";
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
@@ -174,18 +169,20 @@ pub async fn knowledge_search_handler(
         AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
     })?;
 
-    let prompts = HybridSearchPrompts {
-        analysis_system_prompt: &task_config.system_prompt,
-        analysis_user_prompt_template: &task_config.user_prompt,
-    };
     let search_results = hybrid_search(
-        app_state.sqlite_provider.as_ref(),
-        analysis_provider.as_ref(),
-        query_vector,
-        &payload.query,
-        owner_id.as_deref(),
+        app_state.sqlite_provider.clone(),
+        analysis_provider.clone(),
+        payload.query.clone(),
+        owner_id,
         limit,
-        prompts,
+        HybridSearchPrompts {
+            analysis_system_prompt: &task_config.system_prompt,
+            analysis_user_prompt_template: &task_config.user_prompt,
+        },
+        true, // use_keyword_search
+        true, // use_vector_search
+        &app_state.config.embedding.api_url,
+        &app_state.config.embedding.model_name,
     )
     .await?;
 

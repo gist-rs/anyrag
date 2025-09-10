@@ -126,6 +126,14 @@ pub const CONTEXT_AGENT_USER_PROMPT: &str = r#"# User's Context Request
 {prompt}
 "#;
 
+// --- Query Deconstruction ---
+pub const QUERY_DECONSTRUCTION_SYSTEM_PROMPT: &str = r#"You are a query analyst. Your task is to deconstruct the user's request into two parts: a concise `search_query` for finding relevant data, and the full `generative_intent` which is the user's original, complete goal. The `search_query` should be a comma-separated list of keywords and concepts. The `generative_intent` must be the original, unmodified user request."#;
+pub const QUERY_DECONSTRUCTION_USER_PROMPT: &str = r#"# User's Request
+{prompt}
+
+# JSON Output
+Respond with ONLY a valid JSON object with the keys "search_query" and "generative_intent"."#;
+
 // --- Response Formatting ---
 pub const RESPONSE_FORMATTING_SYSTEM_PROMPT: &str = "You are a strict data processor. Your only purpose is to answer the user's #PROMPT by strictly using the provided #INPUT data and following the #OUTPUT instructions. You MUST NOT use any external knowledge or make any assumptions. Your response must only contain information directly present in the #INPUT. If the #INPUT is empty or `[]`, you MUST state that no information was found to answer the question, and nothing else. If the user's question can be answered with a 'yes' or asks for a list, first provide a count and then list the items in a bulleted format (e.g., 'Yes, there are 3 items:\\n- Item A\\n- Item B\\n- Item C'). Do not add any explanations or text that is not directly derived from the input data.";
 pub const RESPONSE_FORMATTING_USER_PROMPT: &str = r#"# PROMPT:

@@ -184,6 +184,14 @@ fn build_default_tasks() -> HashMap<String, ConfigValue> {
                 CONTEXT_AGENT_USER_PROMPT,
             ),
         ),
+        (
+            "query_deconstruction",
+            (
+                "gemini_default",
+                QUERY_DECONSTRUCTION_SYSTEM_PROMPT,
+                QUERY_DECONSTRUCTION_USER_PROMPT,
+            ),
+        ),
     ];
 
     #[cfg(feature = "rss")]

@@ -34,7 +34,7 @@ use anyrag::{
         ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider},
         db::sqlite::SqliteProvider,
     },
-    search::{hybrid_search, HybridSearchPrompts},
+    search::{hybrid_search, HybridSearchOptions},
     types::{ContentType, ExecutePromptOptions},
     PromptClientBuilder,
 };
@@ -197,7 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         question,
         Some(&user.id), // owner_id
         5,              // limit
-        HybridSearchPrompts {
+        anyrag::search::HybridSearchPrompts {
             analysis_system_prompt: QUERY_ANALYSIS_SYSTEM_PROMPT,
             analysis_user_prompt_template: QUERY_ANALYSIS_USER_PROMPT,
         },
