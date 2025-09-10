@@ -9,6 +9,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tracing::info;
 use turso::{Database, Error as TursoError, Row, params};
 use uuid::Uuid;
 
@@ -64,8 +65,10 @@ pub async fn get_or_create_user(
     db: &Database,
     user_identifier: &str,
 ) -> Result<User, CoreAccessError> {
+    info!("[core_access] get_or_create_user for identifier: '{user_identifier}'");
     let conn = db.connect()?;
     let user_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, user_identifier.as_bytes()).to_string();
+    info!("[core_access] Calculated user_id: '{user_id}'");
 
     // 1. Try to SELECT the user first for maximum compatibility.
     let mut rows = conn
@@ -77,9 +80,14 @@ pub async fn get_or_create_user(
 
     if let Some(row) = rows.next().await? {
         // User exists, parse and return it.
-        return User::try_from(&row);
+        let user_result = User::try_from(&row);
+        if let Ok(user) = &user_result {
+            info!("[core_access] Found existing user: {user:?}");
+        }
+        return user_result;
     }
 
+    info!("[core_access] User not found, creating new user.");
     // 2. User does not exist. Determine role.
     // A guest user can never be root. The first non-guest user becomes root.
     let role = if user_identifier == GUEST_USER_IDENTIFIER {
@@ -94,15 +102,25 @@ pub async fn get_or_create_user(
 
         if !root_exists { "root" } else { "user" }
     };
+    info!("[core_access] Determined role for new user: '{role}'");
 
-    // Insert the new user with the determined role.
-    conn.execute(
-        "INSERT INTO users (id, role) VALUES (?, ?)",
-        params![user_id.clone(), role],
-    )
-    .await?;
+    // 2.5. If user doesn't exist, INSERT. If the INSERT fails due to a UNIQUE
+    // constraint violation, it means a concurrent process created the user
+    // between our SELECT and INSERT (a race condition). In this case, we can
+    // safely ignore the error and proceed to the final SELECT.
+    if let Err(e) = conn
+        .execute(
+            "INSERT INTO users (id, role) VALUES (?, ?)",
+            params![user_id.clone(), role],
+        )
+        .await
+    {
+        if !e.to_string().contains("UNIQUE constraint failed") {
+            return Err(e.into());
+        }
+    }
 
-    // 3. SELECT the newly created user to get all fields (like created_at).
+    // 3. SELECT the user, which is now guaranteed to exist.
     let mut rows = conn
         .query(
             "SELECT id, role, created_at FROM users WHERE id = ?",
@@ -115,7 +133,9 @@ pub async fn get_or_create_user(
         .await?
         .ok_or_else(|| CoreAccessError::UserPersistenceFailed(user_identifier.to_string()))?;
 
-    User::try_from(&row)
+    let user = User::try_from(&row)?;
+    info!("[core_access] Returning newly created user: {:?}", user);
+    Ok(user)
 }
 
 #[cfg(test)]

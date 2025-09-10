@@ -84,7 +84,10 @@ pub async fn gen_text_handler(
             .unwrap_or("anyrag")
             .to_string()
     });
-    info!("Received text generation request for db: '{}'", db_name);
+    info!(
+        "Received text generation request for db: '{}' from user_id: {}",
+        db_name, user.0.id
+    );
 
     let mut retrieved_context = String::new();
     let mut debug_context = json!({});
@@ -144,8 +147,8 @@ pub async fn gen_text_handler(
         };
 
         info!(
-            "Agent decided to use tool: '{}' with query: '{}'",
-            agent_decision.tool, agent_decision.query
+            "Agent decided to use tool: '{}' with query: '{}' for user_id: {}",
+            agent_decision.tool, agent_decision.query, user.0.id
         );
         debug_context["agent_decision"] = json!(agent_decision);
 

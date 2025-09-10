@@ -314,6 +314,13 @@ impl VectorSearch for SqliteProvider {
         document_ids: Option<&[String]>,
     ) -> Result<Vec<SearchResult>, SearchError> {
         info!("Executing SQLite vector search on documents.");
+
+        if let Some(ids) = document_ids {
+            if ids.is_empty() {
+                return Ok(Vec::new());
+            }
+        }
+
         let conn = self.db.connect()?;
 
         let vector_numbers_str = query_vector
@@ -336,49 +343,50 @@ impl VectorSearch for SqliteProvider {
         let mut conditions: Vec<String> = vec!["de.embedding IS NOT NULL".to_string()];
         let mut query_params: Vec<TursoValue> = Vec::new();
 
-        // This block needs the GUEST_USER_IDENTIFIER, so it's conditionally compiled.
-        #[cfg(feature = "core-access")]
-        {
-            let guest_user_id =
-                Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
+        // Only apply the owner_id filter if we are not already filtering by a specific set of document IDs.
+        // The document_ids are pre-filtered by owner in the metadata search step.
+        if document_ids.is_none() {
+            // This block needs the GUEST_USER_IDENTIFIER, so it's conditionally compiled.
+            #[cfg(feature = "core-access")]
+            {
+                let guest_user_id =
+                    Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes())
+                        .to_string();
 
-            if let Some(owner) = owner_id {
-                if owner == guest_user_id {
-                    // It's the guest user, they only see guest content.
+                if let Some(owner) = owner_id {
+                    if owner == guest_user_id {
+                        // It's the guest user, they only see guest content.
+                        conditions.push("d.owner_id = ?".to_string());
+                        query_params.push(guest_user_id.into());
+                    } else {
+                        // It's an authenticated user, they see their own content and guest content.
+                        conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
+                        query_params.push(owner.to_string().into());
+                        query_params.push(guest_user_id.into());
+                    }
+                } else {
+                    // No owner provided, default to only showing guest content.
                     conditions.push("d.owner_id = ?".to_string());
                     query_params.push(guest_user_id.into());
-                } else {
-                    // It's an authenticated user, they see their own content and guest content.
-                    conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
-                    query_params.push(owner.to_string().into());
-                    query_params.push(guest_user_id.into());
                 }
-            } else {
-                // No owner provided, default to only showing guest content.
-                conditions.push("d.owner_id = ?".to_string());
-                query_params.push(guest_user_id.into());
             }
-        }
-        #[cfg(not(feature = "core-access"))]
-        {
-            if let Some(owner) = owner_id {
-                conditions.push("d.owner_id = ?".to_string());
-                query_params.push(owner.to_string().into());
-            } else {
-                conditions.push("d.owner_id IS NULL".to_string());
+            #[cfg(not(feature = "core-access"))]
+            {
+                if let Some(owner) = owner_id {
+                    conditions.push("d.owner_id = ?".to_string());
+                    query_params.push(owner.to_string().into());
+                } else {
+                    conditions.push("d.owner_id IS NULL".to_string());
+                }
             }
         }
 
         if let Some(ids) = document_ids {
-            if !ids.is_empty() {
-                let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-                let condition = format!("de.document_id IN ({placeholders})");
-                conditions.push(condition);
-                for id in ids {
-                    query_params.push(id.clone().into());
-                }
-            } else {
-                return Ok(Vec::new());
+            let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            let condition = format!("de.document_id IN ({placeholders})");
+            conditions.push(condition);
+            for id in ids {
+                query_params.push(id.clone().into());
             }
         }
 
@@ -450,27 +458,28 @@ impl KeywordSearch for SqliteProvider {
             if let Some(owner) = owner_id {
                 if owner == guest_user_id {
                     // Guest user sees only guest content.
-                    conditions.push("owner_id = ?".to_string());
+                    conditions.push("documents.owner_id = ?".to_string());
                     params.push(TursoValue::Text(guest_user_id));
                 } else {
                     // Authenticated user sees their own and guest content.
-                    conditions.push("(owner_id = ? OR owner_id = ?)".to_string());
+                    conditions
+                        .push("(documents.owner_id = ? OR documents.owner_id = ?)".to_string());
                     params.push(TursoValue::Text(owner.to_string()));
                     params.push(TursoValue::Text(guest_user_id));
                 }
             } else {
                 // No owner means guest-only view.
-                conditions.push("owner_id = ?".to_string());
+                conditions.push("documents.owner_id = ?".to_string());
                 params.push(TursoValue::Text(guest_user_id));
             }
         }
         #[cfg(not(feature = "core-access"))]
         {
             if let Some(owner) = owner_id {
-                conditions.push("owner_id = ?".to_string());
+                conditions.push("documents.owner_id = ?".to_string());
                 params.push(TursoValue::Text(owner.to_string()));
             } else {
-                conditions.push("owner_id IS NULL".to_string());
+                conditions.push("documents.owner_id IS NULL".to_string());
             }
         }
 
@@ -530,25 +539,26 @@ impl MetadataSearch for SqliteProvider {
 
             if let Some(owner) = owner_id {
                 if owner == guest_user_id {
-                    conditions.push("owner_id = ?".to_string());
+                    // Guest user sees only guest content.
+                    conditions.push("d.owner_id = ?".to_string());
                     params.push(guest_user_id.into());
                 } else {
-                    conditions.push("(owner_id = ? OR owner_id = ?)".to_string());
+                    conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
                     params.push(owner.to_string().into());
                     params.push(guest_user_id.into());
                 }
             } else {
-                conditions.push("owner_id = ?".to_string());
+                conditions.push("d.owner_id = ?".to_string());
                 params.push(guest_user_id.into());
             }
         }
         #[cfg(not(feature = "core-access"))]
         {
             if let Some(owner) = owner_id {
-                conditions.push("owner_id = ?".to_string());
+                conditions.push("d.owner_id = ?".to_string());
                 params.push(owner.to_string().into());
             } else {
-                conditions.push("owner_id IS NULL".to_string());
+                conditions.push("d.owner_id IS NULL".to_string());
             }
         }
 
@@ -556,10 +566,10 @@ impl MetadataSearch for SqliteProvider {
         if !entities.is_empty() {
             let entity_likes: Vec<String> = entities
                 .iter()
-                .map(|_| "lower(metadata_value) LIKE ?".to_string())
+                .map(|_| "lower(cm.metadata_value) LIKE ?".to_string())
                 .collect();
             metadata_conditions.push(format!(
-                "(metadata_type = 'ENTITY' AND ({}))",
+                "(cm.metadata_type = 'ENTITY' AND ({}))",
                 entity_likes.join(" OR ")
             ));
             for entity in entities {
@@ -569,10 +579,10 @@ impl MetadataSearch for SqliteProvider {
         if !keyphrases.is_empty() {
             let keyphrase_likes: Vec<String> = keyphrases
                 .iter()
-                .map(|_| "lower(metadata_value) LIKE ?".to_string())
+                .map(|_| "lower(cm.metadata_value) LIKE ?".to_string())
                 .collect();
             metadata_conditions.push(format!(
-                "((metadata_type = 'KEYPHRASE' OR metadata_type = 'KEYPHRASES') AND ({}))",
+                "(cm.metadata_type = 'KEYPHRASE' AND ({}))",
                 keyphrase_likes.join(" OR ")
             ));
             for keyphrase in keyphrases {
@@ -593,10 +603,11 @@ impl MetadataSearch for SqliteProvider {
         };
 
         let sql = format!(
-            "SELECT document_id, COUNT(document_id) as relevance_score
-             FROM content_metadata
+            "SELECT cm.document_id, COUNT(cm.document_id) as relevance_score
+             FROM content_metadata cm
+             JOIN documents d on cm.document_id = d.id
              {where_clause}
-             GROUP BY document_id
+             GROUP BY cm.document_id
              ORDER BY relevance_score DESC
              LIMIT {limit}"
         );

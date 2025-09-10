@@ -7,29 +7,11 @@
 mod common;
 
 use anyhow::Result;
-use anyrag_server::{auth::middleware::Claims, types::ApiResponse};
-use common::TestApp;
+use anyrag_server::types::ApiResponse;
+use common::{generate_jwt, TestApp};
 use httpmock::Method;
-use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::{json, Value};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
-
-/// Generates a valid JWT for a given user identifier (subject).
-fn generate_jwt(sub: &str) -> Result<String> {
-    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600; // Expires in 1 hour
-    let claims = Claims {
-        sub: sub.to_string(),
-        exp: expiration as usize,
-    };
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_ref()),
-    )?;
-    Ok(token)
-}
 
 #[tokio::test]
 async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {

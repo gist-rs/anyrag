@@ -113,6 +113,19 @@ pub fn reciprocal_rank_fusion(
 ) -> Vec<SearchResult> {
     info!("Re-ranking using Reciprocal Rank Fusion.");
 
+    // Early return if one of the result sets is empty to avoid unnecessary work.
+    if vector_results.is_empty() && keyword_results.is_empty() {
+        return Vec::new();
+    }
+    if vector_results.is_empty() {
+        // No need to re-score, just return the keyword results.
+        return keyword_results;
+    }
+    if keyword_results.is_empty() {
+        // No need to re-score, just return the vector results.
+        return vector_results;
+    }
+
     let mut rrf_scores: HashMap<String, f64> = HashMap::new();
     let k = 60.0;
     let keyword_boost = 1.2;

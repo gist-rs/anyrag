@@ -11,25 +11,7 @@ use common::TestApp;
 use serde_json::json;
 use turso::Value as TursoValue;
 
-use anyrag_server::auth::middleware::Claims;
-use jsonwebtoken::{encode, EncodingKey, Header};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Generates a valid JWT for a given user identifier (subject).
-fn generate_jwt(sub: &str) -> Result<String> {
-    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
-    let claims = Claims {
-        sub: sub.to_string(),
-        exp: expiration as usize,
-    };
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_ref()),
-    )?;
-    Ok(token)
-}
+use crate::common::generate_jwt;
 
 #[tokio::test]
 async fn test_ingest_text_endpoint_success() -> Result<()> {

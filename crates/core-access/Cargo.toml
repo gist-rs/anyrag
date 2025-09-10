@@ -10,6 +10,7 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 turso = { workspace = true }
 uuid = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 anyrag = { path = "../lib" }

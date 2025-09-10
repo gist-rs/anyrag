@@ -14,6 +14,7 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
+use chrono::Utc;
 use core_access::{get_or_create_user, User, GUEST_USER_IDENTIFIER};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,9 @@ pub struct Claims {
     pub sub: String,
     /// The expiration timestamp.
     pub exp: usize,
+    /// The user's database ID (UUID). This is optional and mainly for testing.
+    #[serde(default)]
+    pub user_id: String,
 }
 
 /// An Axum extractor that provides the currently authenticated user.
@@ -120,8 +124,17 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
                 ));
             }
 
-            // Get or create a user in the database based on the token's subject claim.
-            get_or_create_user(&state.sqlite_provider.db, &token_data.claims.sub).await
+            // If user_id is provided in the claim, construct the user directly.
+            // This is primarily for testing scenarios to inject a specific user.
+            if !token_data.claims.user_id.is_empty() {
+                Ok(User {
+                    id: token_data.claims.user_id,
+                    role: "user".to_string(),
+                    created_at: Utc::now(),
+                })
+            } else {
+                get_or_create_user(&state.sqlite_provider.db, &token_data.claims.sub).await
+            }
         } else {
             // Case 2: No token is present. Use the guest user.
             info!("No Authorization header found, using guest user.");

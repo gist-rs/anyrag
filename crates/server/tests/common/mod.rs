@@ -38,6 +38,7 @@ use std::{
 };
 use tempfile::{tempdir, NamedTempFile, TempDir};
 use tokio::{net::TcpListener, task::JoinHandle};
+use uuid::Uuid;
 
 // --- Full Application Test Harness ---
 
@@ -214,11 +215,19 @@ pub fn get_mock_schema() -> Arc<TableSchema> {
 }
 
 /// Generates a valid JWT for a given user identifier (subject).
+/// Generates a valid JWT for a given user identifier (subject).
 pub fn generate_jwt(sub: &str) -> Result<String> {
-    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3600;
+    generate_jwt_with_expiry(sub, 3600)
+}
+
+/// Generates a valid JWT for a given user identifier (subject) with a custom expiration.
+pub fn generate_jwt_with_expiry(sub: &str, expires_in_secs: u64) -> Result<String> {
+    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + expires_in_secs;
+    let user_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, sub.as_bytes()).to_string();
     let claims = Claims {
         sub: sub.to_string(),
         exp: expiration as usize,
+        user_id,
     };
     let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
     let token = encode(

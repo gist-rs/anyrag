@@ -10,32 +10,14 @@
 mod common;
 
 use anyhow::Result;
-use anyrag_server::{auth::middleware::Claims, types::ApiResponse};
+use anyrag_server::types::ApiResponse;
 use axum::http::StatusCode;
-use common::TestApp;
+use common::{generate_jwt_with_expiry, TestApp};
 use core_access::{get_or_create_user, GUEST_USER_IDENTIFIER};
 use httpmock::Method;
-use jsonwebtoken::{encode, EncodingKey, Header};
 use serde_json::{json, Value};
-use std::time::{SystemTime, UNIX_EPOCH};
 use turso::{params, Builder};
 use uuid::Uuid;
-
-/// Generates a valid JWT for a given user identifier (subject).
-fn generate_jwt(sub: &str, expires_in_secs: u64) -> Result<String> {
-    let expiration = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + expires_in_secs;
-    let claims = Claims {
-        sub: sub.to_string(),
-        exp: expiration as usize,
-    };
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "a-secure-secret-key".to_string());
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_ref()),
-    )?;
-    Ok(token)
-}
 
 /// Seeds the database with documents owned by different users and the guest user.
 async fn seed_ownership_data(app: &TestApp) -> Result<()> {
@@ -98,8 +80,8 @@ async fn seed_ownership_data(app: &TestApp) -> Result<()> {
         ("doc_guest", guest_user_id),
     ] {
         conn.execute(
-            "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_value) VALUES (?, ?, ?, ?)",
-            params![doc_id, owner_id, "KEYPHRASE", common_keyphrase],
+            "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+            params![doc_id, owner_id, "KEYPHRASE", "CONCEPT", common_keyphrase],
         )
         .await?;
     }
@@ -146,9 +128,12 @@ async fn seed_ownership_data(app: &TestApp) -> Result<()> {
 async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    seed_ownership_data(&app).await?;
-
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
     let user_a_identifier = "user_a@example.com";
+    let _ = get_or_create_user(&db, user_a_identifier).await?;
+    seed_ownership_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     let final_rag_answer = "Found User A's private document and the public guest document.";
 
@@ -183,7 +168,7 @@ async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
     });
 
     // --- 3. Execute search with a valid JWT for User A ---
-    let token = generate_jwt(user_a_identifier, 3600)?;
+    let token = generate_jwt_with_expiry(user_a_identifier, 3600)?;
     let response = app
         .client
         .post(format!("{}/search/knowledge", app.address))
@@ -205,9 +190,12 @@ async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
 async fn test_user_b_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    seed_ownership_data(&app).await?;
-
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
     let _user_b_identifier = "user_b@example.com";
+    let _ = get_or_create_user(&db, _user_b_identifier).await?;
+    seed_ownership_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     // The final answer should ONLY be based on the guest document.
     let final_rag_answer = "Found the public guest document.";
@@ -286,7 +274,7 @@ async fn test_request_with_invalid_token_is_rejected() -> Result<()> {
 async fn test_request_with_expired_token_is_rejected() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
-    let expired_token = generate_jwt("any-user@example.com", 0)?; // Expires immediately
+    let expired_token = generate_jwt_with_expiry("any-user@example.com", 0)?; // Expires immediately
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; // Ensure it's expired
 
     // --- 2. Act ---
@@ -310,9 +298,12 @@ async fn test_request_with_expired_token_is_rejected() -> Result<()> {
 async fn test_authenticated_user_b_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    seed_ownership_data(&app).await?;
-
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
     let user_b_identifier = "user_b@example.com";
+    let _ = get_or_create_user(&db, user_b_identifier).await?;
+    seed_ownership_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     // The final answer should be based on User B's own content and the public/guest doc.
     let final_rag_answer = "Found User B's private document and the public guest document.";
@@ -348,7 +339,7 @@ async fn test_authenticated_user_b_sees_own_and_guest_content() -> Result<()> {
     });
 
     // --- 3. Execute search with a valid JWT for User B ---
-    let token = generate_jwt(user_b_identifier, 3600)?;
+    let token = generate_jwt_with_expiry(user_b_identifier, 3600)?;
     let response = app
         .client
         .post(format!("{}/search/knowledge", app.address))

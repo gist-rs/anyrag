@@ -19,7 +19,7 @@ use crate::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Defines the re-ranking strategy for hybrid search.
 #[derive(Default, Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -135,14 +135,20 @@ where
         )
         .await?;
 
+    info!(
+        "[hybrid_search] Metadata search returned {} candidate doc IDs: {:?}",
+        candidate_doc_ids.len(),
+        candidate_doc_ids
+    );
+
     let provider_kw = Arc::clone(&provider);
-    let query_text_kw = options.query_text.clone();
+    let keyword_query = analyzed_query.keyphrases.join(" ");
     let owner_id_kw = options.owner_id.clone();
     let limit_kw = options.limit;
     let keyword_handle = tokio::spawn(async move {
-        if options.use_keyword_search {
+        if options.use_keyword_search && !keyword_query.is_empty() {
             provider_kw
-                .keyword_search(&query_text_kw, limit_kw * 2, owner_id_kw.as_deref())
+                .keyword_search(&keyword_query, limit_kw * 2, owner_id_kw.as_deref())
                 .await
         } else {
             Ok(Vec::new())
@@ -189,6 +195,11 @@ where
         }
     };
 
+    info!(
+        "[hybrid_search] Keyword search returned {} candidates.",
+        keyword_candidates.len()
+    );
+
     let vector_candidates = match vector_results {
         Ok(Ok(res)) => res,
         Ok(Err(e)) => {
@@ -200,6 +211,11 @@ where
             Vec::new()
         }
     };
+
+    info!(
+        "[hybrid_search] Vector search returned {} candidates.",
+        vector_candidates.len()
+    );
 
     let mut final_results = reciprocal_rank_fusion(vector_candidates, keyword_candidates);
     final_results.truncate(options.limit as usize);
