@@ -12,7 +12,7 @@ use md5;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, info, warn};
-use turso::{params, Database};
+use turso::{params, Connection, Database};
 use uuid::Uuid;
 
 // --- Error Definitions ---
@@ -131,6 +131,8 @@ pub async fn run_ingestion_pipeline(
             Err(e) => return Err(e),
         };
 
+    let conn = db.connect()?;
+
     // Run FAQ generation and metadata extraction concurrently.
     let (faq_result, metadata_result) = tokio::join!(
         distill_and_augment(
@@ -141,7 +143,7 @@ pub async fn run_ingestion_pipeline(
             prompts.augmentation_system_prompt,
         ),
         extract_and_store_metadata(
-            db,
+            &conn,
             ai_provider,
             &document_id,
             owner_id,
@@ -450,7 +452,7 @@ pub async fn store_structured_knowledge(
 // --- Stage 2.5: Hybrid Metadata Extraction ---
 
 pub async fn extract_and_store_metadata(
-    db: &Database,
+    conn: &Connection,
     ai_provider: &dyn AiProvider,
     document_id: &str,
     owner_id: Option<&str>,
@@ -532,7 +534,6 @@ pub async fn extract_and_store_metadata(
         return Ok(());
     }
 
-    let conn = db.connect()?;
     info!(
         "Storing {} metadata items for document: {}",
         metadata_items.len(),
@@ -546,24 +547,25 @@ pub async fn extract_and_store_metadata(
     )
     .await?;
 
-    // Use a single bulk insert statement for efficiency and to avoid driver panics.
-    let values_placeholders: Vec<_> = metadata_items.iter().map(|_| "(?, ?, ?, ?, ?)").collect();
+    // Use a transaction with individual inserts for better stability.
+    conn.execute("BEGIN TRANSACTION", ()).await?;
+    let mut stmt = conn
+        .prepare(
+            "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+        )
+        .await?;
 
-    let mut query_params = Vec::with_capacity(metadata_items.len() * 5);
     for item in &metadata_items {
-        query_params.push(turso::Value::Text(document_id.to_string()));
-        query_params.push(owner_id.map(|s| s.to_string()).into());
-        query_params.push(turso::Value::Text(item.metadata_type.to_uppercase()));
-        query_params.push(turso::Value::Text(item.subtype.clone()));
-        query_params.push(turso::Value::Text(item.value.clone()));
+        stmt.execute(params![
+            document_id.to_string(),
+            owner_id.map(|s| s.to_string()),
+            item.metadata_type.to_uppercase(),
+            item.subtype.clone(),
+            item.value.clone(),
+        ])
+        .await?;
     }
-
-    let insert_sql = format!(
-        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES {}",
-        values_placeholders.join(", ")
-    );
-
-    conn.execute(&insert_sql, query_params).await?;
+    conn.execute("COMMIT", ()).await?;
     info!(
         "Successfully stored {} metadata items for document: {document_id}",
         metadata_items.len()

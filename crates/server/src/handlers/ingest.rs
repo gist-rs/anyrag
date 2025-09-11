@@ -640,7 +640,7 @@ pub async fn ingest_firebase_handler(
         .await?;
 
         if let Err(e) = extract_and_store_metadata(
-            &sqlite_provider.db,
+            &conn,
             meta_ai_provider.as_ref(),
             &document_id,
             owner_id.as_deref(),

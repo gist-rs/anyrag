@@ -115,11 +115,11 @@ async fn main() -> Result<()> {
         .map(|(doc_id, owner_id, content)| {
             let provider = ai_provider.clone();
             let prompt = system_prompt.clone();
-            let db = app_state.sqlite_provider.db.clone();
+            let conn = app_state.sqlite_provider.db.connect().unwrap();
             async move {
                 info!("Processing document ID: {}", doc_id);
                 let result = extract_and_store_metadata(
-                    &db,
+                    &conn,
                     provider.as_ref(),
                     &doc_id,
                     owner_id.as_deref(),

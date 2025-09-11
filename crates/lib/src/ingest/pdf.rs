@@ -131,7 +131,7 @@ pub async fn run_pdf_ingestion_pipeline(
             prompts.augmentation_system_prompt,
         ),
         extract_and_store_metadata(
-            db,
+            &conn,
             ai_provider,
             &document_id,
             owner_id,

@@ -93,7 +93,7 @@ You are strictly forbidden from extracting generic user identifiers. Any text ma
 1.  **Category**: Extract EXACTLY ONE high-level category (e.g., "Love Story", "Tech Tutorial").
 2.  **Keyphrases**: Extract the 5-10 MOST IMPORTANT thematic concepts (e.g., "unrequited love").
 3.  **Entities**: Extract the 5-10 MOST IMPORTANT proper nouns (e.g., people, products), excluding forbidden identifiers.
-4.  **Language**: All output MUST be in the same language as the original text.
+4.  **Crucial Language Rule**: You MUST generate all output in the SAME language as the original document. Do NOT translate. For example, if the document is in Thai, all extracted `value` fields in your JSON response MUST be in Thai.
 5.  **Format**: Respond with ONLY a single JSON array of objects.
 
 # JSON Object Schema
