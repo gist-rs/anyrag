@@ -311,6 +311,7 @@ pub async fn gen_text_handler(
         format!("# User's Goal\n{user_goal}\n\n# Inspirational Context\nDraw inspiration from the following JSON data of real online posts but do not copy directly.\n---\n{retrieved_context}")
     };
 
+    info!(system_prompt = %gen_task_config.system_prompt, user_prompt = %final_user_prompt, "--> Sending final prompt for generation");
     let raw_response = generation_provider
         .generate(&gen_task_config.system_prompt, &final_user_prompt)
         .await?;

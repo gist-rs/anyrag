@@ -9,28 +9,20 @@ pub const QUERY_GENERATION_SYSTEM_PROMPT: &str = r#"You are an intelligent data 
 - Otherwise, respond with a direct, helpful answer.
 Do not add explanations or apologies. Provide only the query or the answer."#;
 
-pub const QUERY_GENERATION_USER_PROMPT: &str = r#"Your task is to write a single, read-only {language} query based on the provided schema and question. Your primary objective is to select all columns needed to satisfy the # Primary Goal.
+pub const QUERY_GENERATION_USER_PROMPT: &str = r#"Your task is to write a single, read-only {language} query based on the provided schema and question.
 
 # Primary Goal
 {select_instruction}
 {alias_instruction}
 
-# User question
+# User Question
 {prompt}
 
 # Context
 {context}
 
-# Query Construction Rules
-1. For questions about "who", "what", or "list", use DISTINCT to avoid duplicate results.
-2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).
-3. For questions about "today", you MUST use one of the formats provided in the # TODAY context. Choose the format that matches the data in the relevant date column. If the column is TEXT, you may need to use string matching (e.g., `your_column LIKE 'YYYY-MM-DD%'`).
-4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).
-5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
-6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
-7. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
-8. **Compatibility Constraint**: You MUST NOT use subqueries (e.g., `SELECT ... FROM (SELECT ...)` or `WHERE col IN (SELECT ...)`). Use `JOIN`s or simplified `WHERE` clauses instead.
-9. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names."#;
+{query_construction_rules}
+"#;
 
 // --- Direct Generation ---
 pub const DIRECT_GENERATION_SYSTEM_PROMPT: &str = r#"You are a helpful AI assistant. Follow the user's instructions carefully and provide a direct, concise response."#;

@@ -22,7 +22,10 @@ pub use types::{
 };
 
 use crate::prompts::{
-    core::{get_alias_instruction, get_select_instruction, SQLITE_QUERY_USER_PROMPT},
+    core::{
+        get_alias_instruction, get_select_instruction, QUERY_CONSTRUCTION_RULES,
+        SQLITE_QUERY_USER_PROMPT,
+    },
     tasks::{
         QUERY_GENERATION_SYSTEM_PROMPT, QUERY_GENERATION_USER_PROMPT,
         RESPONSE_FORMATTING_SYSTEM_PROMPT, RESPONSE_FORMATTING_USER_PROMPT,
@@ -214,7 +217,8 @@ impl PromptClient {
                 .replace("{context}", &final_context)
                 .replace("{prompt}", &options.prompt)
                 .replace("{language}", language)
-                .replace("{alias_instruction}", &alias_instruction);
+                .replace("{alias_instruction}", &alias_instruction)
+                .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES);
 
             (system_prompt, user_prompt)
         } else if options.table_name.is_some() {
@@ -262,6 +266,7 @@ impl PromptClient {
                     .replace("{prompt}", &options.prompt)
                     .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
+                    .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES)
             } else if self.storage_provider.name() == "SQLite" {
                 // If the storage provider is SQLite, use the specialized user prompt.
                 SQLITE_QUERY_USER_PROMPT
@@ -270,6 +275,8 @@ impl PromptClient {
                     .replace("{prompt}", &options.prompt)
                     .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
+                    .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES)
+                    .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES)
             } else {
                 QUERY_GENERATION_USER_PROMPT
                     .replace("{language}", language)

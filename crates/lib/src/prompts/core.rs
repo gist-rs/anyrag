@@ -13,32 +13,40 @@
 /// Placeholders: `{language}`, `{db_name}`
 pub const DEFAULT_QUERY_SYSTEM_PROMPT: &str = "You are a {language} expert for {db_name}. Write a readonly {language} query that answers the user's question. Expected output is a single {language} query only.";
 
+/// A shared set of rules for query construction to be used by multiple prompts.
+pub const QUERY_CONSTRUCTION_RULES: &str = r#"# Query Construction Rules
+1.  **Top-N Requests**: For requests asking for "top N", "highest", "best", or "most popular" items, you MUST use an `ORDER BY` clause on the relevant metric (e.g., `rating`, `views`) in descending order (`DESC`) and a `LIMIT` clause to restrict the number of results.
+2.  **Column Specificity**: When the user's prompt specifies a column to filter on (e.g., "where the `topic_detail` contains..."), you MUST use that exact column in your `WHERE` clause. Do not substitute it with another column like `title`.
+3. For questions about "who", "what", or "list", use DISTINCT to avoid duplicate results.
+4. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).
+5. For questions about "today", you MUST use one of the formats provided in the # TODAY context. Choose the format that matches the data in the relevant date column. If the column is TEXT, you may need to use string matching (e.g., `your_column LIKE 'YYYY-MM-DD%'`).
+6. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).
+7. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
+8. For keyword searches (e.g., 'Rust') where no specific column is mentioned, it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
+9. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
+10. **Compatibility Constraint**: You MUST NOT use subqueries (e.g., `SELECT ... FROM (SELECT ...)` or `WHERE col IN (SELECT ...)`). Use `JOIN`s or simplified `WHERE` clauses instead.
+11. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names."#;
+
 /// The default user prompt for the query generation stage (for BigQuery).
 ///
 /// This template defines how the user's specific question and any table schema
 /// context are presented to the AI.
 ///
 /// Placeholders: `{language}`, `{context}`, `{prompt}`, `{alias_instruction}`
-pub const DEFAULT_QUERY_USER_PROMPT: &str = r#"Follow these rules to create production-grade {language}:
+pub const DEFAULT_QUERY_USER_PROMPT: &str = r#"Your task is to write a single, read-only {language} query based on the provided schema and question.
 
-1. For questions about "who", "what", or "list", use DISTINCT to avoid duplicate results.
-2. When filtering, always explicitly exclude NULL values (e.g., `your_column IS NOT NULL`).
-3. For questions about "today", you MUST use one of the formats provided in the # TODAY context. Choose the format that matches the data in the relevant date column. If the column is TEXT, you may need to use string matching (e.g., `your_column LIKE 'YYYY-MM-DD%'`).
-4. For searches involving a person's name, use a `LIKE` clause for partial matching (e.g., `name_column LIKE 'John%'`).
-5. If a Japanese name includes an honorific like "さん", remove the honorific before using the name in the query.
-6. For keyword searches (e.g., 'Rust'), it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
-7. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
-
+# Primary Goal
 {select_instruction}
 {alias_instruction}
 
-Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
+# User Question
+{prompt}
 
 # Context
 {context}
 
-# User question
-{prompt}"#;
+{query_construction_rules}
+"#;
 
 /// A SQLite-specific user prompt for query generation.
 ///
@@ -55,6 +63,8 @@ pub const SQLITE_QUERY_USER_PROMPT: &str = r#"Your task is to write a single, re
 
 # Context
 {context}
+
+{query_construction_rules}
 "#;
 
 /// Generates the instruction for aliasing a result column in a query.
