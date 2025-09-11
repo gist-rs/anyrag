@@ -55,7 +55,7 @@ async fn test_ingest_pdf_with_faq_true() -> Result<()> {
     let token = generate_jwt("pdf-faq-user@example.com")?;
     let pdf_data = generate_test_pdf("The magic word is AnyRAG.")?;
 
-    // Mock the full AI pipeline: refinement -> distillation
+    // Mock the full AI pipeline: refinement -> distillation -> metadata
     let refinement_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/chat/completions").body_contains("expert technical analyst");
         then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": "The magic word is AnyRAG."}}]}));
@@ -65,6 +65,16 @@ async fn test_ingest_pdf_with_faq_true() -> Result<()> {
         then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({
             "faqs": [{"question": "What is the magic word?", "answer": "AnyRAG", "is_explicit": false}], "content_chunks": []
         }).to_string()}}]}));
+    });
+    let metadata_extraction_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert document analyst");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!({
+            "metadata": [{"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "AnyRAG"}]
+        }).to_string()}}]}),
+        );
     });
     let augmentation_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/chat/completions").body_contains("expert content analyst");
@@ -91,6 +101,7 @@ async fn test_ingest_pdf_with_faq_true() -> Result<()> {
     assert_eq!(body.result["ingested_faqs"], 1);
     refinement_mock.assert();
     distillation_mock.assert();
+    metadata_extraction_mock.assert();
     augmentation_mock.assert_hits(0);
 
     // Assert Database State
@@ -138,7 +149,10 @@ async fn test_ingest_sheet_with_faq_true() -> Result<()> {
     // Assert API Response
     let body: ApiResponse<Value> = response.json().await?;
     assert_eq!(body.result["ingested_rows"], 1);
-    assert_eq!(body.result["message"], "Sheet FAQ ingestion successful");
+    assert!(body.result["message"]
+        .as_str()
+        .unwrap()
+        .contains("Sheet FAQ ingestion successful"));
     sheet_download_mock.assert();
 
     // Assert Database State
@@ -229,16 +243,11 @@ async fn test_ingest_pdf_with_faq_false() -> Result<()> {
     let token = generate_jwt("pdf-light-user@example.com")?;
     let pdf_data = generate_test_pdf("This is a light ingestion test.")?;
 
-    // For faq=false, only refinement should be called.
     let refinement_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/chat/completions").body_contains("expert technical analyst");
         then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": "This is a light ingestion test."}}]}));
     });
 
-    // NOTE: This test is written against the CURRENT implementation, where `faq=false` for PDFs
-    // still runs the full pipeline but is expected to produce no FAQs. When the light ingestion
-    // path is fully implemented, this test will fail, indicating it needs to be updated to
-    // assert that distillation and augmentation are NOT called.
     let distillation_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -246,6 +255,17 @@ async fn test_ingest_pdf_with_faq_false() -> Result<()> {
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
             "faqs": [], "content_chunks": []
+        }).to_string()}}]}),
+        );
+    });
+
+    let metadata_extraction_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert document analyst");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!({
+            "metadata": []
         }).to_string()}}]}),
         );
     });
@@ -280,7 +300,7 @@ async fn test_ingest_pdf_with_faq_false() -> Result<()> {
     // Assert Mocks
     refinement_mock.assert();
     distillation_mock.assert();
-    // Augmentation shouldn't be called if distillation finds no content chunks.
+    metadata_extraction_mock.assert();
     augmentation_mock.assert_hits(0);
 
     // Assert Database State
