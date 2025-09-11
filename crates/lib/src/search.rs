@@ -117,6 +117,7 @@ pub async fn hybrid_search<P>(
 where
     P: MetadataSearch + VectorSearch + KeywordSearch + Send + Sync + 'static,
 {
+    info!(query = %options.query_text, "Starting hybrid search");
     let analyzed_query = analyze_query(
         ai_provider.as_ref(),
         &options.query_text,
@@ -159,7 +160,7 @@ where
     let owner_id_vec = options.owner_id;
     let embedding_api_url = options.embedding_api_url.to_string();
     let embedding_model = options.embedding_model.to_string();
-    let query_text_vec = options.query_text;
+    let query_text_vec = options.query_text.clone();
     let limit_vec = options.limit;
     let vector_handle = tokio::spawn(async move {
         if options.use_vector_search {
@@ -229,5 +230,13 @@ where
 
     let mut final_results = reciprocal_rank_fusion(vector_candidates, keyword_candidates);
     final_results.truncate(options.limit as usize);
+
+    if final_results.is_empty() {
+        warn!(
+            query = %options.query_text,
+            "Hybrid search returned zero results from all sources."
+        );
+    }
+
     Ok(final_results)
 }

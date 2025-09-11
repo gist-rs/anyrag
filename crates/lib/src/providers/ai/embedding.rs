@@ -43,6 +43,7 @@ pub async fn generate_embedding(
     input: &str,
 ) -> Result<Vec<f32>, PromptError> {
     info!("Generating embedding using model '{model}' with API URL: {api_url}");
+    info!(text_to_embed = %input, "Sending text for embedding");
     let client = ReqwestClient::new();
     let request_body = EmbeddingRequest { model, input };
 

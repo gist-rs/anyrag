@@ -18,7 +18,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tracing::info;
+use tracing::{debug, info};
 
 // --- API Payloads for Generation Handlers ---
 
@@ -88,6 +88,7 @@ pub async fn gen_text_handler(
         "Received text generation request for db: '{}' from user_id: {}",
         db_name, user.0.id
     );
+    debug!(?payload, "Full generation request payload");
 
     let mut retrieved_context = String::new();
     let mut debug_context = json!({});
@@ -110,40 +111,84 @@ pub async fn gen_text_handler(
         } else {
             // --- Path 2: Implicit Agent-Based Routing ---
             info!("No explicit tool selected. Starting intelligent agent workflow.");
-            // --- LLM Call 1: Deconstruct the prompt ---
-            let deconstruct_task = app_state.tasks.get("query_deconstruction").unwrap();
-            let deconstruct_provider = app_state
-                .ai_providers
-                .get(&deconstruct_task.provider)
-                .unwrap();
-            let deconstruct_user_prompt = deconstruct_task
-                .user_prompt
-                .replace("{prompt}", context_prompt);
-            let deconstruct_response_raw = deconstruct_provider
-                .generate(&deconstruct_task.system_prompt, &deconstruct_user_prompt)
-                .await?;
-            let deconstructed: DeconstructedQuery =
-                serde_json::from_str(&deconstruct_response_raw)?;
-            debug_context["deconstructed_query"] = json!(deconstructed);
+            // Attempt the two-step agentic process. If any step fails (e.g., due to a
+            // non-JSON response from the LLM), this entire block will return an Err.
+            let agent_result: Result<(DeconstructedQuery, AgentDecision), AppError> = async {
+                // --- LLM Call 1: Deconstruct the prompt ---
+                let deconstruct_task = app_state.tasks.get("query_deconstruction").unwrap();
+                let deconstruct_provider = app_state
+                    .ai_providers
+                    .get(&deconstruct_task.provider)
+                    .unwrap();
+                let deconstruct_user_prompt = deconstruct_task
+                    .user_prompt
+                    .replace("{prompt}", context_prompt);
+                debug!(system_prompt = %deconstruct_task.system_prompt, user_prompt = %deconstruct_user_prompt, "Sending prompt for deconstruction");
+                let deconstruct_response_raw = deconstruct_provider
+                    .generate(&deconstruct_task.system_prompt, &deconstruct_user_prompt)
+                    .await?;
 
-            generative_intent = deconstructed.generative_intent;
-            if generative_intent.is_empty() {
-                generative_intent = context_prompt.clone();
+                let cleaned_deconstruct = deconstruct_response_raw
+                    .trim()
+                    .strip_prefix("```json")
+                    .unwrap_or(&deconstruct_response_raw)
+                    .strip_suffix("```")
+                    .unwrap_or(&deconstruct_response_raw)
+                    .trim();
+
+                let deconstructed: DeconstructedQuery = serde_json::from_str(cleaned_deconstruct)?;
+
+                // --- LLM Call 2: Select the tool for the search query ---
+                let agent_task_config = app_state.tasks.get("context_agent").unwrap();
+                let agent_provider = app_state
+                    .ai_providers
+                    .get(&agent_task_config.provider)
+                    .unwrap();
+                let agent_user_prompt = agent_task_config
+                    .user_prompt
+                    .replace("{prompt}", &deconstructed.search_query);
+                debug!(system_prompt = %agent_task_config.system_prompt, user_prompt = %agent_user_prompt, "Sending prompt for agent tool selection");
+                let agent_response_raw = agent_provider
+                    .generate(&agent_task_config.system_prompt, &agent_user_prompt)
+                    .await?;
+
+                let cleaned_agent = agent_response_raw
+                    .trim()
+                    .strip_prefix("```json")
+                    .unwrap_or(&agent_response_raw)
+                    .strip_suffix("```")
+                    .unwrap_or(&agent_response_raw)
+                    .trim();
+
+                let decision: AgentDecision = serde_json::from_str(cleaned_agent)?;
+                Ok((deconstructed, decision))
             }
+            .await;
 
-            // --- LLM Call 2: Select the tool for the search query ---
-            let agent_task_config = app_state.tasks.get("context_agent").unwrap();
-            let agent_provider = app_state
-                .ai_providers
-                .get(&agent_task_config.provider)
-                .unwrap();
-            let agent_user_prompt = agent_task_config
-                .user_prompt
-                .replace("{prompt}", &deconstructed.search_query);
-            let agent_response_raw = agent_provider
-                .generate(&agent_task_config.system_prompt, &agent_user_prompt)
-                .await?;
-            serde_json::from_str(&agent_response_raw)?
+            // Handle the result of the agentic workflow.
+            match agent_result {
+                Ok((deconstructed, decision)) => {
+                    // Success: Use the agent's decision and store the deconstructed query for debugging.
+                    debug_context["deconstructed_query"] = json!(deconstructed);
+                    generative_intent = deconstructed.generative_intent;
+                    if generative_intent.is_empty() {
+                        generative_intent = context_prompt.clone();
+                    }
+                    decision
+                }
+                Err(e) => {
+                    // Fallback: If the agent failed, default to text_to_sql with the original prompt.
+                    info!(
+                        "Agent workflow failed with error: {:?}. Falling back to text_to_sql.",
+                        e
+                    );
+                    debug_context["agent_fallback_reason"] = json!(format!("{:?}", e));
+                    AgentDecision {
+                        tool: "text_to_sql".to_string(),
+                        query: context_prompt.clone(),
+                    }
+                }
+            }
         };
 
         info!(
@@ -220,8 +265,21 @@ pub async fn gen_text_handler(
     }
 
     if retrieved_context.trim() == "[]" || retrieved_context.trim().is_empty() {
-        info!("Context retrieval query returned no data. Proceeding to generation without it.");
-        retrieved_context.clear();
+        info!("Context retrieval query returned no data. Aborting generation.");
+        let response = PromptResponse {
+            text: Value::String(
+                "Failed to generate content: No relevant context was found for your request."
+                    .to_string(),
+            ),
+        };
+        let debug_info = json!({
+            "status": "Aborted due to no context",
+            "db": db_name,
+            "generation_prompt": payload.generation_prompt,
+            "context_prompt": payload.context_prompt,
+            "context_retrieval_details": debug_context,
+        });
+        return Ok(wrap_response(response, debug_params, Some(debug_info)));
     } else if let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(&retrieved_context) {
         info!("Context retrieval returned {} items.", arr.len());
     }

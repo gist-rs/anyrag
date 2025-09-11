@@ -443,11 +443,12 @@ impl KeywordSearch for SqliteProvider {
         limit: u32,
         owner_id: Option<&str>,
     ) -> Result<Vec<SearchResult>, SearchError> {
-        info!("Executing unified keyword search for: '{query}' for owner: {owner_id:?}");
+        info!("Executing keyword search for: '{query}' for owner: {owner_id:?}");
         let conn = self.db.connect()?;
         let pattern = format!("%{}%", query.to_lowercase());
+        let mut search_results = Vec::new();
 
-        // --- Build conditions and params for both parts of the UNION ---
+        // --- Part 1: Search Documents ---
         let mut doc_conditions =
             vec!["(lower(d.content) LIKE ? OR lower(d.title) LIKE ?)".to_string()];
         let mut doc_params = vec![
@@ -455,37 +456,22 @@ impl KeywordSearch for SqliteProvider {
             TursoValue::Text(pattern.clone()),
         ];
 
-        let mut faq_conditions =
-            vec!["(lower(fi.question) LIKE ? OR lower(fi.answer) LIKE ?)".to_string()];
-        let mut faq_params = vec![TursoValue::Text(pattern.clone()), TursoValue::Text(pattern)];
-
-        // Common ownership logic, applied to both queries
         #[cfg(feature = "core-access")]
         {
             let guest_user_id =
                 Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
             if let Some(owner) = owner_id {
                 if owner == guest_user_id {
-                    // Guest user sees only guest content.
                     doc_conditions.push("d.owner_id = ?".to_string());
                     doc_params.push(TursoValue::Text(guest_user_id.clone()));
-                    faq_conditions.push("fi.owner_id = ?".to_string());
-                    faq_params.push(TursoValue::Text(guest_user_id));
                 } else {
-                    // Authenticated user sees their own and guest content.
                     doc_conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
                     doc_params.push(TursoValue::Text(owner.to_string()));
                     doc_params.push(TursoValue::Text(guest_user_id.clone()));
-                    faq_conditions.push("(fi.owner_id = ? OR fi.owner_id = ?)".to_string());
-                    faq_params.push(TursoValue::Text(owner.to_string()));
-                    faq_params.push(TursoValue::Text(guest_user_id));
                 }
             } else {
-                // No owner means guest-only view.
                 doc_conditions.push("d.owner_id = ?".to_string());
                 doc_params.push(TursoValue::Text(guest_user_id.clone()));
-                faq_conditions.push("fi.owner_id = ?".to_string());
-                faq_params.push(TursoValue::Text(guest_user_id));
             }
         }
         #[cfg(not(feature = "core-access"))]
@@ -493,59 +479,87 @@ impl KeywordSearch for SqliteProvider {
             if let Some(owner) = owner_id {
                 doc_conditions.push("d.owner_id = ?".to_string());
                 doc_params.push(TursoValue::Text(owner.to_string()));
-                faq_conditions.push("fi.owner_id = ?".to_string());
-                faq_params.push(TursoValue::Text(owner.to_string()));
             } else {
                 doc_conditions.push("d.owner_id IS NULL".to_string());
-                faq_conditions.push("fi.owner_id IS NULL".to_string());
             }
         }
 
         let doc_where = doc_conditions.join(" AND ");
-        let faq_where = faq_conditions.join(" AND ");
-
-        // Combine params for the final query
-        let mut all_params = doc_params;
-        all_params.extend(faq_params);
-
-        let sql = format!(
-            "
-            SELECT title, source_url, content FROM (
-                SELECT d.title, d.source_url, d.content FROM documents d WHERE {doc_where}
-                UNION ALL
-                SELECT fi.question as title, d.source_url, fi.answer as content
-                FROM faq_items fi JOIN documents d ON fi.document_id = d.id
-                WHERE {faq_where}
-            )
-            LIMIT {limit}
-            "
+        let doc_sql = format!(
+            "SELECT d.title, d.source_url, d.content FROM documents d WHERE {doc_where} LIMIT {limit}"
         );
 
-        let mut results = conn.query(&sql, all_params).await?;
-        let mut search_results = Vec::new();
-
-        while let Some(row) = results.next().await? {
-            let title = match row.get_value(0)? {
-                TursoValue::Text(s) => s,
-                _ => String::new(),
-            };
-            let link = match row.get_value(1)? {
-                TursoValue::Text(s) => s,
-                _ => String::new(),
-            };
-            let content = match row.get_value(2)? {
-                TursoValue::Text(s) => s,
-                _ => String::new(),
-            };
+        let mut doc_rows = conn.query(&doc_sql, doc_params).await?;
+        while let Some(row) = doc_rows.next().await? {
             search_results.push(SearchResult {
-                title,
-                link,
-                description: content,
-                score: 0.5, // Using a default score for keyword matches
+                title: row.get::<String>(0)?,
+                link: row.get::<String>(1)?,
+                description: row.get::<String>(2)?,
+                score: 0.5,
             });
         }
 
-        Ok(search_results)
+        // --- Part 2: Search FAQs ---
+        let mut faq_conditions =
+            vec!["(lower(fi.question) LIKE ? OR lower(fi.answer) LIKE ?)".to_string()];
+        let mut faq_params = vec![TursoValue::Text(pattern.clone()), TursoValue::Text(pattern)];
+
+        #[cfg(feature = "core-access")]
+        {
+            let guest_user_id =
+                Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
+            if let Some(owner) = owner_id {
+                if owner == guest_user_id {
+                    faq_conditions.push("fi.owner_id = ?".to_string());
+                    faq_params.push(TursoValue::Text(guest_user_id));
+                } else {
+                    faq_conditions.push("(fi.owner_id = ? OR fi.owner_id = ?)".to_string());
+                    faq_params.push(TursoValue::Text(owner.to_string()));
+                    faq_params.push(TursoValue::Text(guest_user_id));
+                }
+            } else {
+                faq_conditions.push("fi.owner_id = ?".to_string());
+                faq_params.push(TursoValue::Text(guest_user_id));
+            }
+        }
+        #[cfg(not(feature = "core-access"))]
+        {
+            if let Some(owner) = owner_id {
+                faq_conditions.push("fi.owner_id = ?".to_string());
+                faq_params.push(TursoValue::Text(owner.to_string()));
+            } else {
+                faq_conditions.push("fi.owner_id IS NULL".to_string());
+            }
+        }
+
+        let faq_where = faq_conditions.join(" AND ");
+        let faq_sql = format!(
+            "SELECT fi.question as title, d.source_url, fi.answer as content \
+             FROM faq_items fi JOIN documents d ON fi.document_id = d.id \
+             WHERE {faq_where} LIMIT {limit}"
+        );
+
+        let mut faq_rows = conn.query(&faq_sql, faq_params).await?;
+        while let Some(row) = faq_rows.next().await? {
+            search_results.push(SearchResult {
+                title: row.get::<String>(0)?,
+                link: row.get::<String>(1)?,
+                description: row.get::<String>(2)?,
+                score: 0.5,
+            });
+        }
+
+        // --- Part 3: Combine, Deduplicate, and Limit ---
+        let mut final_results_map = std::collections::HashMap::new();
+        for result in search_results {
+            final_results_map
+                .entry(result.link.clone())
+                .or_insert(result);
+        }
+        let mut final_results: Vec<SearchResult> = final_results_map.into_values().collect();
+        final_results.truncate(limit as usize);
+
+        Ok(final_results)
     }
 }
 

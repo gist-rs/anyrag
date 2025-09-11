@@ -41,6 +41,7 @@ regex = { workspace = true }
 # Config
 config = { version = "0.15.15", features = ["yaml"] }
 uuid = { workspace = true }
+futures = "0.3.30"
 
 [features]
 default = ["bigquery", "graph_db", "rss", "firebase"]
@@ -125,3 +126,7 @@ harness = true
 name = "generation_agent_test"
 path = "tests/generation_agent_test.rs"
 harness = true
+
+[[example]]
+name = "backfill_metadata"
+path = "examples/backfill_metadata.rs"

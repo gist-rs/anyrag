@@ -87,10 +87,10 @@ pub const KNOWLEDGE_AUGMENTATION_USER_PROMPT: &str = r#"# Content Chunks to Anal
 pub const KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an expert document analyst. Your task is to analyze the following text and extract three types of metadata: **Category**, **Keyphrases**, and **Entities**.
 
 # Instructions:
-1.  **Category**: Determine the single, high-level category of the content. This should be a broad classification like "Love Story", "Tech Tutorial", "Product Review", or "Travel Guide".
-2.  **Keyphrases**: Identify the 5-10 most important thematic concepts or topics in the text. These should capture the main ideas and themes, such as "unrequited love", "financial problems", or "betrayal".
-3.  **Entities**: Identify specific, proper nouns. These are unique, identifiable items like people, products, or organizations.
-4.  **Crucial Rule**: **DO NOT** extract generic identifiers like "สมาชิกหมายเลข" followed by numbers. These are not useful entities.
+1.  **Crucial Filtering Rule**: You **MUST NOT** extract generic user identifiers as entities. Specifically, any text matching the pattern "สมาชิกหมายเลข" followed by numbers is considered a generic identifier and must be ignored. These are not useful entities.
+2.  **Category**: Determine the single, high-level category of the content. This should be a broad classification like "Love Story", "Tech Tutorial", "Product Review", or "Travel Guide".
+3.  **Keyphrases**: Identify the 5-10 most important thematic concepts or topics in the text. These should capture the main ideas and themes, such as "unrequited love", "financial problems", or "betrayal".
+4.  **Entities**: Identify specific, proper nouns, but **exclude** the generic identifiers mentioned in rule #1.
 5.  **Language Rule**: You **MUST** generate all metadata in the same language as the original text. For example, if the content is in Thai, all metadata must be in Thai.
 6.  Return a single JSON array of objects. Do not include any other text or explanations.
 
@@ -127,7 +127,14 @@ pub const CONTEXT_AGENT_USER_PROMPT: &str = r#"# User's Context Request
 "#;
 
 // --- Query Deconstruction ---
-pub const QUERY_DECONSTRUCTION_SYSTEM_PROMPT: &str = r#"You are a query analyst. Your task is to deconstruct the user's request into two parts: a concise `search_query` for finding relevant data, and the full `generative_intent` which is the user's original, complete goal. The `search_query` should be a comma-separated list of keywords and concepts. The `generative_intent` must be the original, unmodified user request. Respond with ONLY a valid JSON object with the keys "search_query" and "generative_intent"."#;
+pub const QUERY_DECONSTRUCTION_SYSTEM_PROMPT: &str = r#"You are a query analyst. Your task is to deconstruct the user's request into two parts: a concise `search_query` for finding relevant data, and the full `generative_intent` which is the user's original, complete goal.
+
+# Rules
+1. The `search_query` should be a comma-separated list of keywords and concepts.
+2. The `generative_intent` must be the original, unmodified user request.
+3. **CRUCIAL**: You MUST preserve the original language. If the user's request is in Thai, the `search_query` MUST be in Thai. Do NOT translate.
+
+Respond with ONLY a valid JSON object with the keys "search_query" and "generative_intent"."#;
 pub const QUERY_DECONSTRUCTION_USER_PROMPT: &str = r#"# User's Request
 {prompt}"#;
 

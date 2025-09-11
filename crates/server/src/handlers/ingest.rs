@@ -115,6 +115,8 @@ pub struct IngestFirebaseRequest {
     pub fields: Option<Vec<String>>,
     #[serde(default)]
     pub use_graph: bool,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -555,10 +557,23 @@ pub async fn ingest_firebase_handler(
         .tasks
         .get("knowledge_metadata_extraction")
         .unwrap();
-    let meta_ai_provider = app_state
-        .ai_providers
-        .get(&meta_task_config.provider)
-        .unwrap();
+    let (meta_ai_provider, _) = if let Some(model_name) = &payload.model {
+        crate::providers::create_dynamic_provider(&app_state, model_name).await?
+    } else {
+        let provider_name = &meta_task_config.provider;
+        let provider = app_state
+            .ai_providers
+            .get(provider_name)
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Provider '{}' for task 'knowledge_metadata_extraction' not found in providers map.",
+                    provider_name
+                ))
+            })?
+            .clone();
+        let provider_config = app_state.config.providers.get(provider_name).unwrap();
+        (provider, provider_config.model_name.clone())
+    };
 
     let all_data_sql = format!("SELECT * FROM {table_name}");
     let mut stmt = conn.prepare(&all_data_sql).await?;
