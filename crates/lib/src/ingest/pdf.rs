@@ -90,6 +90,16 @@ pub async fn run_pdf_ingestion_pipeline(
         }
     };
 
+    if refined_markdown.trim().is_empty() {
+        warn!(
+            "PDF extraction for '{}' resulted in empty content. Aborting pipeline.",
+            source_identifier
+        );
+        return Err(KnowledgeError::Parse(serde_json::Error::custom(
+            "Extracted PDF content was empty.",
+        )));
+    }
+
     // --- Stage 3: Store Refined Content as a Document ---
     let conn = db.connect()?;
     let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, source_identifier.as_bytes()).to_string();
