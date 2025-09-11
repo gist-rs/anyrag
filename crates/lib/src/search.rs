@@ -167,12 +167,20 @@ where
                 generate_embedding(&embedding_api_url, &embedding_model, &query_text_vec)
                     .await
                     .map_err(SearchError::Embedding)?;
+            // If metadata search returned no candidates, search all documents.
+            // Otherwise, search only within the filtered candidate set.
+            let doc_ids_filter = if candidate_doc_ids.is_empty() {
+                None
+            } else {
+                Some(candidate_doc_ids.as_slice())
+            };
+
             provider_vec
                 .vector_search(
                     query_vector,
                     limit_vec * 2,
                     owner_id_vec.as_deref(),
-                    Some(&candidate_doc_ids),
+                    doc_ids_filter,
                 )
                 .await
         } else {
