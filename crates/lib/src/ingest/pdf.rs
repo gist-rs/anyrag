@@ -9,7 +9,9 @@
 
 #[cfg(feature = "pdf")]
 use crate::{
-    ingest::knowledge::{distill_and_augment, store_structured_knowledge, KnowledgeError},
+    ingest::knowledge::{
+        distill_and_augment, extract_and_store_metadata, store_structured_knowledge, KnowledgeError,
+    },
     prompts::pdf::PDF_REFINEMENT_SYSTEM_PROMPT,
     providers::ai::AiProvider,
 };
@@ -37,6 +39,7 @@ pub struct PdfIngestionPrompts<'a> {
     pub distillation_system_prompt: &'a str,
     pub distillation_user_prompt_template: &'a str,
     pub augmentation_system_prompt: &'a str,
+    pub metadata_extraction_system_prompt: &'a str,
 }
 
 // --- Pipeline Orchestration ---
@@ -111,21 +114,34 @@ pub async fn run_pdf_ingestion_pipeline(
         source_identifier
     );
 
-    // --- Stage 4: Distill & Augment ---
+    // --- Stage 4: Distill, Augment, and Extract Metadata (Concurrently) ---
     let ingested_document = crate::ingest::knowledge::IngestedDocument {
         id: document_id.clone(),
         source_url: source_identifier.to_string(),
         content: refined_markdown,
         content_hash,
     };
-    let faq_items = distill_and_augment(
-        ai_provider,
-        &ingested_document,
-        prompts.distillation_system_prompt,
-        prompts.distillation_user_prompt_template,
-        prompts.augmentation_system_prompt,
-    )
-    .await?;
+
+    let (faq_result, metadata_result) = tokio::join!(
+        distill_and_augment(
+            ai_provider,
+            &ingested_document,
+            prompts.distillation_system_prompt,
+            prompts.distillation_user_prompt_template,
+            prompts.augmentation_system_prompt,
+        ),
+        extract_and_store_metadata(
+            db,
+            ai_provider,
+            &document_id,
+            owner_id,
+            &ingested_document.content,
+            prompts.metadata_extraction_system_prompt,
+        )
+    );
+
+    let faq_items = faq_result?;
+    metadata_result?; // Propagate metadata errors
 
     // --- Stage 5: Store Structured Knowledge (Q&A) ---
     store_structured_knowledge(db, &document_id, owner_id, faq_items).await

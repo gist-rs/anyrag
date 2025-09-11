@@ -167,3 +167,38 @@ This endpoint will be simplified and returned to its single, core responsibility
 *   **Clear Separation of Concerns**: Ingestion and metadata generation are handled by ingestion endpoints. Graph building is handled by the graph endpoint. This is a cleaner, more maintainable design.
 *   **Unified Ingestion Flow**: Users have a single, powerful command (`/ingest/firebase`) to make their structured data fully integrated and searchable across the entire application.
 *   **Improved Testability**: Each component has a clearly defined job, making them easier to test in isolation.
+
+## 7. Phase 3: Agent Tool Expansion and Autonomous Operation
+
+### 7.1. Objective
+
+To evolve the agent from a simple tool selector into a more autonomous system capable of answering a wider range of questions and performing multi-step tasks by expanding its set of available tools.
+
+### 7.2. New Agent Tools
+
+The agent's system prompt will be updated to include new tools that broaden its capabilities beyond database lookups.
+
+*   **Tool 3: `web_search`**
+    *   **Description for AI:** "Use this tool for questions about recent events, general knowledge, or topics not covered in the local knowledge base. Best for queries that require up-to-date, real-world information."
+    *   **Action:** Triggers a call to an external web search API (e.g., Jina Search) to retrieve snippets of relevant information.
+
+*   **Tool 4: `file_system_read`**
+    *   **Description for AI:** "Use this tool to read the content of a local file when the user provides a specific, relative file path in their prompt."
+    *   **Action:** Reads a file from a sandboxed, pre-approved directory within the project and returns its content as context.
+
+### 7.3. Chained Tool Use (Autonomous Operation)
+
+The agent's core logic will be enhanced to support multi-step reasoning. Instead of selecting a single tool and finishing, the agent will be able to chain tool calls together.
+
+*   **Prompt Engineering**: The agent's main system prompt will be updated to encourage multi-step thinking. It will be instructed to formulate a plan, execute a tool, observe the result, and decide on the next step until the user's final goal is achieved.
+*   **Example Flow**: A user prompt like "Search the web for the latest Rust release notes and summarize the key features mentioned in `docs/CHANGELOG.md`" would trigger the following chain:
+    1.  **Agent Plan**: (1) Use `web_search` to find the latest Rust release info. (2) Use `file_system_read` to get the content of `docs/CHANGELOG.md`. (3) Synthesize the final summary.
+    2.  **Tool Call 1**: `web_search(query="latest Rust release notes")`
+    3.  **Tool Call 2**: `file_system_read(path="docs/CHANGELOG.md")`
+    4.  **Final Generation**: The agent combines the results from both tools to generate the final, comprehensive answer.
+
+### 7.4. Benefits of this Approach
+
+*   **Wider Range of Capabilities**: The agent can now answer questions about current events and read local project files.
+*   **Complex Problem Solving**: Enables the agent to tackle multi-step tasks that require gathering information from multiple sources.
+*   **Increased Autonomy**: Reduces the need for the user to manually break down a complex request into smaller, manageable prompts.

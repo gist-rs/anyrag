@@ -180,11 +180,17 @@ where
         }
     });
 
-    let (keyword_results, vector_results) = tokio::join!(keyword_handle, vector_handle);
+    let (keyword_results, vector_results) = (keyword_handle.await, vector_handle.await);
 
     // Soft-fail: If a task panics or returns an error, log it and proceed with an empty result set.
     let keyword_candidates = match keyword_results {
-        Ok(Ok(res)) => res,
+        Ok(Ok(res)) => {
+            info!(
+                "[hybrid_search] Keyword search returned {} candidates.",
+                res.len()
+            );
+            res
+        }
         Ok(Err(e)) => {
             warn!("Keyword search task failed: {}", e);
             Vec::new()
@@ -195,13 +201,14 @@ where
         }
     };
 
-    info!(
-        "[hybrid_search] Keyword search returned {} candidates.",
-        keyword_candidates.len()
-    );
-
     let vector_candidates = match vector_results {
-        Ok(Ok(res)) => res,
+        Ok(Ok(res)) => {
+            info!(
+                "[hybrid_search] Vector search returned {} candidates.",
+                res.len()
+            );
+            res
+        }
         Ok(Err(e)) => {
             warn!("Vector search task failed: {}", e);
             Vec::new()
@@ -211,11 +218,6 @@ where
             Vec::new()
         }
     };
-
-    info!(
-        "[hybrid_search] Vector search returned {} candidates.",
-        vector_candidates.len()
-    );
 
     let mut final_results = reciprocal_rank_fusion(vector_candidates, keyword_candidates);
     final_results.truncate(options.limit as usize);

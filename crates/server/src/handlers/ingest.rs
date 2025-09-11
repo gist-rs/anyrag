@@ -374,6 +374,14 @@ pub async fn ingest_pdf_handler(
                     "Task 'knowledge_augmentation' not found in config"
                 ))
             })?;
+    let metadata_task_config = app_state
+        .tasks
+        .get("knowledge_metadata_extraction")
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Task 'knowledge_metadata_extraction' not found in config"
+            ))
+        })?;
 
     let extractor_strategy = match extractor_choice {
         ExtractorChoice::Local => PdfSyncExtractor::Local,
@@ -384,6 +392,7 @@ pub async fn ingest_pdf_handler(
         distillation_system_prompt: &task_config.system_prompt,
         distillation_user_prompt_template: &task_config.user_prompt,
         augmentation_system_prompt: &augmentation_task_config.system_prompt,
+        metadata_extraction_system_prompt: &metadata_task_config.system_prompt,
     };
 
     let ingested_count = run_pdf_ingestion_pipeline(
