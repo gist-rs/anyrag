@@ -474,7 +474,7 @@ pub async fn extract_and_store_metadata(
         .unwrap_or(&llm_response)
         .trim();
 
-    let metadata_items: Vec<ContentMetadata> =
+    let parsed_metadata: Vec<ContentMetadata> =
         // First, try to parse the response as a direct array of metadata items.
         match serde_json::from_str(cleaned_response) {
             Ok(items) => items,
@@ -491,6 +491,37 @@ pub async fn extract_and_store_metadata(
                 }
             },
         };
+
+    // --- Programmatic Filtering and Limiting (Safety Net) ---
+    let mut categories = Vec::new();
+    let mut keyphrases = Vec::new();
+    let mut entities = Vec::new();
+
+    for item in parsed_metadata {
+        // Rule 1: Filter out forbidden generic user identifiers.
+        if item.value.starts_with("สมาชิกหมายเลข") {
+            continue;
+        }
+
+        // Rule 2: Group by type.
+        match item.metadata_type.to_uppercase().as_str() {
+            "CATEGORY" => categories.push(item),
+            "KEYPHRASE" => keyphrases.push(item),
+            "ENTITY" => entities.push(item),
+            _ => (), // Ignore unknown types
+        }
+    }
+
+    // Rule 3: Truncate each list to the desired limit.
+    categories.truncate(1);
+    keyphrases.truncate(10);
+    entities.truncate(10);
+
+    // Combine the capped lists back into one.
+    let mut metadata_items = Vec::new();
+    metadata_items.append(&mut categories);
+    metadata_items.append(&mut keyphrases);
+    metadata_items.append(&mut entities);
 
     let metadata_json = serde_json::to_string_pretty(&metadata_items)
         .unwrap_or_else(|_| "Failed to serialize metadata".to_string());

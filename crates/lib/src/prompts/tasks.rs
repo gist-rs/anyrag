@@ -84,21 +84,22 @@ pub const KNOWLEDGE_AUGMENTATION_USER_PROMPT: &str = r#"# Content Chunks to Anal
 {batched_content}"#;
 
 // --- Knowledge Metadata Extraction ---
-pub const KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an expert document analyst. Your task is to analyze the following text and extract three types of metadata: **Category**, **Keyphrases**, and **Entities**.
+pub const KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT: &str = r#"You are a document analyst. Your task is to extract Category, Keyphrases, and Entities.
 
-# Instructions:
-1.  **Crucial Filtering Rule**: You **MUST NOT** extract generic user identifiers as entities. Specifically, any text matching the pattern "สมาชิกหมายเลข" followed by numbers is considered a generic identifier and must be ignored. These are not useful entities.
-2.  **Category**: Determine the single, high-level category of the content. This should be a broad classification like "Love Story", "Tech Tutorial", "Product Review", or "Travel Guide".
-3.  **Keyphrases**: Identify the 5-10 most important thematic concepts or topics in the text. These should capture the main ideas and themes, such as "unrequited love", "financial problems", or "betrayal".
-4.  **Entities**: Identify specific, proper nouns, but **exclude** the generic identifiers mentioned in rule #1.
-5.  **Language Rule**: You **MUST** generate all metadata in the same language as the original text. For example, if the content is in Thai, all metadata must be in Thai.
-6.  Return a single JSON array of objects. Do not include any other text or explanations.
+# Primary Rule: FORBIDDEN CONTENT
+You are strictly forbidden from extracting generic user identifiers. Any text matching "สมาชิกหมายเลข" followed by numbers MUST BE IGNORED. Do not include it.
 
-# JSON Object Schema:
-Each object in the array must have the following keys:
-- `type`: Must be one of 'CATEGORY', 'KEYPHRASE', or 'ENTITY'.
-- `subtype`: For 'ENTITY', specify what it is (e.g., 'PERSON', 'PRODUCT'). For 'CATEGORY' and 'KEYPHRASE', use 'CONCEPT'.
-- `value`: The extracted string value.
+# Extraction Instructions
+1.  **Category**: Extract EXACTLY ONE high-level category (e.g., "Love Story", "Tech Tutorial").
+2.  **Keyphrases**: Extract the 5-10 MOST IMPORTANT thematic concepts (e.g., "unrequited love").
+3.  **Entities**: Extract the 5-10 MOST IMPORTANT proper nouns (e.g., people, products), excluding forbidden identifiers.
+4.  **Language**: All output MUST be in the same language as the original text.
+5.  **Format**: Respond with ONLY a single JSON array of objects.
+
+# JSON Object Schema
+- `type`: 'CATEGORY', 'KEYPHRASE', or 'ENTITY'
+- `subtype`: For 'ENTITY', specify type (e.g., 'PERSON'). For others, use 'CONCEPT'.
+- `value`: The extracted string.
 "#;
 pub const KNOWLEDGE_METADATA_EXTRACTION_USER_PROMPT: &str = r#"# Document Content:
 {content}"#;
