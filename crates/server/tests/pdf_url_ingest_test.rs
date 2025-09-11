@@ -3,10 +3,10 @@
 //! This test verifies the entire `POST /ingest/pdf` workflow using a URL:
 //! 1. A mock server is set up to serve a PDF, including a redirect.
 //! 2. The server receives the URL, downloads the PDF, extracts the messy text, and sends it to a mock LLM for refinement.
-//! 3. The server takes the refined Markdown and sends it to a mock LLM for knowledge distillation (Q&A generation).
-//! 4. The server stores the refined markdown and the Q&A pairs.
-//! 5. The new Q&A pairs are embedded via a mock embedding API.
-//! 6. A final RAG query (`/search/knowledge`) is made, which uses a mock LLM to synthesize an answer from the retrieved Q&A pair.
+//! 3. The server takes the refined Markdown and sends it to mock LLMs for knowledge distillation and metadata extraction.
+//! 4. The server stores the refined markdown, Q&A pairs, and metadata.
+//! 5. The new document is embedded via a mock embedding API.
+//! 6. A final RAG query (`/search/knowledge`) is made, which uses a mock LLM to synthesize an answer from the retrieved document.
 //! 7. The final answer is verified to prove the entire pipeline worked.
 
 mod common;
@@ -101,14 +101,30 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
             }).to_string()}}]}));
     });
 
-    // D. Mock Embedding API call
+    // D. Mock Metadata Extraction call
+    let metadata_extraction_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert document analyst"); // Unique to the metadata prompt
+        then.status(200).json_body(json!({
+            "choices": [{"message": {"role": "assistant", "content": json!({
+                "metadata": [{
+                    "type": "KEYPHRASE",
+                    "subtype": "CONCEPT",
+                    "value": "test number"
+                }]
+            }).to_string()}}]
+        }));
+    });
+
+    // E. Mock Embedding API call
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.4, 0.5, 0.6] }] }));
     });
 
-    // E. Mock the Query Analysis call for the RAG search.
+    // F. Mock the Query Analysis call for the RAG search.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -121,7 +137,7 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
         );
     });
 
-    // F. Mock final RAG synthesis call
+    // G. Mock final RAG synthesis call
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -179,6 +195,7 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     pdf_serve_mock.assert();
     refinement_mock.assert();
     distillation_mock.assert();
+    metadata_extraction_mock.assert();
     query_analysis_mock.assert();
     embedding_mock.assert_hits(2); // Once for new FAQ, once for search query
     rag_synthesis_mock.assert();
