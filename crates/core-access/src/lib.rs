@@ -61,6 +61,13 @@ impl TryFrom<&Row> for User {
 ///
 /// This function creates a deterministic UUIDv5 from the identifier to use as
 /// the primary key, ensuring idempotency.
+///
+/// # Security
+///
+/// The `role_override` parameter is a potential security risk and should only
+/// be used in trusted, internal contexts like tests or administrative scripts.
+/// It MUST NOT be exposed to external API calls, as this could allow a user
+/// to escalate their privileges.
 pub async fn get_or_create_user(
     db: &Database,
     user_identifier: &str,
