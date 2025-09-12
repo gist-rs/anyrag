@@ -7,36 +7,45 @@ This project is a comprehensive Rust-based platform for building a self-improvin
 -   **Natural Language to Data:**
     -   **Text-to-SQL:** Translates prompts into executable SQL queries for providers like Google BigQuery.
     -   **Dynamic Google Sheet Querying:** Automatically ingests a Google Sheet from a URL within a prompt and answers questions about its content on the fly.
-    -   **Context-Aware:** Automatically injects the current date and time into the context, enabling time-sensitive questions like "What is the current hobby?".
+    -   **Context-Aware:** Automatically injects the current date and time into the context, enabling time-sensitive questions.
 
 -   **Comprehensive Knowledge Base Pipeline:**
     -   **Multi-Source Ingestion:** Builds a knowledge base from various sources:
-        -   **Web URLs:** Fetches and cleans content from any webpage.
-        -   **PDFs:** Ingests documents directly from file uploads or URLs.
-        -   **Google Sheets:** Extracts structured Q&A pairs directly from sheets, respecting date ranges (`start_at`, `end_at`).
-        -   **Raw Text:** Ingests and automatically chunks plain text.
+        -   Web URLs, PDFs, Google Sheets, RSS Feeds, and Raw Text.
     -   **AI-Powered Distillation:** Uses an LLM to automatically extract explicit Q&A pairs and generate new ones from unstructured text.
-    -   **Vector Embeddings:** Generates embeddings for semantic search, enabling the RAG functionality.
+    -   **Vector Embeddings:** Generates embeddings for semantic search.
 
--   **Retrieval-Augmented Generation (RAG):**
+-   **Advanced Retrieval-Augmented Generation (RAG):**
     -   Provides an API to ask questions against the knowledge base.
-    -   Uses a hybrid search (vector + keyword) to find the most relevant facts.
-    -   Synthesizes coherent, accurate answers using an LLM based on the retrieved context.
+    -   Employs a sophisticated, multi-stage pipeline for highly relevant and context-aware answers.
+    -   **Temporal Reasoning:** Understands and correctly answers time-sensitive queries like "what is the newest..." by filtering results based on date properties.
 
 -   **Self-Improvement Cycle:**
     -   **Fine-Tuning Export:** Generates a dataset from the knowledge base in the correct format for fine-tuning your base LLM, which in turn improves future data extraction.
 
 -   **Flexible Identity & Ownership:**
-    -   **JWT & Guest Access:** Supports standard JWT-based authentication for multi-user environments. For simpler use cases (like local CLI), it seamlessly falls back to a deterministic "Guest User," ensuring all ingested data has a clear owner without requiring a login.
-    -   **Ownership-Aware Search:** Search results are automatically and securely filtered based on the user's identity, ensuring users can only see their own content and public "guest" content.
+    -   **JWT & Guest Access:** Supports standard JWT-based authentication and seamlessly falls back to a deterministic "Guest User," ensuring all ingested data has a clear owner without requiring a login.
+    -   **Ownership-Aware Search:** Search results are automatically and securely filtered based on the user's identity.
+
+## The Advanced RAG Pipeline
+
+When you ask a question, the system uses a multi-stage process involving three LLM calls to deliver a precise answer:
+
+1.  **Query Analysis (LLM Call #1):** The user's query is first analyzed to extract key entities (e.g., "iPhone") and keyphrases (e.g., "newest").
+
+2.  **Multi-Stage Candidate Retrieval:**
+    *   **Metadata Search:** A fast database query retrieves an initial set of candidate documents based on the extracted entities and keyphrases.
+    *   **Keyword & Vector Search:** In parallel, keyword and vector searches are performed. The vector search uses an **Embedding Model (LLM Call #2)** to convert the user's query into a vector.
+
+3.  **Reciprocal Rank Fusion (RRF):** The results from keyword and vector searches are intelligently combined and re-ranked using the RRF algorithm to produce a single, relevance-scored list.
+
+4.  **Temporal Filtering:** The system checks the query for temporal keywords (like "newest," "latest"). If found, it filters the re-ranked list to find the single most recent document based on its date properties.
+
+5.  **Answer Synthesis (LLM Call #3):** The final, highly-filtered context is passed to a powerful LLM, which generates a coherent, accurate answer based *only* on the provided information.
 
 ## API Response Structure
 
-All JSON API responses follow a consistent structure for predictability. The primary content is always nested inside a `result` object.
-
-### Debug Mode
-
-All endpoints support a `debug` query parameter. When you append `?debug=true` to a request URL, the server adds a `debug` object to the response, containing contextual information about the request.
+All JSON API responses follow a consistent `result` object structure. Appending `?debug=true` to any request URL will add a `debug` object to the response with contextual information.
 
 -   **Standard Response (`/ingest/rss`)**
     ```json
@@ -62,23 +71,26 @@ All endpoints support a `debug` query parameter. When you append `?debug=true` t
 
 ## Workspace Crates
 
-The workspace is divided into two main crates. For detailed information on configuration, setup, and usage, please refer to the `README.md` file within each crate's directory.
+The workspace is divided into two main crates. For detailed information, please refer to the `README.md` file within each crate's directory.
 
--   **[`anyrag`](crates/lib/README.md)**: The core library containing all business logic. This includes prompt-to-SQL conversion, the knowledge base ingestion pipeline (fetch, distill, augment, store), and the RAG implementation.
--   **[`anyrag-server`](crates/server/README.md)**: A lightweight `axum` web server that exposes the library's functionality via a REST API. It provides endpoints for NL-to-SQL, knowledge base management, and RAG-based searches.
+-   **[`anyrag`](crates/lib/README.md)**: The core library containing all business logic.
+-   **[`anyrag-server`](crates/server/README.md)**: A lightweight `axum` web server that exposes the library's functionality via a REST API.
+
+## API Examples
+
+For detailed `curl` examples for every API endpoint, please see the **[API Usage Examples (EXAMPLES.md)](EXAMPLES.md)** document.
 
 ## Project Structure
 
 ```
 anyrag/
 ├── Cargo.toml         # Workspace configuration
+├── EXAMPLES.md        # Detailed API usage examples
 ├── crates/
 │   ├── lib/           # The core logic library
-│   │   ├── Cargo.toml
 │   │   ├── README.md  <-- Library details
 │   │   └── src/
 │   └── server/        # The axum web server
-│       ├── Cargo.toml
 │       ├── README.md  <-- Server details
 │       ├── Dockerfile
 │       └── src/
@@ -87,26 +99,20 @@ anyrag/
 
 ## Deployment to Google Cloud Run
 
-This project includes a comprehensive script to automate deployment to Google Cloud Run. The script handles creating secrets, setting IAM permissions, building the container, and deploying the service.
+This project includes a comprehensive script (`deploy.sh`) to automate deployment to Google Cloud Run.
 
 ### Prerequisites
 
--   The [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) must be installed and initialized.
--   You must have a Google Cloud project with billing enabled.
--   Your `crates/server/.env` file must be created and contain your `AI_API_KEY` and `BIGQUERY_PROJECT_ID`.
+-   The [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) is installed and initialized.
+-   You have a Google Cloud project with billing enabled.
+-   Your `crates/server/.env` file contains your `AI_API_KEY` and `BIGQUERY_PROJECT_ID`.
 
 ### How to Deploy
 
-1.  **Make the script executable:**
-    ```sh
-    chmod +x deploy.sh
-    ```
+1.  **Make the script executable:** `chmod +x deploy.sh`
+2.  **Run the deployment script:** `./deploy.sh your-gcp-project-id`
 
-2.  **Run the deployment script, passing your Google Cloud Project ID as an argument:**
-    ```sh
-    ./deploy.sh your-gcp-project-id
-    ```
-    The script will guide you through the authentication process and handle all the necessary steps to get your service live. Upon completion, it will output the URL for your deployed service.
+The script will guide you through the process and output the URL for your deployed service.
 
 ## Running Tests
 
@@ -115,8 +121,6 @@ You can run all tests for the entire workspace from the root directory:
 ```sh
 cargo test --workspace
 ```
-
-For instructions on how to run tests for a specific crate, please see its respective `README.md`.
 
 ## License
 
