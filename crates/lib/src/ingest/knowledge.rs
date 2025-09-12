@@ -9,7 +9,7 @@
 
 use crate::{errors::PromptError, providers::ai::AiProvider};
 use md5;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 use turso::{params, Connection, Database};
@@ -37,19 +37,6 @@ pub enum KnowledgeError {
     Internal(#[from] anyhow::Error),
 }
 
-// --- Deserialization Helper ---
-
-/// A helper function for serde to deserialize a field that might be `null` into a default value.
-/// `#[serde(default)]` only works for missing fields, not `null` values.
-fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    T: Default + Deserialize<'de>,
-    D: Deserializer<'de>,
-{
-    let opt = Option::<T>::deserialize(deserializer)?;
-    Ok(opt.unwrap_or_default())
-}
-
 // --- Data Structures ---
 
 /// Represents the essential data of a newly ingested or updated document.
@@ -61,31 +48,18 @@ pub struct IngestedDocument {
     pub content_hash: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ExtractedKnowledge {
-    #[serde(default)]
-    faqs: Vec<FaqItem>,
-    #[serde(default)]
-    content_chunks: Vec<ContentChunk>,
-}
-
+/// The public-facing, validated struct for a Q&A pair.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FaqItem {
-    #[serde(deserialize_with = "deserialize_null_default")]
-    #[serde(default)]
     pub question: String,
-    #[serde(deserialize_with = "deserialize_null_default")]
-    #[serde(default)]
     pub answer: String,
     pub is_explicit: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct ContentChunk {
-    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     topic: String,
-    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     content: String,
 }
@@ -93,7 +67,6 @@ pub struct ContentChunk {
 #[derive(Deserialize, Debug)]
 pub struct AugmentedFaq {
     id: usize,
-    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     question: String,
 }
@@ -106,13 +79,10 @@ pub struct AugmentationResponse {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContentMetadata {
     #[serde(rename = "type")]
-    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     pub metadata_type: String,
-    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     pub subtype: String,
-    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     pub value: String,
 }
@@ -314,6 +284,26 @@ pub async fn distill_and_augment(
         "Starting Pass 1: Extraction for document ID: {}",
         ingested_doc.id
     );
+
+    // Define temporary structs that can handle nullable fields from the LLM.
+    // This makes the initial parsing robust against `null` values.
+    #[derive(Deserialize)]
+    struct RawFaqItem {
+        #[serde(default)]
+        question: Option<String>,
+        #[serde(default)]
+        answer: Option<String>,
+        is_explicit: bool,
+    }
+
+    #[derive(Deserialize)]
+    struct RawExtractedKnowledge {
+        #[serde(default)]
+        faqs: Vec<RawFaqItem>,
+        #[serde(default)]
+        content_chunks: Vec<ContentChunk>,
+    }
+
     let user_prompt =
         extraction_user_prompt_template.replace("{markdown_content}", &ingested_doc.content);
     let llm_response = ai_provider
@@ -321,7 +311,7 @@ pub async fn distill_and_augment(
         .await?;
     debug!("LLM extraction response: {}", llm_response);
     let cleaned_response = clean_llm_response(&llm_response);
-    let mut extracted_data: ExtractedKnowledge = match serde_json::from_str(cleaned_response) {
+    let mut extracted_data: RawExtractedKnowledge = match serde_json::from_str(cleaned_response) {
         Ok(data) => data,
         Err(e) => {
             warn!(
@@ -332,10 +322,24 @@ pub async fn distill_and_augment(
         }
     };
 
-    // After parsing, filter out any FAQs that might have empty questions or answers.
-    extracted_data
+    // Filter and map the raw, potentially noisy data into the clean, validated FaqItem struct.
+    // This removes any items where the question or answer was null, missing, or just an empty string.
+    let mut clean_faqs: Vec<FaqItem> = extracted_data
         .faqs
-        .retain(|faq| !faq.question.is_empty() && !faq.answer.is_empty());
+        .into_iter()
+        .filter_map(|raw_faq| {
+            match (raw_faq.question, raw_faq.answer) {
+                (Some(q), Some(a)) if !q.trim().is_empty() && !a.trim().is_empty() => {
+                    Some(FaqItem {
+                        question: q,
+                        answer: a,
+                        is_explicit: raw_faq.is_explicit,
+                    })
+                }
+                _ => None, // Discard if question or answer is None or empty
+            }
+        })
+        .collect();
 
     let original_chunk_count = extracted_data.content_chunks.len();
     extracted_data
@@ -352,7 +356,7 @@ pub async fn distill_and_augment(
 
     info!(
         "Pass 1 complete. Found {} explicit FAQs and {} valid content chunks.",
-        extracted_data.faqs.len(),
+        clean_faqs.len(),
         cleaned_chunk_count
     );
 
@@ -387,18 +391,20 @@ pub async fn distill_and_augment(
                 let mut augmented_faqs = Vec::new();
                 for aug_faq in parsed.augmented_faqs {
                     if let Some(original_chunk) = extracted_data.content_chunks.get(aug_faq.id) {
-                        augmented_faqs.push(FaqItem {
-                            question: aug_faq.question,
-                            answer: original_chunk.content.clone(),
-                            is_explicit: false,
-                        });
+                        if !aug_faq.question.trim().is_empty() {
+                            augmented_faqs.push(FaqItem {
+                                question: aug_faq.question,
+                                answer: original_chunk.content.clone(),
+                                is_explicit: false,
+                            });
+                        }
                     }
                 }
                 info!(
                     "Pass 2 complete. Generated {} new FAQs from batch.",
                     augmented_faqs.len()
                 );
-                extracted_data.faqs.extend(augmented_faqs);
+                clean_faqs.extend(augmented_faqs);
             }
             Err(e) => warn!(
                 "Failed to parse batched augmentation response, skipping augmentation. Error: {}",
@@ -407,7 +413,7 @@ pub async fn distill_and_augment(
         }
     }
 
-    Ok(extracted_data.faqs)
+    Ok(clean_faqs)
 }
 
 // --- Stage 3: Structured Storage ---
