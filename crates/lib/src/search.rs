@@ -7,6 +7,7 @@
 //! 3.  **Vector Re-Ranking**: A semantic vector search is performed *only* on the pre-filtered
 //!     documents to find the final, most relevant results.
 
+use crate::ingest::knowledge::clean_llm_response;
 use crate::{
     providers::{
         ai::{generate_embedding, AiProvider},
@@ -84,13 +85,7 @@ async fn analyze_query(
     let llm_response = ai_provider.generate(system_prompt, &user_prompt).await?;
 
     debug!("LLM query analysis response: {}", llm_response);
-    let cleaned_response = llm_response
-        .trim()
-        .strip_prefix("```json")
-        .unwrap_or(&llm_response)
-        .strip_suffix("```")
-        .unwrap_or(&llm_response)
-        .trim();
+    let cleaned_response = clean_llm_response(&llm_response);
 
     match serde_json::from_str(cleaned_response) {
         Ok(parsed) => Ok(parsed),

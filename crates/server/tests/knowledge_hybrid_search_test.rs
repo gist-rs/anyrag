@@ -72,7 +72,7 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
-    let user = get_or_create_user(&db, user_identifier).await?;
+    let user = get_or_create_user(&db, user_identifier, None).await?;
 
     // --- 2. Define Test Data and Vectors ---
     let faq_keyword_question = "How does the Quantum Widget work?";

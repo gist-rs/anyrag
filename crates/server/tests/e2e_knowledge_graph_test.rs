@@ -88,7 +88,7 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
 
     // Create a user to own the data
     let user_identifier = "test-user-kg@example.com";
-    let user = get_or_create_user(&db, user_identifier).await?;
+    let user = get_or_create_user(&db, user_identifier, None).await?;
 
     let document_id = "doc_superwidget";
     conn.execute(
@@ -223,7 +223,7 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
         .await?;
     let conn = db.connect()?;
     let user_identifier = "harry-potter-fan@example.com";
-    let user = get_or_create_user(&db, user_identifier).await?;
+    let user = get_or_create_user(&db, user_identifier, None).await?;
 
     // --- 2. Define Scenario Data ---
     let subject = "Harry_Potter";

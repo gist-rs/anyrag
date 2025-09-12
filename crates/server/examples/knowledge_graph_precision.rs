@@ -110,8 +110,12 @@ async fn main() -> Result<()> {
     info!("Application state built successfully.");
 
     // Create a user for this example run.
-    let user =
-        get_or_create_user(&app_state.sqlite_provider.db, "example-user-kg@anyrag.com").await?;
+    let user = get_or_create_user(
+        &app_state.sqlite_provider.db,
+        "example-user-kg@anyrag.com",
+        None,
+    )
+    .await?;
     let auth_user = AuthenticatedUser(user);
     info!("Simulating requests for user: {}", auth_user.0.id);
 

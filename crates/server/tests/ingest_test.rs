@@ -79,7 +79,7 @@ async fn test_ingest_endpoint_success() -> Result<()> {
     let conn = db.connect().expect("Failed to get connection from db");
 
     // Get the expected owner ID.
-    let expected_user = get_or_create_user(&db, user_identifier).await?;
+    let expected_user = get_or_create_user(&db, user_identifier, None).await?;
 
     // Check the content and owner of the inserted document.
     let mut result_set = conn

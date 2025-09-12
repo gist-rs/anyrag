@@ -64,6 +64,7 @@ impl TryFrom<&Row> for User {
 pub async fn get_or_create_user(
     db: &Database,
     user_identifier: &str,
+    role_override: Option<&str>,
 ) -> Result<User, CoreAccessError> {
     info!("[core_access] get_or_create_user for identifier: '{user_identifier}'");
     let conn = db.connect()?;
@@ -79,29 +80,32 @@ pub async fn get_or_create_user(
         .await?;
 
     if let Some(row) = rows.next().await? {
-        // User exists, parse and return it.
-        let user_result = User::try_from(&row);
-        if let Ok(user) = &user_result {
-            info!("[core_access] Found existing user: {user:?}");
+        // User exists, parse it.
+        let mut user = User::try_from(&row)?;
+        info!("[core_access] Found existing user: {user:?}");
+
+        // If a role override is provided and it's different, update the existing user's role.
+        if let Some(new_role) = role_override {
+            if user.role != new_role {
+                info!(
+                    "[core_access] Updating user {} role from '{}' to '{}'",
+                    user.id, user.role, new_role
+                );
+                conn.execute(
+                    "UPDATE users SET role = ? WHERE id = ?",
+                    params![new_role, user.id.clone()],
+                )
+                .await?;
+                user.role = new_role.to_string(); // Update the struct to be returned
+            }
         }
-        return user_result;
+
+        return Ok(user);
     }
 
     info!("[core_access] User not found, creating new user.");
     // 2. User does not exist. Determine role.
-    // A guest user can never be root. The first non-guest user becomes root.
-    let role = if user_identifier == GUEST_USER_IDENTIFIER {
-        "user"
-    } else {
-        let root_exists = conn
-            .query("SELECT 1 FROM users WHERE role = 'root' LIMIT 1", ())
-            .await?
-            .next()
-            .await?
-            .is_some();
-
-        if !root_exists { "root" } else { "user" }
-    };
+    let role = role_override.unwrap_or("user");
     info!("[core_access] Determined role for new user: '{role}'");
 
     // 2.5. If user doesn't exist, INSERT. If the INSERT fails due to a UNIQUE
@@ -151,8 +155,10 @@ mod tests {
         let db = provider.db;
         let user_identifier = "test@example.com";
 
-        // 2. Act: First call should create the user
-        let user1 = get_or_create_user(&db, user_identifier).await.unwrap();
+        // 2. Act: First call should create the user, explicitly making them root.
+        let user1 = get_or_create_user(&db, user_identifier, Some("root"))
+            .await
+            .unwrap();
 
         // 3. Assert: Check the created user
         let expected_id =
@@ -161,7 +167,9 @@ mod tests {
         assert_eq!(user1.role, "root", "The first user should be root");
 
         // 4. Act: Second call should retrieve the same user
-        let user2 = get_or_create_user(&db, user_identifier).await.unwrap();
+        let user2 = get_or_create_user(&db, user_identifier, None)
+            .await
+            .unwrap();
 
         // 5. Assert: Check that the retrieved user is identical
         assert_eq!(user1.id, user2.id);
@@ -170,7 +178,7 @@ mod tests {
 
         // 6. Act: Create a second user
         let second_user_identifier = "another@example.com";
-        let user3 = get_or_create_user(&db, second_user_identifier)
+        let user3 = get_or_create_user(&db, second_user_identifier, None)
             .await
             .unwrap();
 
@@ -190,7 +198,7 @@ mod tests {
         let db = provider.db;
 
         // 2. Act: Create guest user first.
-        let guest_user = get_or_create_user(&db, GUEST_USER_IDENTIFIER)
+        let guest_user = get_or_create_user(&db, GUEST_USER_IDENTIFIER, None)
             .await
             .unwrap();
 
@@ -200,8 +208,8 @@ mod tests {
             "The guest user should never be root"
         );
 
-        // 4. Act: Create a normal user.
-        let normal_user = get_or_create_user(&db, "first.real.user@example.com")
+        // 4. Act: Create a normal user, explicitly making them root.
+        let normal_user = get_or_create_user(&db, "first.real.user@example.com", Some("root"))
             .await
             .unwrap();
 
@@ -212,7 +220,7 @@ mod tests {
         );
 
         // 6. Act: Create a second normal user.
-        let second_normal_user = get_or_create_user(&db, "second.real.user@example.com")
+        let second_normal_user = get_or_create_user(&db, "second.real.user@example.com", None)
             .await
             .unwrap();
 

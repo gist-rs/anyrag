@@ -114,7 +114,7 @@ async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
     let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
-    let user = get_or_create_user(&db, user_identifier).await?;
+    let user = get_or_create_user(&db, user_identifier, None).await?;
     seed_data_for_hybrid_search(&app, &user.id).await?;
 
     let user_query = "Tell me about the Tesla campaign prize";

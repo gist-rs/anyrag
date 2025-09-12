@@ -16,13 +16,18 @@ async fn test_e2e_prompt_execution() -> Result<()> {
 
     // --- Arrange: Database Setup ---
     // The TestApp creates an empty database. We need to create the table
-    // that this test intends to query.
+    // that this test intends to query and seed it with data.
     let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
     let conn = db.connect()?;
     conn.execute(
-        "CREATE TABLE test_table (id INTEGER PRIMARY KEY, name TEXT, value REAL);",
+        "CREATE TABLE works (corpus TEXT PRIMARY KEY, word_count INTEGER);",
+        (),
+    )
+    .await?;
+    conn.execute(
+        "INSERT INTO works (corpus, word_count) VALUES ('kinghenryv', 27894), ('macbeth', 18155);",
         (),
     )
     .await?;
@@ -39,9 +44,8 @@ async fn test_e2e_prompt_execution() -> Result<()> {
             .path("/v1/chat/completions")
             .body_contains("intelligent data assistant"); // Differentiate from the format call
         then.status(200).json_body(
-            // Return a valid SQLite query. The alias is important so the
-            // JSON result sent to the next step is predictable.
-            json!({"choices": [{"message": {"role": "assistant", "content": "SELECT 27894 AS total;"}}]}),
+            // Return a real query that interacts with the seeded data.
+            json!({"choices": [{"message": {"role": "assistant", "content": "SELECT word_count AS result FROM works WHERE corpus = 'kinghenryv';"}}]}),
         );
     });
 
@@ -51,7 +55,8 @@ async fn test_e2e_prompt_execution() -> Result<()> {
     let format_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("strict data processor"); // Differentiate from query gen
+            .body_contains("strict data processor") // Differentiate from query gen
+            .body_contains("27894"); // Check for the key part of the DB result
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": "27,894"}}]}),
         );
@@ -63,7 +68,7 @@ async fn test_e2e_prompt_execution() -> Result<()> {
     // A name with dots like "a.b.c" is invalid in SQLite and caused the original failure.
     let payload = json!({
         "prompt": "What is the total word_count for the corpus 'kinghenryv'?",
-        "table_name": "test_table", // Use a valid SQLite table name
+        "table_name": "works", // Use the newly created and seeded table
         "instruction": "Answer with only the number, with thousand format."
     });
 

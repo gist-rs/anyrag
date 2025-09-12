@@ -18,7 +18,7 @@ use crate::common::{generate_jwt, TestApp};
 async fn seed_data(db: &Database, user_identifier: &str) -> Result<()> {
     // This connection comes from the same pool the server is using.
     let conn = db.connect()?;
-    let user = get_or_create_user(db, user_identifier).await?;
+    let user = get_or_create_user(db, user_identifier, None).await?;
 
     // --- Seed Data ---
     let doc1_id = "doc_love";

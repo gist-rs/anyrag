@@ -299,13 +299,7 @@ pub async fn distill_and_augment(
         .generate(extraction_system_prompt, &user_prompt)
         .await?;
     debug!("LLM extraction response: {}", llm_response);
-    let cleaned_response = llm_response
-        .trim()
-        .strip_prefix("```json")
-        .unwrap_or(&llm_response)
-        .strip_suffix("```")
-        .unwrap_or(&llm_response)
-        .trim();
+    let cleaned_response = clean_llm_response(&llm_response);
     let mut extracted_data: ExtractedKnowledge = match serde_json::from_str(cleaned_response) {
         Ok(data) => data,
         Err(e) => {
@@ -366,13 +360,7 @@ pub async fn distill_and_augment(
             .generate(augmentation_system_prompt, &augmentation_user_prompt)
             .await?;
 
-        let cleaned_response = llm_response
-            .trim()
-            .strip_prefix("```json")
-            .unwrap_or(&llm_response)
-            .strip_suffix("```")
-            .unwrap_or(&llm_response)
-            .trim();
+        let cleaned_response = clean_llm_response(&llm_response);
         match serde_json::from_str::<AugmentationResponse>(cleaned_response) {
             Ok(parsed) => {
                 let mut augmented_faqs = Vec::new();
@@ -470,31 +458,21 @@ pub async fn extract_and_store_metadata(
     let llm_response = ai_provider.generate(system_prompt, user_prompt).await?;
 
     debug!("LLM metadata response: {}", llm_response);
-    let cleaned_response = llm_response
-        .trim()
-        .strip_prefix("```json")
-        .unwrap_or(&llm_response)
-        .strip_suffix("```")
-        .unwrap_or(&llm_response)
-        .trim();
+    let cleaned_response = clean_llm_response(&llm_response);
 
-    let parsed_metadata: Vec<ContentMetadata> =
-        // First, try to parse the response as a direct array of metadata items.
-        match serde_json::from_str(cleaned_response) {
-            Ok(items) => items,
-            // If that fails, try parsing it as an object that contains a `metadata` field.
-            Err(_) => match serde_json::from_str::<MetadataResponse>(cleaned_response) {
-                Ok(response) => response.metadata,
-                // If both parsing attempts fail, log a warning and skip metadata storage.
-                Err(e) => {
-                    warn!(
-                        "Failed to parse metadata response as array or object, skipping. Error: {}",
-                        e
-                    );
-                    return Ok(());
-                }
-            },
-        };
+    let parsed_metadata: Vec<ContentMetadata> = if let Ok(items) =
+        serde_json::from_str(cleaned_response)
+    {
+        items
+    } else if let Ok(response) = serde_json::from_str::<MetadataResponse>(cleaned_response) {
+        response.metadata
+    } else {
+        warn!(
+            "Failed to parse metadata response as array or object, skipping. Raw response: '{}'",
+            cleaned_response
+        );
+        return Ok(());
+    };
 
     // --- Programmatic Filtering and Limiting (Safety Net) ---
     let mut categories = Vec::new();
@@ -574,6 +552,19 @@ pub async fn extract_and_store_metadata(
     );
 
     Ok(())
+}
+
+// --- Helper Functions ---
+
+/// Cleans the raw JSON response from an LLM, removing markdown code fences.
+pub fn clean_llm_response(response: &str) -> &str {
+    response
+        .trim()
+        .strip_prefix("```json")
+        .unwrap_or(response)
+        .strip_suffix("```")
+        .unwrap_or(response)
+        .trim()
 }
 
 // --- Stage 5: Fine-Tuning Export ---

@@ -14,7 +14,6 @@ use axum_extra::{
     headers::{authorization::Bearer, Authorization},
     TypedHeader,
 };
-use chrono::Utc;
 use core_access::{get_or_create_user, User, GUEST_USER_IDENTIFIER};
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
@@ -124,21 +123,14 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
                 ));
             }
 
-            // If user_id is provided in the claim, construct the user directly.
-            // This is primarily for testing scenarios to inject a specific user.
-            if !token_data.claims.user_id.is_empty() {
-                Ok(User {
-                    id: token_data.claims.user_id,
-                    role: "user".to_string(),
-                    created_at: Utc::now(),
-                })
-            } else {
-                get_or_create_user(&state.sqlite_provider.db, &token_data.claims.sub).await
-            }
+            // The claims `sub` is the source of truth for the user's identity.
+            // We use it to deterministically find or create the user in our database,
+            // which holds the authoritative role.
+            get_or_create_user(&state.sqlite_provider.db, &token_data.claims.sub, None).await
         } else {
             // Case 2: No token is present. Use the guest user.
             info!("No Authorization header found, using guest user.");
-            get_or_create_user(&state.sqlite_provider.db, GUEST_USER_IDENTIFIER).await
+            get_or_create_user(&state.sqlite_provider.db, GUEST_USER_IDENTIFIER, None).await
         }
         .map_err(|e| {
             // This is an internal error because the DB should be available.

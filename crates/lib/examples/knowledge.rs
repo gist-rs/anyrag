@@ -110,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("--- Starting Knowledge Ingestion ---");
     let ingest_url = "https://www.true.th/betterliv/support/true-app-mega-campaign";
     // Create a user to own the ingested content.
-    let user = get_or_create_user(&sqlite_provider.db, "default-user@example.com").await?;
+    let user = get_or_create_user(&sqlite_provider.db, "default-user@example.com", None).await?;
     info!("Content will be ingested for owner_id: {}", user.id);
 
     let prompts = IngestionPrompts {

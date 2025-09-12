@@ -27,8 +27,8 @@ async fn seed_ownership_data(app: &TestApp) -> Result<()> {
     let conn = db.connect()?;
 
     // 1. Create users and get their deterministic IDs.
-    let user_a = get_or_create_user(&db, "user_a@example.com").await?;
-    let user_b = get_or_create_user(&db, "user_b@example.com").await?;
+    let user_a = get_or_create_user(&db, "user_a@example.com", None).await?;
+    let user_b = get_or_create_user(&db, "user_b@example.com", None).await?;
     let guest_user_id =
         Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
 
@@ -132,7 +132,7 @@ async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
         .build()
         .await?;
     let user_a_identifier = "user_a@example.com";
-    let _ = get_or_create_user(&db, user_a_identifier).await?;
+    let _ = get_or_create_user(&db, user_a_identifier, None).await?;
     seed_ownership_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     let final_rag_answer = "Found User A's private document and the public guest document.";
@@ -194,7 +194,7 @@ async fn test_user_b_sees_own_and_guest_content() -> Result<()> {
         .build()
         .await?;
     let _user_b_identifier = "user_b@example.com";
-    let _ = get_or_create_user(&db, _user_b_identifier).await?;
+    let _ = get_or_create_user(&db, _user_b_identifier, None).await?;
     seed_ownership_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     // The final answer should ONLY be based on the guest document.
@@ -302,7 +302,7 @@ async fn test_authenticated_user_b_sees_own_and_guest_content() -> Result<()> {
         .build()
         .await?;
     let user_b_identifier = "user_b@example.com";
-    let _ = get_or_create_user(&db, user_b_identifier).await?;
+    let _ = get_or_create_user(&db, user_b_identifier, None).await?;
     seed_ownership_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     // The final answer should be based on User B's own content and the public/guest doc.

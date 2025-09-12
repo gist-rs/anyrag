@@ -127,6 +127,11 @@ name = "generation_agent_test"
 path = "tests/generation_agent_test.rs"
 harness = true
 
+[[test]]
+name = "admin_test"
+path = "tests/admin_test.rs"
+harness = true
+
 [[example]]
 name = "backfill_metadata"
 path = "examples/backfill_metadata.rs"

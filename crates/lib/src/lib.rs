@@ -400,7 +400,7 @@ impl PromptClient {
     ) -> Result<String, PromptError> {
         let instruction = match &options.instruction {
             Some(inst) => inst,
-            None => return Ok(content.to_string()),
+            _ => return Ok(content.to_string()),
         };
 
         info!("[format_response] received instruction: {instruction:?}");

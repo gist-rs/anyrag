@@ -13,6 +13,8 @@
 // functions might be used by every test file that includes it.
 #![allow(unused)]
 
+pub mod pdf_helper;
+
 use anyhow::Result;
 use anyrag::{
     graph::types::MemoryKnowledgeGraph,

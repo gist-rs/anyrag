@@ -78,6 +78,7 @@ async fn main() -> Result<()> {
     let user = get_or_create_user(
         &app_state.sqlite_provider.db,
         "example-user-sheet-faq@anyrag.com",
+        None,
     )
     .await?;
     let auth_user = AuthenticatedUser(user);
