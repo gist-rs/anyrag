@@ -10,55 +10,32 @@ use anyrag_server::types::ApiResponse;
 use core_access::get_or_create_user;
 use httpmock::Method;
 use serde_json::{json, Value};
-use turso::{params, Database};
 
-use crate::common::{generate_jwt, TestApp};
-
-/// Seeds the database using the exact same database object from the running TestApp's state.
-async fn seed_data(db: &Database, user_identifier: &str) -> Result<()> {
-    // This connection comes from the same pool the server is using.
-    let conn = db.connect()?;
-    let user = get_or_create_user(db, user_identifier, None).await?;
-
-    // --- Seed Data ---
-    let doc1_id = "doc_love";
-    let doc1_vector: Vec<f32> = vec![1.0, 0.0, 0.0];
-    let doc1_vector_bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(doc1_vector.as_ptr() as *const u8, doc1_vector.len() * 4)
-    };
-    conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
-        params![
-            doc1_id,
-            user.id.clone(),
-            "http://m.com/love",
-            "A Story of Love",
-            "This story is about a heartwarming romance."
-        ],
-    )
-    .await?;
-    conn.execute(
-        "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
-        params![doc1_id, user.id.clone(), "KEYPHRASE", "CONCEPT", "love stories"],
-    )
-    .await?;
-    conn.execute(
-        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        params![doc1_id, "mock-embedding-model", doc1_vector_bytes],
-    )
-    .await?;
-
-    Ok(())
-}
+use crate::common::{generate_jwt, TestApp, TestDataBuilder};
 
 #[tokio::test]
 async fn test_gen_text_agent_chooses_knowledge_search() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
     let user_identifier = "agent-test-user@example.com";
+    let db = &app.app_state.sqlite_provider.db;
+    let user = get_or_create_user(db, user_identifier, None).await?;
 
-    // Seed data using the server's own database connection pool.
-    seed_data(&app.app_state.sqlite_provider.db, user_identifier).await?;
+    // Seed data
+    let builder = TestDataBuilder::new(&app).await?;
+    builder
+        .add_document(
+            "doc_love",
+            &user.id,
+            "A Story of Love",
+            "This story is about a heartwarming romance.",
+            None,
+        )
+        .await?
+        .add_metadata("doc_love", &user.id, "KEYPHRASE", "CONCEPT", "love stories")
+        .await?
+        .add_embedding("doc_love", vec![1.0, 0.0, 0.0])
+        .await?;
 
     let context_prompt = "Find the best story about betrayal and forgiveness.";
     let final_generation = "Generated post about a heartwarming romance.";

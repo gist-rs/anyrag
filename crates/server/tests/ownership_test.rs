@@ -12,114 +12,82 @@ mod common;
 use anyhow::Result;
 use anyrag_server::types::ApiResponse;
 use axum::http::StatusCode;
-use common::{generate_jwt_with_expiry, TestApp};
+use common::{generate_jwt_with_expiry, TestApp, TestDataBuilder};
 use core_access::{get_or_create_user, GUEST_USER_IDENTIFIER};
 use httpmock::Method;
 use serde_json::{json, Value};
-use turso::{params, Builder};
-use uuid::Uuid;
 
 /// Seeds the database with documents owned by different users and the guest user.
-async fn seed_ownership_data(app: &TestApp) -> Result<()> {
-    let db = Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let conn = db.connect()?;
+async fn seed_data(app: &TestApp) -> Result<()> {
+    let db = &app.app_state.sqlite_provider.db;
 
-    // 1. Create users and get their deterministic IDs.
-    let user_a = get_or_create_user(&db, "user_a@example.com", None).await?;
-    let user_b = get_or_create_user(&db, "user_b@example.com", None).await?;
-    let guest_user_id =
-        Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
+    // 1. Create users
+    let user_a = get_or_create_user(db, "user_a@example.com", None).await?;
+    let user_b = get_or_create_user(db, "user_b@example.com", None).await?;
+    let guest_user = get_or_create_user(db, GUEST_USER_IDENTIFIER, None).await?;
 
-    // 2. Define document content
-    let doc_a_content = "This document is private to User A.";
-    let doc_b_content = "This document is private to User B.";
-    let doc_guest_content = "This document is public/guest owned.";
-
-    // 3. Insert documents with correct ownership
-    conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
-        params![
-            "doc_owned_by_a",
-            user_a.id.clone(),
-            "http://a.com",
-            "Doc A",
-            doc_a_content
-        ],
-    )
-    .await?;
-    conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
-        params![
-            "doc_owned_by_b",
-            user_b.id.clone(),
-            "http://b.com",
-            "Doc B",
-            doc_b_content
-        ],
-    )
-    .await?;
-    conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
-        params![
-            "doc_guest",
-            guest_user_id.clone(),
-            "http://guest.com",
-            "Guest Doc",
-            doc_guest_content
-        ],
-    )
-    .await?;
-
-    // 4. Insert metadata for all documents so they are discoverable
+    // 2. Seed data
+    let builder = TestDataBuilder::new(app).await?;
     let common_keyphrase = "searchable_topic";
-    for (doc_id, owner_id) in [
-        ("doc_owned_by_a", user_a.id),
-        ("doc_owned_by_b", user_b.id),
-        ("doc_guest", guest_user_id),
-    ] {
-        conn.execute(
-            "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
-            params![doc_id, owner_id, "KEYPHRASE", "CONCEPT", common_keyphrase],
+    builder
+        .add_document(
+            "doc_owned_by_a",
+            &user_a.id,
+            "Doc A",
+            "This document is private to User A.",
+            None,
         )
+        .await?
+        .add_metadata(
+            "doc_owned_by_a",
+            &user_a.id,
+            "KEYPHRASE",
+            "CONCEPT",
+            common_keyphrase,
+        )
+        .await?
+        .add_embedding("doc_owned_by_a", vec![1.0, 0.0, 0.0])
         .await?;
-    }
 
-    // 5. Insert embeddings for all documents so they are findable by vector search
-    let doc_a_vector: Vec<f32> = vec![1.0, 0.0, 0.0];
-    let doc_b_vector: Vec<f32> = vec![0.0, 1.0, 0.0];
-    let doc_guest_vector: Vec<f32> = vec![0.0, 0.0, 1.0];
-
-    let doc_a_vector_bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(doc_a_vector.as_ptr() as *const u8, doc_a_vector.len() * 4)
-    };
-    conn.execute(
-        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        params!["doc_owned_by_a", "mock-model", doc_a_vector_bytes],
-    )
-    .await?;
-
-    let doc_b_vector_bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(doc_b_vector.as_ptr() as *const u8, doc_b_vector.len() * 4)
-    };
-    conn.execute(
-        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        params!["doc_owned_by_b", "mock-model", doc_b_vector_bytes],
-    )
-    .await?;
-
-    let doc_guest_vector_bytes: &[u8] = unsafe {
-        std::slice::from_raw_parts(
-            doc_guest_vector.as_ptr() as *const u8,
-            doc_guest_vector.len() * 4,
+    builder
+        .add_document(
+            "doc_owned_by_b",
+            &user_b.id,
+            "Doc B",
+            "This document is private to User B.",
+            None,
         )
-    };
-    conn.execute(
-        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        params!["doc_guest", "mock-model", doc_guest_vector_bytes],
-    )
-    .await?;
+        .await?
+        .add_metadata(
+            "doc_owned_by_b",
+            &user_b.id,
+            "KEYPHRASE",
+            "CONCEPT",
+            common_keyphrase,
+        )
+        .await?
+        .add_embedding("doc_owned_by_b", vec![0.0, 1.0, 0.0])
+        .await?;
+
+    builder
+        .add_document(
+            "doc_guest",
+            &guest_user.id,
+            "Guest Doc",
+            "This document is public/guest owned.",
+            None,
+        )
+        .await?
+        .add_metadata(
+            "doc_guest",
+            &guest_user.id,
+            "KEYPHRASE",
+            "CONCEPT",
+            common_keyphrase,
+        )
+        .await?
+        .add_embedding("doc_guest", vec![0.0, 0.0, 1.0])
+        .await?;
 
     Ok(())
 }
@@ -128,12 +96,8 @@ async fn seed_ownership_data(app: &TestApp) -> Result<()> {
 async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    let db = Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
+    seed_data(&app).await?;
     let user_a_identifier = "user_a@example.com";
-    let _ = get_or_create_user(&db, user_a_identifier, None).await?;
-    seed_ownership_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     let final_rag_answer = "Found User A's private document and the public guest document.";
 
@@ -190,12 +154,7 @@ async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
 async fn test_user_b_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    let db = Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let _user_b_identifier = "user_b@example.com";
-    let _ = get_or_create_user(&db, _user_b_identifier, None).await?;
-    seed_ownership_data(&app).await?;
+    seed_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     // The final answer should ONLY be based on the guest document.
     let final_rag_answer = "Found the public guest document.";
@@ -298,12 +257,8 @@ async fn test_request_with_expired_token_is_rejected() -> Result<()> {
 async fn test_authenticated_user_b_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    let db = Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
+    seed_data(&app).await?;
     let user_b_identifier = "user_b@example.com";
-    let _ = get_or_create_user(&db, user_b_identifier, None).await?;
-    seed_ownership_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     // The final answer should be based on User B's own content and the public/guest doc.
     let final_rag_answer = "Found User B's private document and the public guest document.";

@@ -189,6 +189,91 @@ impl TestSetup {
     }
 }
 
+// --- Test Data Builder ---
+
+/// A fluent builder for creating test data in the database.
+pub struct TestDataBuilder<'a> {
+    // We hold a reference to the TestApp to ensure the database file outlives the builder.
+    _app: &'a TestApp,
+    conn: turso::Connection,
+}
+
+impl<'a> TestDataBuilder<'a> {
+    /// Creates a new TestDataBuilder.
+    pub async fn new(app: &'a TestApp) -> Result<Self> {
+        let db = turso::Builder::new_local(app.db_path.to_str().unwrap())
+            .build()
+            .await?;
+        let conn = db.connect()?;
+        Ok(Self { _app: app, conn })
+    }
+
+    /// Adds a document to the database.
+    pub async fn add_document(
+        &self,
+        doc_id: &str,
+        owner_id: &str,
+        title: &str,
+        content: &str,
+        source_url: Option<&str>,
+    ) -> Result<&Self> {
+        let default_url = format!("http://test.com/{doc_id}");
+        let final_source_url = source_url.unwrap_or(&default_url);
+        self.conn.execute(
+            "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+            turso::params![doc_id, owner_id, final_source_url, title, content],
+        )
+        .await?;
+        Ok(self)
+    }
+
+    /// Adds an FAQ item to the database.
+    pub async fn add_faq(
+        &self,
+        doc_id: &str,
+        owner_id: &str,
+        question: &str,
+        answer: &str,
+    ) -> Result<&Self> {
+        self.conn.execute(
+            "INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)",
+            turso::params![doc_id, owner_id, question, answer],
+        )
+        .await?;
+        Ok(self)
+    }
+
+    /// Adds metadata to a document.
+    pub async fn add_metadata(
+        &self,
+        doc_id: &str,
+        owner_id: &str,
+        meta_type: &str, // e.g., ENTITY, KEYPHRASE
+        subtype: &str,   // e.g., PRODUCT, CONCEPT
+        value: &str,
+    ) -> Result<&Self> {
+        self.conn.execute(
+            "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+            turso::params![doc_id, owner_id, meta_type, subtype, value],
+        )
+        .await?;
+        Ok(self)
+    }
+
+    /// Adds an embedding vector to a document.
+    pub async fn add_embedding(&self, doc_id: &str, vector: Vec<f32>) -> Result<&Self> {
+        let vector_bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
+        self.conn
+            .execute(
+                "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+                turso::params![doc_id, "mock-embedding-model", vector_bytes],
+            )
+            .await?;
+        Ok(self)
+    }
+}
+
 // --- Mock Data Helpers ---
 
 /// A helper to get a mock `TableSchema` for testing.

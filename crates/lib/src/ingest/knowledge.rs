@@ -460,19 +460,18 @@ pub async fn extract_and_store_metadata(
     debug!("LLM metadata response: {}", llm_response);
     let cleaned_response = clean_llm_response(&llm_response);
 
-    let parsed_metadata: Vec<ContentMetadata> = if let Ok(items) =
-        serde_json::from_str(cleaned_response)
-    {
-        items
-    } else if let Ok(response) = serde_json::from_str::<MetadataResponse>(cleaned_response) {
-        response.metadata
-    } else {
-        warn!(
+    let parsed_metadata: Vec<ContentMetadata> =
+        if let Ok(items) = serde_json::from_str(cleaned_response) {
+            items
+        } else if let Ok(response) = serde_json::from_str::<MetadataResponse>(cleaned_response) {
+            response.metadata
+        } else {
+            warn!(
             "Failed to parse metadata response as array or object, skipping. Raw response: '{}'",
             cleaned_response
         );
-        return Ok(());
-    };
+            return Ok(());
+        };
 
     // --- Programmatic Filtering and Limiting (Safety Net) ---
     let mut categories = Vec::new();

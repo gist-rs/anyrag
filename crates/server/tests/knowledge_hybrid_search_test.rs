@@ -7,72 +7,18 @@ mod common;
 
 use anyhow::Result;
 use anyrag_server::types::ApiResponse;
-use common::{generate_jwt, TestApp};
+use common::{generate_jwt, TestApp, TestDataBuilder};
 use core_access::get_or_create_user;
 use httpmock::Method;
 use serde_json::{json, Value};
-use std::path::Path;
-use turso::{params, Builder};
-
-/// A helper to manually insert and embed a FAQ into the database with a specific owner.
-async fn seed_faq(
-    db_path: &Path,
-    owner_id: &str,
-    doc_id: &str,
-    question: &str,
-    answer: &str,
-    vector: Vec<f32>,
-    metadata: Vec<(&str, &str, &str)>, // type, subtype, value
-) -> Result<()> {
-    let db = Builder::new_local(db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let conn = db.connect()?;
-
-    conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
-        params![doc_id, owner_id, format!("manual_seed/{doc_id}"), question, answer],
-    )
-    .await?;
-
-    conn.execute(
-        "INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)",
-        params![doc_id, owner_id, question, answer],
-    )
-    .await?;
-
-    for (m_type, m_subtype, m_value) in metadata {
-        conn.execute(
-            "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
-            params![doc_id, owner_id, m_type, m_subtype, m_value],
-        )
-        .await?;
-    }
-
-    let vector_bytes: &[u8] =
-        unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
-
-    conn.execute(
-        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-        params![doc_id, "mock-model", vector_bytes],
-    )
-    .await?;
-
-    Ok(())
-}
 
 #[tokio::test]
 async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    let db_path = app.db_path.clone();
     let user_identifier = "test-user-khs@example.com";
-
-    // Create the user and get their ID to seed data correctly.
-    let db = Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let user = get_or_create_user(&db, user_identifier, None).await?;
+    let db = &app.app_state.sqlite_provider.db;
+    let user = get_or_create_user(db, user_identifier, None).await?;
 
     // --- 2. Define Test Data and Vectors ---
     let faq_keyword_question = "How does the Quantum Widget work?";
@@ -87,26 +33,60 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     let final_rag_answer = "The Quantum Widget uses quantum entanglement, and advanced data processing uses multi-layered abstraction.";
 
     // --- 3. Seed the Database with data owned by our test user ---
-    seed_faq(
-        &db_path,
-        &user.id,
-        "doc_keyword",
-        faq_keyword_question,
-        faq_keyword_answer,
-        faq_keyword_vector,
-        vec![("ENTITY", "PRODUCT", "Quantum Widget")],
-    )
-    .await?;
-    seed_faq(
-        &db_path,
-        &user.id,
-        "doc_vector",
-        faq_vector_question,
-        faq_vector_answer,
-        faq_vector_vector,
-        vec![("KEYPHRASE", "CONCEPT", "advanced data processing")],
-    )
-    .await?;
+    let builder = TestDataBuilder::new(&app).await?;
+    builder
+        .add_document(
+            "doc_keyword",
+            &user.id,
+            faq_keyword_question,
+            faq_keyword_answer,
+            None,
+        )
+        .await?
+        .add_faq(
+            "doc_keyword",
+            &user.id,
+            faq_keyword_question,
+            faq_keyword_answer,
+        )
+        .await?
+        .add_metadata(
+            "doc_keyword",
+            &user.id,
+            "ENTITY",
+            "PRODUCT",
+            "Quantum Widget",
+        )
+        .await?
+        .add_embedding("doc_keyword", faq_keyword_vector)
+        .await?;
+
+    builder
+        .add_document(
+            "doc_vector",
+            &user.id,
+            faq_vector_question,
+            faq_vector_answer,
+            None,
+        )
+        .await?
+        .add_faq(
+            "doc_vector",
+            &user.id,
+            faq_vector_question,
+            faq_vector_answer,
+        )
+        .await?
+        .add_metadata(
+            "doc_vector",
+            &user.id,
+            "KEYPHRASE",
+            "CONCEPT",
+            "advanced data processing",
+        )
+        .await?
+        .add_embedding("doc_vector", faq_vector_vector)
+        .await?;
 
     // --- 4. Mock External Services ---
     let query_analysis_mock = app.mock_server.mock(|when, then| {
