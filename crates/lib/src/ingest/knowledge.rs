@@ -9,7 +9,7 @@
 
 use crate::{errors::PromptError, providers::ai::AiProvider};
 use md5;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 use tracing::{debug, info, warn};
 use turso::{params, Connection, Database};
@@ -37,6 +37,19 @@ pub enum KnowledgeError {
     Internal(#[from] anyhow::Error),
 }
 
+// --- Deserialization Helper ---
+
+/// A helper function for serde to deserialize a field that might be `null` into a default value.
+/// `#[serde(default)]` only works for missing fields, not `null` values.
+fn deserialize_null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    T: Default + Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    let opt = Option::<T>::deserialize(deserializer)?;
+    Ok(opt.unwrap_or_default())
+}
+
 // --- Data Structures ---
 
 /// Represents the essential data of a newly ingested or updated document.
@@ -58,8 +71,10 @@ pub struct ExtractedKnowledge {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FaqItem {
+    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     pub question: String,
+    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     pub answer: String,
     pub is_explicit: bool,
@@ -67,8 +82,10 @@ pub struct FaqItem {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContentChunk {
+    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     topic: String,
+    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     content: String,
 }
@@ -76,6 +93,7 @@ pub struct ContentChunk {
 #[derive(Deserialize, Debug)]
 pub struct AugmentedFaq {
     id: usize,
+    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     question: String,
 }
@@ -88,10 +106,13 @@ pub struct AugmentationResponse {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContentMetadata {
     #[serde(rename = "type")]
+    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     pub metadata_type: String,
+    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     pub subtype: String,
+    #[serde(deserialize_with = "deserialize_null_default")]
     #[serde(default)]
     pub value: String,
 }
