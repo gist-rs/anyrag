@@ -77,13 +77,31 @@ pub async fn gen_text_handler(
     debug_params: Query<DebugParams>,
     Json(payload): Json<GenTextRequest>,
 ) -> Result<Json<ApiResponse<PromptResponse>>, AppError> {
-    let db_name = payload.db.clone().unwrap_or_else(|| {
-        std::path::Path::new(&app_state.config.db_url)
-            .file_stem()
-            .and_then(std::ffi::OsStr::to_str)
-            .unwrap_or("anyrag")
-            .to_string()
-    });
+    // --- Provider Setup ---
+    // Decide which database provider to use. If a `db` name is specified in the
+    // payload, create a dynamic client for that project's database. Otherwise,
+    // use the default provider from the application state.
+    let (sqlite_provider, db_name) = if let Some(db_name_str) = payload.db.clone() {
+        info!(
+            "Request specified db: '{}'. Creating dynamic SQLite provider.",
+            db_name_str
+        );
+        let db_path = format!("db/{}.db", db_name_str);
+        let provider = SqliteProvider::new(&db_path).await?;
+        provider.initialize_schema().await?;
+        (Arc::new(provider), db_name_str)
+    } else {
+        info!("No db specified in request. Using default SQLite provider.");
+        (
+            app_state.sqlite_provider.clone(),
+            std::path::Path::new(&app_state.config.db_url)
+                .file_stem()
+                .and_then(std::ffi::OsStr::to_str)
+                .unwrap_or("anyrag")
+                .to_string(),
+        )
+    };
+
     info!(
         "Received text generation request for db: '{}' from user_id: {}",
         db_name, user.0.id
@@ -202,12 +220,9 @@ pub async fn gen_text_handler(
             "text_to_sql" => {
                 let task_config = app_state.tasks.get("query_generation").unwrap();
                 let provider = app_state.ai_providers.get(&task_config.provider).unwrap();
-                let db_path = format!("db/{db_name}.db");
-                let sqlite_provider = SqliteProvider::new(&db_path).await?;
-                sqlite_provider.initialize_schema().await?;
                 let client = PromptClientBuilder::new()
                     .ai_provider(provider.clone())
-                    .storage_provider(Box::new(sqlite_provider))
+                    .storage_provider(Box::new(sqlite_provider.as_ref().clone()))
                     .build()?;
                 let options = LibExecutePromptOptions {
                     prompt: agent_decision.query,
@@ -224,10 +239,6 @@ pub async fn gen_text_handler(
                     .ai_providers
                     .get(&analysis_task_config.provider)
                     .unwrap();
-
-                let db_path = format!("db/{db_name}.db");
-                let sqlite_provider = Arc::new(SqliteProvider::new(&db_path).await?);
-                sqlite_provider.initialize_schema().await?;
 
                 let search_options = HybridSearchOptions {
                     query_text: agent_decision.query,

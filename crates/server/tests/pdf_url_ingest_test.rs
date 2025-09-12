@@ -105,16 +105,14 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     let metadata_extraction_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert document analyst"); // Unique to the metadata prompt
-        then.status(200).json_body(json!({
-            "choices": [{"message": {"role": "assistant", "content": json!({
-                "metadata": [{
-                    "type": "KEYPHRASE",
-                    "subtype": "CONCEPT",
-                    "value": "test number"
-                }]
-            }).to_string()}}]
-        }));
+            .body_contains("You are a document analyst"); // Unique to the metadata prompt
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!([{
+                "type": "KEYPHRASE",
+                "subtype": "CONCEPT",
+                "value": "test number"
+            }]).to_string()}}]}),
+        );
     });
 
     // E. Mock Embedding API call

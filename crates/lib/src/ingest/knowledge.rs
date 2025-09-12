@@ -341,7 +341,9 @@ pub async fn distill_and_augment(
         cleaned_chunk_count
     );
 
-    if !extracted_data.content_chunks.is_empty() {
+    if extracted_data.content_chunks.is_empty() {
+        info!("No content chunks found, skipping augmentation step.");
+    } else {
         info!(
             "Starting Pass 2: Augmentation for {} content chunks.",
             extracted_data.content_chunks.len()

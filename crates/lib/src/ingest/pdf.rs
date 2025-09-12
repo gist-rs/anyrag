@@ -90,13 +90,14 @@ pub async fn run_pdf_ingestion_pipeline(
         }
     };
 
+    // Definitive check: if after extraction and refinement we have no content, abort.
     if refined_markdown.trim().is_empty() {
         warn!(
-            "PDF extraction for '{}' resulted in empty content. Aborting pipeline.",
+            "PDF processing for '{}' resulted in empty content. Aborting pipeline.",
             source_identifier
         );
         return Err(KnowledgeError::Parse(serde_json::Error::custom(
-            "Extracted PDF content was empty.",
+            "Extracted and refined PDF content was empty.",
         )));
     }
 
@@ -124,7 +125,7 @@ pub async fn run_pdf_ingestion_pipeline(
         source_identifier
     );
 
-    // --- Stage 4: Distill, Augment, and Extract Metadata (Concurrently) ---
+    // --- Stage 4: Distill & Augment (Sequential) ---
     let ingested_document = crate::ingest::knowledge::IngestedDocument {
         id: document_id.clone(),
         source_url: source_identifier.to_string(),
@@ -132,28 +133,37 @@ pub async fn run_pdf_ingestion_pipeline(
         content_hash,
     };
 
-    let (faq_result, metadata_result) = tokio::join!(
-        distill_and_augment(
-            ai_provider,
-            &ingested_document,
-            prompts.distillation_system_prompt,
-            prompts.distillation_user_prompt_template,
-            prompts.augmentation_system_prompt,
-        ),
-        extract_and_store_metadata(
-            &conn,
-            ai_provider,
-            &document_id,
-            owner_id,
-            &ingested_document.content,
-            prompts.metadata_extraction_system_prompt,
-        )
-    );
+    let faq_items = distill_and_augment(
+        ai_provider,
+        &ingested_document,
+        prompts.distillation_system_prompt,
+        prompts.distillation_user_prompt_template,
+        prompts.augmentation_system_prompt,
+    )
+    .await?;
 
-    let faq_items = faq_result?;
-    metadata_result?; // Propagate metadata errors
+    // --- Stage 5: Conditional Metadata Extraction and Storage ---
+    // Only proceed if the primary distillation was successful and produced content.
+    if faq_items.is_empty() {
+        info!(
+            "Distillation of '{}' produced no FAQs. Halting pipeline.",
+            source_identifier
+        );
+        return Ok(0);
+    }
 
-    // --- Stage 5: Store Structured Knowledge (Q&A) ---
+    // Now that we have valid FAQs, we can extract metadata...
+    extract_and_store_metadata(
+        &conn,
+        ai_provider,
+        &document_id,
+        owner_id,
+        &ingested_document.content,
+        prompts.metadata_extraction_system_prompt,
+    )
+    .await?;
+
+    // ...and finally, store the structured knowledge.
     store_structured_knowledge(db, &document_id, owner_id, faq_items).await
 }
 

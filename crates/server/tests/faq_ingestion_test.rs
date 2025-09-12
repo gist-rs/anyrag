@@ -57,27 +57,29 @@ async fn test_ingest_pdf_with_faq_true() -> Result<()> {
 
     // Mock the full AI pipeline: refinement -> distillation -> metadata
     let refinement_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions").body_contains("expert technical analyst");
+        when.method(Method::POST).path("/v1/chat/completions").body_contains("reformat it into a clean, well-structured Markdown");
         then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": "The magic word is AnyRAG."}}]}));
     });
     let distillation_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions").body_contains("data extraction agent");
+        when.method(Method::POST).path("/v1/chat/completions").body_contains("extract two types of information: 1. Explicit FAQs");
         then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({
             "faqs": [{"question": "What is the magic word?", "answer": "AnyRAG", "is_explicit": false}], "content_chunks": []
         }).to_string()}}]}));
     });
-    let metadata_extraction_mock = app.mock_server.mock(|when, then| {
+
+    let metadata_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert document analyst");
+            .body_contains("You are a document analyst"); // From METADATA_EXTRACTION_SYSTEM_PROMPT
         then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": json!({
-            "metadata": [{"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "AnyRAG"}]
-        }).to_string()}}]}),
+            json!({"choices": [{"message": {"role": "assistant", "content": json!([
+            {"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "magic word"}
+        ]).to_string()}}]}),
         );
     });
+
     let augmentation_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions").body_contains("expert content analyst");
+        when.method(Method::POST).path("/v1/chat/completions").body_contains("generate a high-quality, comprehensive question for EACH");
         then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({"augmented_faqs": []}).to_string()}}]}));
     });
 
@@ -101,7 +103,7 @@ async fn test_ingest_pdf_with_faq_true() -> Result<()> {
     assert_eq!(body.result["ingested_faqs"], 1);
     refinement_mock.assert();
     distillation_mock.assert();
-    metadata_extraction_mock.assert();
+    metadata_mock.assert();
     augmentation_mock.assert_hits(0);
 
     // Assert Database State
@@ -244,14 +246,14 @@ async fn test_ingest_pdf_with_faq_false() -> Result<()> {
     let pdf_data = generate_test_pdf("This is a light ingestion test.")?;
 
     let refinement_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions").body_contains("expert technical analyst");
+        when.method(Method::POST).path("/v1/chat/completions").body_contains("reformat it into a clean, well-structured Markdown");
         then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": "This is a light ingestion test."}}]}));
     });
 
     let distillation_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("data extraction agent");
+            .body_contains("extract two types of information");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
             "faqs": [], "content_chunks": []
@@ -259,21 +261,10 @@ async fn test_ingest_pdf_with_faq_false() -> Result<()> {
         );
     });
 
-    let metadata_extraction_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("expert document analyst");
-        then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": json!({
-            "metadata": []
-        }).to_string()}}]}),
-        );
-    });
-
     let augmentation_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert content analyst");
+            .body_contains("generate a high-quality, comprehensive question for EACH");
         then.status(200)
             .json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({"augmented_faqs": []}).to_string()}}]}));
     });
@@ -300,7 +291,6 @@ async fn test_ingest_pdf_with_faq_false() -> Result<()> {
     // Assert Mocks
     refinement_mock.assert();
     distillation_mock.assert();
-    metadata_extraction_mock.assert();
     augmentation_mock.assert_hits(0);
 
     // Assert Database State
