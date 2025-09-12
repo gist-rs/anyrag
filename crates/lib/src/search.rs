@@ -11,13 +11,15 @@ use crate::ingest::knowledge::clean_llm_response;
 use crate::{
     providers::{
         ai::{generate_embedding, AiProvider},
-        db::storage::{KeywordSearch, MetadataSearch, VectorSearch},
+        db::storage::{KeywordSearch, MetadataSearch, TemporalSearch, VectorSearch},
     },
     rerank::reciprocal_rank_fusion,
     types::SearchResult,
     PromptError,
 };
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -40,6 +42,16 @@ pub struct HybridSearchPrompts<'a> {
 }
 
 /// Encapsulates all options for a hybrid search operation.
+/// Configuration for temporal ranking.
+#[derive(Clone, Copy)]
+pub struct TemporalRankingConfig<'a> {
+    /// Keywords that trigger temporal ranking (e.g., "newest", "latest").
+    pub keywords: &'a [&'a str],
+    /// The name of the metadata property that holds the date/timestamp.
+    pub property_name: &'a str,
+}
+
+/// Encapsulates all options for a hybrid search operation.
 pub struct HybridSearchOptions<'a> {
     pub query_text: String,
     pub owner_id: Option<String>,
@@ -49,6 +61,7 @@ pub struct HybridSearchOptions<'a> {
     pub use_vector_search: bool,
     pub embedding_api_url: &'a str,
     pub embedding_model: &'a str,
+    pub temporal_ranking_config: Option<TemporalRankingConfig<'a>>,
 }
 
 // --- Query Analysis ---
@@ -103,6 +116,57 @@ async fn analyze_query(
     }
 }
 
+/// Sorts search results based on a date property if found.
+async fn temporally_rank_results<P>(
+    provider: Arc<P>,
+    results: Vec<SearchResult>,
+    config: &TemporalRankingConfig<'_>,
+    owner_id: Option<&str>,
+) -> Vec<SearchResult>
+where
+    P: TemporalSearch + Send + Sync + 'static,
+{
+    let doc_ids: Vec<&str> = results
+        .iter()
+        .filter_map(|r| r.link.split('/').next_back())
+        .collect();
+
+    if doc_ids.is_empty() {
+        return results;
+    }
+
+    let properties = match provider
+        .get_string_properties_for_documents(&doc_ids, config.property_name, owner_id)
+        .await
+    {
+        Ok(props) => props,
+        Err(e) => {
+            warn!(
+                "Failed to fetch temporal properties, returning original order: {}",
+                e
+            );
+            return results;
+        }
+    };
+
+    let mut dated_results: Vec<(SearchResult, NaiveDate)> = results
+        .into_iter()
+        .filter_map(|r| {
+            let doc_id = r.link.split('/').next_back().unwrap_or_default();
+            properties.get(doc_id).and_then(|date_str| {
+                NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
+                    .ok()
+                    .map(|date| (r, date))
+            })
+        })
+        .collect();
+
+    // Sort by date descending (newest first)
+    dated_results.sort_by(|a, b| b.1.cmp(&a.1));
+
+    dated_results.into_iter().map(|(r, _)| r).collect()
+}
+
 /// Performs a multi-stage hybrid search.
 pub async fn hybrid_search<P>(
     provider: Arc<P>,
@@ -110,7 +174,7 @@ pub async fn hybrid_search<P>(
     options: HybridSearchOptions<'_>,
 ) -> Result<Vec<SearchResult>, SearchError>
 where
-    P: MetadataSearch + VectorSearch + KeywordSearch + Send + Sync + 'static,
+    P: MetadataSearch + VectorSearch + KeywordSearch + TemporalSearch + Send + Sync + 'static,
 {
     info!(query = %options.query_text, "Starting hybrid search");
     let analyzed_query = analyze_query(
@@ -152,7 +216,7 @@ where
     });
 
     let provider_vec = Arc::clone(&provider);
-    let owner_id_vec = options.owner_id;
+    let owner_id_vec = options.owner_id.clone();
     let embedding_api_url = options.embedding_api_url.to_string();
     let embedding_model = options.embedding_model.to_string();
     let query_text_vec = options.query_text.clone();
@@ -224,6 +288,32 @@ where
     };
 
     let mut final_results = reciprocal_rank_fusion(vector_candidates, keyword_candidates);
+
+    // --- Temporal Ranking Step ---
+    if let Some(config) = &options.temporal_ranking_config {
+        let is_temporal_query = analyzed_query
+            .keyphrases
+            .iter()
+            .any(|phrase| config.keywords.iter().any(|kw| phrase.contains(*kw)));
+
+        if is_temporal_query && !final_results.is_empty() {
+            info!(
+                "Temporal keyword detected. Re-ranking results by '{}'.",
+                config.property_name
+            );
+            let mut ranked_results = temporally_rank_results(
+                Arc::clone(&provider),
+                final_results,
+                config,
+                options.owner_id.as_deref(),
+            )
+            .await;
+            // As per the plan, truncate to the single most recent result for precision.
+            ranked_results.truncate(1);
+            final_results = ranked_results;
+        }
+    }
+
     final_results.truncate(options.limit as usize);
 
     if final_results.is_empty() {

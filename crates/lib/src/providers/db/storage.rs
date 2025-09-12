@@ -5,6 +5,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use dyn_clone::DynClone;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -77,3 +78,17 @@ pub trait MetadataSearch: Send + Sync + DynClone + Debug {
 }
 
 dyn_clone::clone_trait_object!(MetadataSearch);
+
+/// A trait for providers that support temporal property searches.
+#[async_trait]
+pub trait TemporalSearch: Send + Sync + DynClone + Debug {
+    /// Fetches a specific string property for a set of document IDs.
+    async fn get_string_properties_for_documents(
+        &self,
+        doc_ids: &[&str],
+        property_name: &str,
+        owner_id: Option<&str>,
+    ) -> Result<HashMap<String, String>, turso::Error>;
+}
+
+dyn_clone::clone_trait_object!(TemporalSearch);

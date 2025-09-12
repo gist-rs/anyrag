@@ -21,6 +21,8 @@ use turso::{Database, Value as TursoValue};
 #[cfg(feature = "core-access")]
 use uuid::Uuid;
 
+use crate::providers::db::storage::TemporalSearch;
+
 mod sql;
 
 /// Represents a search result from the `faq_kb` table, used for RAG context.
@@ -670,5 +672,47 @@ impl MetadataSearch for SqliteProvider {
         }
 
         Ok(doc_ids)
+    }
+}
+
+#[async_trait]
+impl TemporalSearch for SqliteProvider {
+    async fn get_string_properties_for_documents(
+        &self,
+        doc_ids: &[&str],
+        property_name: &str,
+        owner_id: Option<&str>,
+    ) -> Result<HashMap<String, String>, turso::Error> {
+        if doc_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let conn = self.db.connect()?;
+        let mut params: Vec<turso::Value> = vec![];
+
+        let mut sql = "SELECT document_id, metadata_value FROM content_metadata WHERE metadata_type = 'PROPERTY' AND metadata_subtype = ?".to_string();
+        params.push(property_name.into());
+
+        if let Some(id) = owner_id {
+            sql.push_str(" AND owner_id = ?");
+            params.push(id.into());
+        }
+
+        let placeholders = doc_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        sql.push_str(&format!(" AND document_id IN ({placeholders})"));
+        for id in doc_ids {
+            params.push((*id).into());
+        }
+
+        let mut result_set = conn.query(&sql, params).await?;
+        let mut results = HashMap::new();
+
+        while let Some(row) = result_set.next().await? {
+            let doc_id: String = row.get(0)?;
+            let value: String = row.get(1)?;
+            results.insert(doc_id, value);
+        }
+
+        Ok(results)
     }
 }

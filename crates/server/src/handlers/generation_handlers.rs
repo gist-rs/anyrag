@@ -252,6 +252,7 @@ pub async fn gen_text_handler(
                     use_vector_search: payload.use_vector_search,
                     embedding_api_url: &app_state.config.embedding.api_url,
                     embedding_model: &app_state.config.embedding.model_name,
+                    temporal_ranking_config: None,
                 };
 
                 let search_results = hybrid_search(

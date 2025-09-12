@@ -143,6 +143,7 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
         use_vector_search: true,
         embedding_api_url: &embedding_api_url,
         embedding_model: "mock-model",
+        temporal_ranking_config: None,
     };
 
     let search_results = hybrid_search(provider, ai_provider.clone(), search_options).await?;

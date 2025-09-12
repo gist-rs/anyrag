@@ -43,6 +43,28 @@ impl From<config::ConfigError> for ConfigError {
     }
 }
 
+/// Configuration for temporal reasoning.
+#[derive(Debug, Deserialize, Clone)]
+#[allow(dead_code)]
+pub struct TemporalReasoningConfig {
+    #[serde(default = "default_temporal_keywords")]
+    pub keywords: Vec<String>,
+    #[serde(default = "default_temporal_property_name")]
+    pub property_name: String,
+}
+
+fn default_temporal_keywords() -> Vec<String> {
+    vec![
+        "newest".to_string(),
+        "latest".to_string(),
+        "most recent".to_string(),
+    ]
+}
+
+fn default_temporal_property_name() -> String {
+    "release_date".to_string()
+}
+
 /// The root configuration structure, mapping directly to `config.yml`.
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
@@ -56,6 +78,10 @@ pub struct AppConfig {
     /// An optional API key for the Jina Reader service. Loaded from `JINA_API_KEY` env var.
     #[serde(default)]
     pub jina_api_key: Option<String>,
+
+    /// Configuration for temporal reasoning.
+    #[serde(default)]
+    pub temporal_reasoning: Option<TemporalReasoningConfig>,
 
     /// Configuration for the text embedding model.
     pub embedding: EmbeddingConfig,

@@ -79,6 +79,9 @@ db_url: "{}"
 embedding:
   api_url: "{}"
   model_name: "mock-embedding-model"
+temporal_reasoning:
+  keywords: ["newest", "latest", "most recent"]
+  property_name: "release_date"
 providers:
   gemini_default:
     provider: "local"

@@ -1,7 +1,7 @@
 //! Example: Programmatic End-to-end Knowledge Base RAG workflow.
 //!
 //! This example demonstrates the full "virtuous cycle" workflow using the library's
-//! core functions, without running the web server. It shows how to use the `anyrag`
+//! core functions, withoutrunning the web server. It shows how to use the `anyrag`
 //! crate as a library to build a RAG pipeline.
 //!
 //! # Workflow:
@@ -201,6 +201,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         use_vector_search: true,
         embedding_api_url: &embeddings_api_url,
         embedding_model: &embeddings_model,
+        temporal_ranking_config: None,
     };
 
     let search_results = hybrid_search(provider, ai_provider.clone(), search_options).await?;

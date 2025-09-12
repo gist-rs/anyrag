@@ -171,6 +171,17 @@ pub async fn knowledge_search_handler(
     })?;
     let ai_provider = Arc::from(analysis_provider.clone());
 
+    let temporal_keywords: Vec<&str>;
+    let temporal_ranking_config = if let Some(config) = &app_state.config.temporal_reasoning {
+        temporal_keywords = config.keywords.iter().map(|s| s.as_str()).collect();
+        Some(anyrag::search::TemporalRankingConfig {
+            keywords: &temporal_keywords,
+            property_name: &config.property_name,
+        })
+    } else {
+        None
+    };
+
     let search_options = HybridSearchOptions {
         query_text: payload.query.clone(),
         owner_id,
@@ -183,6 +194,7 @@ pub async fn knowledge_search_handler(
         use_vector_search: true,
         embedding_api_url: &app_state.config.embedding.api_url,
         embedding_model: &app_state.config.embedding.model_name,
+        temporal_ranking_config,
     };
 
     let search_results = hybrid_search(
