@@ -127,3 +127,13 @@ pub const QUERY_ANALYSIS_SYSTEM_PROMPT: &str = r#"You are an expert query analys
 /// The user prompt for the query analysis step.
 /// Placeholder: {prompt}
 pub const QUERY_ANALYSIS_USER_PROMPT: &str = "USER QUERY:\n{prompt}";
+
+// --- GitHub Example Search Prompts ---
+
+/// The system prompt for the query analysis step in a GitHub example search.
+/// It instructs the model to extract code-related entities and keyphrases.
+pub const GITHUB_EXAMPLE_SEARCH_ANALYSIS_SYSTEM_PROMPT: &str = r#"You are an expert code search analyst. Your task is to extract key **Entities** (like function names, library names, specific variables) and **Keyphrases** (like 'how to connect', 'example of authentication') from the user's query about code examples. Respond with a JSON object containing two keys: "entities" and "keyphrases", which should be arrays of strings. If none are found, provide empty arrays."#;
+
+/// The user prompt for the GitHub example search query analysis step.
+/// Placeholder: {prompt}
+pub const GITHUB_EXAMPLE_SEARCH_ANALYSIS_USER_PROMPT: &str = "USER QUERY:\n{prompt}";
