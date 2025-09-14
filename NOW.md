@@ -33,7 +33,11 @@ This document tracks the implementation of the features outlined in `PLAN.md`.
 - [x] **Implement Context File Chunking**: The `process file` command now chunks Markdown files.
 - [x] **Store Chunks**: The `dump github` command now automatically chunks and stores the consolidated context file.
 
-## Phase 7: Future - Advanced RAG (Planned)
+## Phase 7: GitHub Example RAG (Completed)
 
-- [ ] **Embed Stored Chunks**
-- [ ] **Enhance RAG Endpoint to use Chunks**
+- [x] **Embed Stored Code Examples**: The `dump github` command now generates and stores embeddings for extracted code examples.
+- [x] **Enhance RAG Endpoint**: The `/search/examples` endpoint now uses a hybrid search (keyword + vector) with AI-powered query analysis to retrieve relevant code examples.
+
+## Phase 8: Future - Advanced RAG (Planned)
+
+- [ ] **Implement Metadata Pre-filtering for GitHub Search**: Apply the metadata-based pre-filtering strategy (currently used in the knowledge base search) to the GitHub example search to improve performance and relevance by using extracted entities.
