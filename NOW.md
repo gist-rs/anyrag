@@ -1,4 +1,4 @@
-# NOW: Implementing GitHub Example Ingestion
+# NOW: Implementing Server API for GitHub Ingestion
 
 This document tracks the implementation of the features outlined in `PLAN.md`.
 
@@ -20,8 +20,9 @@ This document tracks the implementation of the features outlined in `PLAN.md`.
     - [x] Create a main function in `github_ingest/mod.rs` that takes an `IngestionTask`.
     - [x] This function will call the `Crawler`, `Extractor`, and `StorageManager` in sequence.
     - [x] Add logic to determine the latest version if none is specified in the task.
+    - [x] Implement `Cargo.toml` parsing as a version fallback.
 
-## Phase 2: Server API and RAG Integration
+## Phase 2: Server API and RAG Integration (In Progress)
 
 - [ ] **Implement API Endpoints**
     - [ ] `POST /ingest/github`: Create a handler that accepts a URL and version, and kicks off the ingestion task.
@@ -34,8 +35,9 @@ This document tracks the implementation of the features outlined in `PLAN.md`.
 
 ## Phase 3: Testing and Refinement
 
-- [ ] **Write Integration Tests**
+- [x] **Write Integration Tests**
     - [x] Write a test for the full ingestion pipeline against a mock or real public repository.
+    - [x] Fix flaky tests in `extractor_test.rs`.
     - [ ] Write E2E tests for the new API endpoints (`/ingest/github`, `/search/examples`).
     - [ ] Write a test for a versioned RAG query.
     - [ ] Write a test for a multi-repo RAG query.

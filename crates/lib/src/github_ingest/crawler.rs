@@ -5,6 +5,7 @@
 
 use super::types::{GitHubIngestError, IngestionTask};
 use semver::Version;
+use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::{tempdir, TempDir};
 use tokio::process::Command;
@@ -152,9 +153,13 @@ impl Crawler {
                     tag
                 }
             } else {
-                info!("No semver tags found. Using the latest commit on the default branch.");
-                // TODO: Implement fallback to Cargo.toml as per PLAN.md
-                Self::get_head_commit(&repo_path).await?
+                info!("No semver tags found. Attempting to read version from Cargo.toml.");
+                if let Some(version) = Self::get_version_from_cargo_toml(&repo_path).await? {
+                    version
+                } else {
+                    info!("No version found in Cargo.toml. Using the latest commit on the default branch.");
+                    Self::get_head_commit(&repo_path).await?
+                }
             }
         };
 
@@ -207,6 +212,32 @@ impl Crawler {
             let trimmed_tag = tag.trim().strip_prefix('v').unwrap_or(tag.trim());
             if Version::parse(trimmed_tag).is_ok() {
                 return Ok(Some(tag.trim().to_string()));
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Reads the version from the `[package]` section of a `Cargo.toml` file.
+    async fn get_version_from_cargo_toml(
+        repo_path: &Path,
+    ) -> Result<Option<String>, GitHubIngestError> {
+        let cargo_toml_path = repo_path.join("Cargo.toml");
+        if !cargo_toml_path.exists() {
+            return Ok(None);
+        }
+
+        let content = fs::read_to_string(cargo_toml_path)?;
+        let value: toml::Value = toml::from_str(&content).map_err(|e| {
+            GitHubIngestError::VersionParsing(format!("Failed to parse Cargo.toml: {e}"))
+        })?;
+
+        if let Some(package) = value.get("package") {
+            if let Some(version) = package.get("version") {
+                if let Some(version_str) = version.as_str() {
+                    info!("Found version in Cargo.toml: {}", version_str);
+                    return Ok(Some(version_str.to_string()));
+                }
             }
         }
 
