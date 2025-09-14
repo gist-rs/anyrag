@@ -121,6 +121,7 @@ async fn vector_search_for_repo(
 #[derive(Deserialize, Debug)]
 struct AnalyzedQuery {
     #[serde(default)]
+    #[allow(dead_code)] // TODO: remove this
     entities: Vec<String>,
     #[serde(default)]
     keyphrases: Vec<String>,

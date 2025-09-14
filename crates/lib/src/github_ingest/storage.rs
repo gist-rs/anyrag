@@ -376,25 +376,37 @@ impl StorageManager {
         Ok(())
     }
 
-    /// Sanitizes a GitHub URL to create a filesystem-friendly repository name.
+    /// Sanitizes a GitHub URL or local path to create a filesystem-friendly repository name.
     /// e.g., "https://github.com/tursodatabase/turso" -> "tursodatabase-turso"
+    /// e.g., "/var/folders/xyz/T/.sometempdir" -> "sometempdir"
     pub fn url_to_repo_name(url: &str) -> String {
-        let name = url
-            .trim_end_matches('/')
-            .split('/')
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .take(2)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("-");
+        let name = if url.starts_with("http") || url.starts_with("git@") {
+            // Handle URLs: take the last two path components.
+            let trimmed = url.trim_end_matches('/');
+            let no_git = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+            let mut parts: Vec<&str> = no_git.split('/').rev().take(2).collect();
+            parts.reverse();
+            parts.join("-")
+        } else {
+            // Handle local paths: take the final component (the directory name).
+            // This is more robust for temporary directories used in tests.
+            Path::new(url)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| url.to_string()) // Fallback to the whole string
+        };
 
-        // Final sanitization for any other invalid characters.
-        name.chars()
+        // Final sanitization for any other invalid characters, including leading dots.
+        let sanitized_name: String = name
+            .trim_start_matches('.')
+            .chars()
             .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-            .collect()
+            .collect();
+
+        info!(
+            "Sanitized URL or path '{}' to repo name '{}'",
+            url, sanitized_name
+        );
+        sanitized_name
     }
 }

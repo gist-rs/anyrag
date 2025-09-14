@@ -27,9 +27,10 @@ use anyrag_server::{
     state::{build_app_state, AppState},
 };
 use axum::serve;
-use httpmock::MockServer;
+use httpmock::{Method, MockServer};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest::Client;
+use serde_json::json;
 use std::{
     fs::File,
     io::Write,
@@ -66,6 +67,22 @@ impl TestApp {
     /// Spawns the application server and returns a `TestApp` instance.
     pub async fn spawn() -> Result<Self> {
         let mock_server = MockServer::start();
+
+        // --- Default Mocks ---
+        // Add a default mock for any embedding requests. This prevents tests
+        // that trigger embedding from failing if they don't set up their own specific mock.
+        mock_server.mock(|when, then| {
+            when.method(Method::POST).path("/v1/embeddings");
+            then.status(200)
+                .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
+        });
+        // Add a default mock for any chat completion requests
+        mock_server.mock(|when, then| {
+            when.method(Method::POST).path("/v1/chat/completions");
+            then.status(200)
+                .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "Default mock response."}}]}));
+        });
+
         let db_file = NamedTempFile::new()?;
         let db_path = db_file.path().to_path_buf();
 
@@ -304,7 +321,6 @@ pub fn get_mock_schema() -> Arc<TableSchema> {
     })
 }
 
-/// Generates a valid JWT for a given user identifier (subject).
 /// Generates a valid JWT for a given user identifier (subject).
 pub fn generate_jwt(sub: &str) -> Result<String> {
     generate_jwt_with_expiry(sub, 3600)

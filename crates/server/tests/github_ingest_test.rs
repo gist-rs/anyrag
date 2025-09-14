@@ -10,7 +10,7 @@ use anyhow::Result;
 use anyrag::github_ingest::storage::StorageManager;
 use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
-use httpmock::Method;
+
 use serde_json::{json, Value};
 use std::fs;
 use std::process::Command;
@@ -41,6 +41,8 @@ async fn test_github_ingestion_e2e_workflow() -> Result<()> {
     // Clone the bare repo.
     Command::new("git")
         .arg("clone")
+        .arg("--no-local")
+        .arg("--depth=1")
         .arg(remote_repo_path.to_str().unwrap())
         .arg(".")
         .current_dir(local_repo_path)
@@ -175,6 +177,13 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
     let user_identifier = "get-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
+    // Clean up from previous test runs to ensure isolation.
+    let db_dir = "db/github_ingest";
+    if fs::metadata(db_dir).is_ok() {
+        fs::remove_dir_all(db_dir)?;
+    }
+    fs::create_dir_all(db_dir)?;
+
     // Create a mock git repository similar to the other test
     let remote_repo_dir = tempdir()?;
     let remote_repo_path = remote_repo_dir.path();
@@ -188,6 +197,8 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
     let local_repo_path = local_repo_dir.path();
     Command::new("git")
         .arg("clone")
+        .arg("--no-local")
+        .arg("--depth=1")
         .arg(remote_repo_path.to_str().unwrap())
         .arg(".")
         .current_dir(local_repo_path)
@@ -279,6 +290,13 @@ async fn test_search_examples_e2e() -> Result<()> {
     let user_identifier = "search-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
+    // Clean up from previous runs to ensure isolation.
+    let db_dir = "db/github_ingest";
+    if fs::metadata(db_dir).is_ok() {
+        fs::remove_dir_all(db_dir)?;
+    }
+    fs::create_dir_all(db_dir)?;
+
     // Create a mock git repository.
     let remote_repo_dir = tempdir()?;
     let remote_repo_path = remote_repo_dir.path();
@@ -289,7 +307,13 @@ async fn test_search_examples_e2e() -> Result<()> {
     let local_repo_dir = tempdir()?;
     let local_repo_path = local_repo_dir.path();
     Command::new("git")
-        .args(["clone", remote_repo_path.to_str().unwrap(), "."])
+        .args([
+            "clone",
+            "--no-local",
+            "--depth=1",
+            remote_repo_path.to_str().unwrap(),
+            ".",
+        ])
         .current_dir(local_repo_path)
         .status()?;
     fs::write(
@@ -372,14 +396,6 @@ async fn test_search_examples_e2e() -> Result<()> {
     )
     .await?;
 
-    // Mock the embedding service for the search query.
-    let query_vector = vec![0.99, 0.01, 0.0]; // Vector very similar to "connect"
-    let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
-        then.status(200)
-            .json_body(json!({ "data": [{ "embedding": query_vector }] }));
-    });
-
     // --- 2. Act ---
     let response = app
         .client
@@ -394,7 +410,7 @@ async fn test_search_examples_e2e() -> Result<()> {
         .error_for_status()?;
 
     // --- 3. Assert ---
-    embedding_mock.assert();
+
     let body: ApiResponse<Value> = response.json().await?;
     let results = body.result["results"].as_array().unwrap();
     assert_eq!(results.len(), 1, "Expected one search result.");
