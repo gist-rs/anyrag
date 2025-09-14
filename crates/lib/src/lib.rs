@@ -7,6 +7,7 @@
 pub mod graph;
 
 pub mod errors;
+pub mod github_ingest;
 pub mod ingest;
 pub mod prompts;
 pub mod providers;
