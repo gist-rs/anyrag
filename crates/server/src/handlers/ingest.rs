@@ -739,7 +739,10 @@ pub async fn ingest_github_handler(
         embedding_model: Some(app_state.config.embedding.model_name.clone()),
     };
 
-    let ingested_count = run_github_ingestion(task)
+    let storage_manager =
+        anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
+
+    let ingested_count = run_github_ingestion(&storage_manager, task)
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("GitHub ingestion failed: {}", e)))?;
 
@@ -830,7 +833,11 @@ pub async fn search_examples_handler(
     let embedding_api_url = &app_state.config.embedding.api_url;
     let embedding_model = &app_state.config.embedding.model_name;
 
+    let storage_manager =
+        anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
+
     let search_results = search_examples(
+        &storage_manager,
         &payload.query,
         &payload.repos,
         std::sync::Arc::from(ai_provider),

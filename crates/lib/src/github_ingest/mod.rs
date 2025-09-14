@@ -21,8 +21,6 @@ use crate::{providers::ai::AiProvider, SearchResult};
 use std::sync::Arc;
 use tracing::{info, instrument};
 
-const DEFAULT_DB_DIR: &str = "db/github_ingest";
-
 /// The main orchestrator for the GitHub ingestion pipeline.
 ///
 /// This function takes an `IngestionTask` and performs the following steps:
@@ -37,12 +35,14 @@ const DEFAULT_DB_DIR: &str = "db/github_ingest";
 ///
 /// # Returns
 /// The number of examples that were successfully ingested.
-#[instrument(skip(task), fields(url = %task.url, version = ?task.version))]
-pub async fn run_github_ingestion(task: IngestionTask) -> Result<usize, GitHubIngestError> {
+#[instrument(skip(storage_manager, task), fields(url = %task.url, version = ?task.version))]
+pub async fn run_github_ingestion(
+    storage_manager: &StorageManager,
+    task: IngestionTask,
+) -> Result<usize, GitHubIngestError> {
     info!("Starting GitHub ingestion pipeline.");
 
     // 1. Setup
-    let storage_manager = StorageManager::new(DEFAULT_DB_DIR).await?;
     let tracked_repo = storage_manager.track_repository(&task.url).await?;
 
     // 2. Crawl
@@ -79,19 +79,17 @@ pub async fn run_github_ingestion(task: IngestionTask) -> Result<usize, GitHubIn
 
 /// Searches for examples across multiple repositories.
 pub async fn search_examples(
+    storage_manager: &StorageManager,
     query: &str,
     repos: &[String],
     ai_provider: Arc<dyn AiProvider>,
     embedding_api_url: &str,
     embedding_model: &str,
 ) -> Result<Vec<SearchResult>, GitHubIngestError> {
-    info!("Initializing storage manager for multi-repo search.");
-    let storage_manager = StorageManager::new(DEFAULT_DB_DIR).await?;
-
     search_across_repos(
         query,
         repos,
-        &storage_manager,
+        storage_manager,
         ai_provider,
         embedding_api_url,
         embedding_model,

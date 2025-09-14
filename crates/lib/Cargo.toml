@@ -78,6 +78,10 @@ path = "tests/github_ingest/extractor_test.rs"
 name = "github_ingest_test"
 path = "tests/github_ingest_test.rs"
 
+[[test]]
+name = "github_search_logic_test"
+path = "tests/github_search_logic_test.rs"
+
 [[example]]
 name = "knowledge"
 path = "examples/knowledge.rs"

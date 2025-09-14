@@ -40,7 +40,8 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         embedding_model: args.embedding_model.clone(),
     };
 
-    let ingested_count = run_github_ingestion(task).await?;
+    let storage_manager = StorageManager::new("db/github_ingest").await?;
+    let ingested_count = run_github_ingestion(&storage_manager, task).await?;
     println!(
         "✅ Successfully ingested {} unique examples from '{}'.",
         ingested_count, args.url
@@ -53,7 +54,6 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
 
     // Now, generate the markdown file from the ingested data.
     println!("📝 Generating consolidated context file...");
-    let storage_manager = StorageManager::new("db/github_ingest").await?;
     let repo_name = StorageManager::url_to_repo_name(&args.url);
 
     // Determine which version to fetch. If a version was specified for ingestion, use that.

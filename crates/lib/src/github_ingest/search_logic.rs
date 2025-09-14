@@ -18,7 +18,7 @@ use futures::future::join_all;
 use serde::Deserialize;
 use std::sync::Arc;
 use tracing::{debug, info, warn};
-use turso::{params, Value as TursoValue};
+use turso::Value as TursoValue;
 
 /// Parses a repository specification string (e.g., "tursodatabase-turso:v1.0.0")
 /// into a repository name and an optional version.
@@ -31,6 +31,45 @@ fn parse_repo_spec(repo_spec: &str) -> (String, Option<String>) {
     (repo_spec.to_string(), None)
 }
 
+/// Performs a metadata pre-filtering search using entities.
+async fn metadata_search_for_repo(
+    storage_manager: &StorageManager,
+    repo_name: &str,
+    version: &str,
+    entities: &[String],
+    limit: u32,
+) -> Result<Vec<i64>, GitHubIngestError> {
+    if entities.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let provider = storage_manager.get_provider_for_repo(repo_name).await?;
+    let conn = provider.db.connect()?;
+
+    let mut params: Vec<TursoValue> = vec![version.to_string().into()];
+    let mut conditions = Vec::new();
+
+    for entity in entities {
+        conditions.push("(content LIKE ? OR example_handle LIKE ?)".to_string());
+        let pattern = format!("%{entity}%");
+        params.push(pattern.clone().into());
+        params.push(pattern.into());
+    }
+
+    let where_clause = conditions.join(" OR ");
+
+    let sql = format!(
+        "SELECT id FROM generated_examples WHERE version = ? AND ({where_clause}) LIMIT {limit}"
+    );
+
+    let mut rows = conn.query(&sql, params).await?;
+    let mut doc_ids = Vec::new();
+    while let Some(row) = rows.next().await? {
+        doc_ids.push(row.get(0)?);
+    }
+    Ok(doc_ids)
+}
+
 /// Performs a keyword search within a single repository's database.
 async fn keyword_search_for_repo(
     storage_manager: &StorageManager,
@@ -38,23 +77,45 @@ async fn keyword_search_for_repo(
     version: &str,
     query: &str,
     limit: u32,
+    candidate_ids: &[i64],
 ) -> Result<Vec<SearchResult>, GitHubIngestError> {
     let provider = storage_manager.get_provider_for_repo(repo_name).await?;
     let conn = provider.db.connect()?;
 
     let pattern = format!("%{query}%");
+    let mut conditions = vec![
+        "version = ?".to_string(),
+        "(content LIKE ? OR example_handle LIKE ?)".to_string(),
+    ];
+    let mut query_params: Vec<TursoValue> = vec![
+        version.to_string().into(),
+        pattern.clone().into(),
+        pattern.into(),
+    ];
+
+    if !candidate_ids.is_empty() {
+        let placeholders = candidate_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        conditions.push(format!("id IN ({placeholders})"));
+        for id in candidate_ids {
+            query_params.push((*id).into());
+        }
+    }
+
+    let where_clause = conditions.join(" AND ");
     let sql = format!(
         "
         SELECT example_handle, source_file, content
         FROM generated_examples
-        WHERE version = ? AND (content LIKE ? OR example_handle LIKE ?)
+        WHERE {where_clause}
         LIMIT {limit}
     "
     );
 
-    let mut rows = conn
-        .query(&sql, params![version.to_string(), pattern.clone(), pattern])
-        .await?;
+    let mut rows = conn.query(&sql, query_params).await?;
 
     let mut results = Vec::new();
     while let Some(row) = rows.next().await? {
@@ -75,6 +136,7 @@ async fn vector_search_for_repo(
     version: &str,
     query_vector: &[f32],
     limit: u32,
+    candidate_ids: &[i64],
 ) -> Result<Vec<SearchResult>, GitHubIngestError> {
     let provider = storage_manager.get_provider_for_repo(repo_name).await?;
     let conn = provider.db.connect()?;
@@ -90,18 +152,37 @@ async fn vector_search_for_repo(
 
     let distance_calc = format!("(1.0 - (vector_distance_cos(ee.embedding, {vector_str}) / 2.0))");
 
+    let mut conditions = vec![
+        "ge.version = ?".to_string(),
+        "ee.embedding IS NOT NULL".to_string(),
+    ];
+    let mut query_params: Vec<TursoValue> = vec![version.to_string().into()];
+
+    if !candidate_ids.is_empty() {
+        let placeholders = candidate_ids
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        conditions.push(format!("ge.id IN ({placeholders})"));
+        for id in candidate_ids {
+            query_params.push((*id).into());
+        }
+    }
+
+    let where_clause = conditions.join(" AND ");
     let sql = format!(
         "
         SELECT ge.example_handle, ge.source_file, ge.content, {distance_calc} AS similarity
         FROM example_embeddings ee
         JOIN generated_examples ge ON ee.example_id = ge.id
-        WHERE ge.version = ? AND ee.embedding IS NOT NULL
+        WHERE {where_clause}
         ORDER BY similarity DESC
         LIMIT {limit}
     "
     );
 
-    let mut rows = conn.query(&sql, params![version.to_string()]).await?;
+    let mut rows = conn.query(&sql, query_params).await?;
 
     let mut results = Vec::new();
     while let Some(row) = rows.next().await? {
@@ -121,7 +202,6 @@ async fn vector_search_for_repo(
 #[derive(Deserialize, Debug)]
 struct AnalyzedQuery {
     #[serde(default)]
-    #[allow(dead_code)] // TODO: remove this
     entities: Vec<String>,
     #[serde(default)]
     keyphrases: Vec<String>,
@@ -180,7 +260,11 @@ pub async fn search_across_repos(
     .await
     .map_err(GitHubIngestError::Prompt)?;
 
-    let keyword_query = analyzed_query.keyphrases.join(" ");
+    let keyword_query = if analyzed_query.keyphrases.join(" ").trim().is_empty() {
+        query.to_string()
+    } else {
+        analyzed_query.keyphrases.join(" ")
+    };
 
     // 2. Generate an embedding for the original, full query for vector search.
     let query_vector = generate_embedding(embedding_api_url, embedding_model, query)
@@ -191,14 +275,10 @@ pub async fn search_across_repos(
 
     for repo_spec in repos {
         let (repo_name, version_opt) = parse_repo_spec(repo_spec);
-        // Use the refined keyword query for keyword search, but the original for vector search.
-        let query_clone = if keyword_query.trim().is_empty() {
-            query.to_string()
-        } else {
-            keyword_query.clone()
-        };
+        let query_clone = keyword_query.clone();
         let query_vector_clone = query_vector.clone();
         let storage_manager_clone = storage_manager.clone();
+        let entities_clone = analyzed_query.entities.clone();
 
         let handle: tokio::task::JoinHandle<Result<Vec<SearchResult>, GitHubIngestError>> =
             tokio::spawn(async move {
@@ -214,20 +294,32 @@ pub async fn search_across_repos(
                         })?,
                 };
 
+                // New pre-filtering step
+                let candidate_ids = metadata_search_for_repo(
+                    &storage_manager_clone,
+                    &repo_name,
+                    &version,
+                    &entities_clone,
+                    50, // Fetch more candidates for filtering
+                )
+                .await?;
+
                 let (keyword_res, vector_res) = tokio::join!(
                     keyword_search_for_repo(
                         &storage_manager_clone,
                         &repo_name,
                         &version,
                         &query_clone,
-                        20
+                        20,
+                        &candidate_ids
                     ),
                     vector_search_for_repo(
                         &storage_manager_clone,
                         &repo_name,
                         &version,
                         &query_vector_clone,
-                        20
+                        20,
+                        &candidate_ids
                     )
                 );
 
