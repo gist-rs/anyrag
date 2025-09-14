@@ -7,15 +7,19 @@ use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use crate::auth::middleware::AuthenticatedUser;
 #[cfg(feature = "rss")]
 use anyrag::ingest::ingest_from_url;
-use anyrag::ingest::{
-    dump_firestore_collection, ingest_faq_from_google_sheet, ingest_from_google_sheet_url,
-    knowledge::{extract_and_store_metadata, IngestionPrompts},
-    run_ingestion_pipeline, run_pdf_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
-    text::{chunk_text, ingest_chunks_as_documents},
-    DumpFirestoreOptions, PdfSyncExtractor,
+use anyrag::{
+    github_ingest::{run_github_ingestion, search_examples, types::IngestionTask},
+    ingest::{
+        dump_firestore_collection, ingest_faq_from_google_sheet, ingest_from_google_sheet_url,
+        knowledge::{extract_and_store_metadata, IngestionPrompts},
+        run_ingestion_pipeline, run_pdf_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
+        text::{chunk_text, ingest_chunks_as_documents},
+        DumpFirestoreOptions, PdfSyncExtractor,
+    },
+    SearchResult,
 };
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     Json,
 };
 use axum_extra::extract::Multipart;
@@ -125,6 +129,40 @@ pub struct IngestFirebaseResponse {
     pub ingested_documents: usize,
     pub documents_processed_for_metadata: usize,
     pub facts_added_to_graph: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct IngestGitHubRequest {
+    pub url: String,
+    pub version: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct IngestGitHubResponse {
+    pub message: String,
+    pub ingested_examples: usize,
+}
+
+#[derive(Deserialize)]
+pub struct GetExamplesPath {
+    pub repo_name: String,
+    pub version: String,
+}
+
+#[derive(Serialize)]
+pub struct GetExamplesResponse {
+    pub content: String,
+}
+
+#[derive(Deserialize)]
+pub struct SearchExamplesRequest {
+    pub query: String,
+    pub repos: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct SearchExamplesResponse {
+    pub results: Vec<SearchResult>,
 }
 
 // --- Ingestion Handlers ---
@@ -341,15 +379,11 @@ pub async fn ingest_pdf_handler(
         ))
     })?;
 
-    // --- 2. Run the ingestion pipeline (currently defaults to FAQ generation) ---
-    // TODO: Implement the logic to switch between "Light Ingest" and "FAQ Generation"
-    // based on the `ingest_params.faq` flag.
     if !ingest_params.faq {
         warn!(
             "'faq=false' is not fully implemented. Running full FAQ generation pipeline for now."
         );
     }
-    // TODO: Pass the `ingest_params.embed` flag down to the library layer.
     if !ingest_params.embed {
         warn!("'embed=false' is not implemented. Embeddings will be generated.");
     }
@@ -438,7 +472,6 @@ pub async fn ingest_web_handler(
         payload.url, owner_id
     );
 
-    // --- Get AI provider for knowledge distillation ---
     let task_name = "knowledge_distillation";
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
@@ -448,7 +481,6 @@ pub async fn ingest_web_handler(
         AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
     })?;
 
-    // --- Get prompts for augmentation and metadata sub-tasks ---
     let aug_task_name = "knowledge_augmentation";
     let aug_task_config = app_state.tasks.get(aug_task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
@@ -508,7 +540,6 @@ pub async fn ingest_firebase_handler(
         payload.project_id, payload.collection
     );
 
-    // --- Part 1: Dump Firestore collection to local SQLite table ---
     let db_path = format!("db/{}.db", payload.project_id);
     let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?;
@@ -536,12 +567,9 @@ pub async fn ingest_firebase_handler(
         return Ok(wrap_response(response, debug_params, None));
     }
 
-    // --- Part 2: Build metadata for each row in the dumped table ---
     let table_name = anyrag::ingest::firebase::sanitize_table_name(&payload.collection);
     let conn = sqlite_provider.db.connect()?;
 
-    // Before processing, delete any existing shadow documents from a previous run for this collection.
-    // This makes the process idempotent and prevents UNIQUE constraint errors.
     let source_url_prefix = format!("db://{}/{}%", payload.project_id, &table_name);
     conn.execute(
         "DELETE FROM documents WHERE source_url LIKE ?",
@@ -603,20 +631,17 @@ pub async fn ingest_firebase_handler(
             .and_then(|index| row.get_value(index).ok())
             .map(turso_value_to_string);
 
-        // A stable, non-empty primary key is required. If we don't have one, we
-        // cannot reliably create or update a shadow document, so we skip the row.
         let pk_val = match pk_val {
             Some(pk) if !pk.is_empty() => pk,
             _ => {
                 warn!(
                     "Skipping row in table '{table_name}' due to missing or invalid primary key (_id)."
                 );
-                continue; // Skip this row entirely
+                continue;
             }
         };
 
         for (i, name) in column_names.iter().enumerate() {
-            // Create the document content from a string representation of all columns.
             let value_str = turso_value_to_string(row.get_value(i)?);
             if !value_str.is_empty() {
                 if name.to_lowercase() == "title" {
@@ -655,7 +680,6 @@ pub async fn ingest_firebase_handler(
     }
     info!("Processed {documents_processed_for_metadata} documents for metadata extraction.");
 
-    // --- Part 3: Optionally build the knowledge graph ---
     let mut facts_added_to_graph = None;
     if payload.use_graph {
         info!("`use_graph` is true. Triggering knowledge graph build for table '{table_name}'.");
@@ -663,7 +687,6 @@ pub async fn ingest_firebase_handler(
             db: payload.project_id.clone(),
             table_name: table_name.clone(),
         };
-        // Construct a new Query<DebugParams> for the internal call to solve the ownership issue.
         let graph_debug_params = Query(DebugParams {
             debug: debug_params.0.debug,
         });
@@ -697,5 +720,102 @@ pub async fn ingest_firebase_handler(
         "generated_table_name": table_name,
     });
 
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+/// Handler for ingesting code examples from a public GitHub repository.
+pub async fn ingest_github_handler(
+    State(_app_state): State<AppState>,
+    _user: AuthenticatedUser,
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<IngestGitHubRequest>,
+) -> Result<Json<ApiResponse<IngestGitHubResponse>>, AppError> {
+    info!("Received GitHub ingest request for URL: {}", payload.url);
+
+    let task = IngestionTask {
+        url: payload.url.clone(),
+        version: payload.version.clone(),
+    };
+
+    let ingested_count = run_github_ingestion(task)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("GitHub ingestion failed: {}", e)))?;
+
+    let response = IngestGitHubResponse {
+        message: "GitHub ingestion pipeline completed successfully.".to_string(),
+        ingested_examples: ingested_count,
+    };
+    let debug_info = json!({ "url": payload.url, "version": payload.version });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+/// Handler for retrieving a consolidated Markdown file of examples for a repository.
+pub async fn get_examples_handler(
+    State(_app_state): State<AppState>,
+    Path(path): Path<GetExamplesPath>,
+    debug_params: Query<DebugParams>,
+) -> Result<Json<ApiResponse<GetExamplesResponse>>, AppError> {
+    info!(
+        "Received request for examples for repo '{}', version '{}'",
+        path.repo_name, path.version
+    );
+
+    let storage_manager =
+        anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
+
+    let examples = storage_manager
+        .get_examples(&path.repo_name, &path.version)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to retrieve examples: {}", e)))?;
+
+    if examples.is_empty() {
+        let response = GetExamplesResponse {
+            content: format!(
+                "# No examples found for repository '{}' version '{}'.",
+                path.repo_name, path.version
+            ),
+        };
+        return Ok(wrap_response(response, debug_params, None));
+    }
+
+    let markdown_content = examples
+        .iter()
+        .map(|ex| {
+            format!(
+                "## `{}`\n**Source:** `{}` (`{}`)\n\n```rust\n{}\n```\n",
+                ex.example_handle, ex.source_file, ex.source_type, ex.content
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("---\n");
+
+    let response = GetExamplesResponse {
+        content: markdown_content,
+    };
+
+    let debug_info = json!({ "repo_name": path.repo_name, "version": path.version, "example_count": examples.len() });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+/// Handler for the RAG search endpoint for code examples.
+pub async fn search_examples_handler(
+    State(_app_state): State<AppState>,
+    _user: AuthenticatedUser,
+    debug_params: Query<DebugParams>,
+    Json(payload): Json<SearchExamplesRequest>,
+) -> Result<Json<ApiResponse<SearchExamplesResponse>>, AppError> {
+    info!(
+        "Received example search request for query: '{}' in repos: {:?}",
+        payload.query, payload.repos
+    );
+
+    let search_results = search_examples(&payload.query, &payload.repos)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Example search failed: {}", e)))?;
+
+    let response = SearchExamplesResponse {
+        results: search_results,
+    };
+    let debug_info = json!({ "query": payload.query, "repos": payload.repos });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }

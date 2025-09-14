@@ -30,6 +30,11 @@ pub fn create_router(app_state: AppState) -> Router {
         )
         .route("/ingest/sheet", post(handlers::ingest_sheet_handler))
         .route("/ingest/web", post(handlers::ingest_web_handler))
+        .route("/ingest/github", post(handlers::ingest_github_handler))
+        .route(
+            "/examples/{repo_name}/{version}",
+            get(handlers::get_examples_handler),
+        )
         .route("/embed/new", post(handlers::embed_new_handler))
         .route("/search/vector", post(handlers::vector_search_handler))
         .route("/search/keyword", post(handlers::keyword_search_handler))
@@ -38,6 +43,7 @@ pub fn create_router(app_state: AppState) -> Router {
             "/search/knowledge",
             post(handlers::knowledge_search_handler),
         )
+        .route("/search/examples", post(handlers::search_examples_handler))
         .route("/knowledge/export", get(handlers::knowledge_export_handler));
 
     // Conditionally add routes by re-binding the router variable.

@@ -15,6 +15,7 @@ use self::{
     storage::StorageManager,
     types::{GitHubIngestError, IngestionTask},
 };
+use crate::SearchResult;
 use tracing::{info, instrument};
 
 const DEFAULT_DB_DIR: &str = "db/github_ingest";
@@ -60,4 +61,19 @@ pub async fn run_github_ingestion(task: IngestionTask) -> Result<usize, GitHubIn
         count
     );
     Ok(count)
+}
+
+/// Searches for examples across multiple repositories.
+pub async fn search_examples(
+    _query: &str,
+    _repos: &[String],
+) -> Result<Vec<SearchResult>, GitHubIngestError> {
+    info!("Searching examples...");
+    // Placeholder implementation
+    Ok(vec![SearchResult {
+        title: "Placeholder".to_string(),
+        link: "placeholder".to_string(),
+        description: "This is a placeholder result.".to_string(),
+        score: 1.0,
+    }])
 }

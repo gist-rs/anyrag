@@ -132,6 +132,11 @@ name = "admin_test"
 path = "tests/admin_test.rs"
 harness = true
 
+[[test]]
+name = "github_ingest_test"
+path = "tests/github_ingest_test.rs"
+harness = true
+
 [[example]]
 name = "backfill_metadata"
 path = "examples/backfill_metadata.rs"

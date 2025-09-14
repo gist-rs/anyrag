@@ -1,6 +1,7 @@
 #[cfg(feature = "rss")]
 use anyrag::ingest::RssIngestError;
 use anyrag::{
+    github_ingest::types::GitHubIngestError,
     ingest::{EmbeddingError, IngestSheetFaqError, KnowledgeError, TextIngestError},
     search::SearchError,
     PromptError,
@@ -29,6 +30,8 @@ pub enum AppError {
     RssIngest(RssIngestError),
     /// Errors from the sheet faq ingestion process.
     SheetFaqIngest(IngestSheetFaqError),
+    /// Errors from the GitHub ingestion process.
+    GitHubIngest(GitHubIngestError),
 
     /// Errors from the embedding process.
     Embedding(EmbeddingError),
@@ -91,6 +94,13 @@ impl From<KnowledgeError> for AppError {
 impl From<SearchError> for AppError {
     fn from(err: SearchError) -> Self {
         AppError::Search(err)
+    }
+}
+
+/// Conversion from `GitHubIngestError` to `AppError`.
+impl From<GitHubIngestError> for AppError {
+    fn from(err: GitHubIngestError) -> Self {
+        AppError::GitHubIngest(err)
     }
 }
 
@@ -177,6 +187,13 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Search operation failed: {err}"),
+                )
+            }
+            AppError::GitHubIngest(err) => {
+                error!("GitHubIngestError: {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to ingest from GitHub: {err}"),
                 )
             }
             AppError::Database(err) => {
