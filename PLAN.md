@@ -32,7 +32,7 @@ The primary goal is to create a system that can crawl public GitHub repositories
         -   `generated_examples` table: `id`, `example_handle` (a unique name), `content`, `source_file`, `source_type` (test, readme, etc.), `version`.
         -   `example_embeddings` table: For storing vector embeddings to power RAG.
 
-### 2.4. RAG Query Engine
+### 2.4. RAG Query Engine (Completed)
 - **Task:** Provide an API to answer natural language questions about how to use the code.
 - **Functionality:**
     1.  **Single-Repo Query:** Answer prompts like `"gimme a code helloworld example for turso"`. The system will perform a hybrid search on the latest version of the `tursodatabase-turso.db`.

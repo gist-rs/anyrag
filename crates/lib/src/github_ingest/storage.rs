@@ -13,6 +13,7 @@ use turso::params;
 const META_DB_NAME: &str = "github_meta.db";
 
 /// Manages all database interactions for the GitHub ingestion feature.
+#[derive(Clone)]
 pub struct StorageManager {
     /// A provider connected to the main `github_meta.db` which tracks all repositories.
     meta_db_provider: SqliteProvider,
@@ -208,6 +209,53 @@ impl StorageManager {
         }
 
         Ok(examples)
+    }
+
+    /// Retrieves a `SqliteProvider` for a specific repository.
+    pub async fn get_provider_for_repo(
+        &self,
+        repo_name: &str,
+    ) -> Result<SqliteProvider, GitHubIngestError> {
+        let conn = self.meta_db_provider.db.connect()?;
+        let mut rows = conn
+            .query(
+                "SELECT db_path FROM repositories WHERE repo_name = ?",
+                params![repo_name],
+            )
+            .await?;
+
+        let db_path: String = if let Some(row) = rows.next().await? {
+            row.get(0)?
+        } else {
+            return Err(GitHubIngestError::Config(format!(
+                "Repository '{repo_name}' not found in metadata."
+            )));
+        };
+
+        let provider = SqliteProvider::new(&db_path).await?;
+        Ok(provider)
+    }
+
+    /// Retrieves the latest version string for a given repository.
+    pub async fn get_latest_version(
+        &self,
+        repo_name: &str,
+    ) -> Result<Option<String>, GitHubIngestError> {
+        let repo_provider = self.get_provider_for_repo(repo_name).await?;
+        let conn = repo_provider.db.connect()?;
+
+        let mut rows = conn
+            .query(
+                "SELECT version FROM generated_examples ORDER BY created_at DESC LIMIT 1",
+                (),
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
     }
 
     // --- Private Helper Functions ---

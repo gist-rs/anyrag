@@ -799,7 +799,7 @@ pub async fn get_examples_handler(
 
 /// Handler for the RAG search endpoint for code examples.
 pub async fn search_examples_handler(
-    State(_app_state): State<AppState>,
+    State(app_state): State<AppState>,
     _user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<SearchExamplesRequest>,
@@ -809,9 +809,34 @@ pub async fn search_examples_handler(
         payload.query, payload.repos
     );
 
-    let search_results = search_examples(&payload.query, &payload.repos)
-        .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Example search failed: {}", e)))?;
+    let task_name = "query_analysis";
+    let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
+        AppError::Internal(anyhow::anyhow!(
+            "Configuration for task '{task_name}' not found."
+        ))
+    })?;
+    let provider_name = &task_config.provider;
+    let ai_provider = app_state
+        .ai_providers
+        .get(provider_name)
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Provider '{provider_name}' not found in providers map."
+            ))
+        })?
+        .clone();
+    let embedding_api_url = &app_state.config.embedding.api_url;
+    let embedding_model = &app_state.config.embedding.model_name;
+
+    let search_results = search_examples(
+        &payload.query,
+        &payload.repos,
+        std::sync::Arc::from(ai_provider),
+        embedding_api_url,
+        embedding_model,
+    )
+    .await
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("Example search failed: {}", e)))?;
 
     let response = SearchExamplesResponse {
         results: search_results,

@@ -29,9 +29,9 @@ This document tracks the implementation of the features outlined in `PLAN.md`.
     - [x] `GET /examples/{repo_name}/{version}`: Create a handler to generate and return the consolidated Markdown file.
     - [x] `POST /search/examples`: Create the RAG handler for querying examples. (Placeholder implemented)
 
-- [ ] **Integrate Multi-DB RAG Logic**
-    - [ ] Update the RAG pipeline to dynamically connect to the correct repository-specific database based on the request.
-    - [ ] Implement the two-stage RAG for multi-repository queries.
+- [x] **Integrate Multi-DB RAG Logic**
+    - [x] Update the RAG pipeline to dynamically connect to the correct repository-specific database based on the request.
+    - [x] Implement the two-stage RAG for multi-repository queries.
 
 ## Phase 3: Testing and Refinement
 
@@ -40,5 +40,5 @@ This document tracks the implementation of the features outlined in `PLAN.md`.
     - [x] Fix flaky tests in `extractor_test.rs`.
     - [x] Write E2E tests for the new API endpoints (`/ingest/github`, `/examples/{repo_name}/{version}`).
     - [x] Write E2E tests for the new API endpoints (`/search/examples`). (Placeholder test implemented)
-    - [ ] Write a test for a versioned RAG query.
-    - [ ] Write a test for a multi-repo RAG query.
+    - [x] Write a test for a versioned RAG query.
+    - [x] Write a test for a multi-repo RAG query.

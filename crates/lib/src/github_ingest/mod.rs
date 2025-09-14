@@ -6,16 +6,19 @@
 
 pub mod crawler;
 pub mod extractor;
+pub mod search_logic;
 pub mod storage;
 pub mod types;
 
 use self::{
     crawler::Crawler,
     extractor::Extractor,
+    search_logic::search_across_repos,
     storage::StorageManager,
     types::{GitHubIngestError, IngestionTask},
 };
-use crate::SearchResult;
+use crate::{providers::ai::AiProvider, SearchResult};
+use std::sync::Arc;
 use tracing::{info, instrument};
 
 const DEFAULT_DB_DIR: &str = "db/github_ingest";
@@ -65,15 +68,22 @@ pub async fn run_github_ingestion(task: IngestionTask) -> Result<usize, GitHubIn
 
 /// Searches for examples across multiple repositories.
 pub async fn search_examples(
-    _query: &str,
-    _repos: &[String],
+    query: &str,
+    repos: &[String],
+    ai_provider: Arc<dyn AiProvider>,
+    embedding_api_url: &str,
+    embedding_model: &str,
 ) -> Result<Vec<SearchResult>, GitHubIngestError> {
-    info!("Searching examples...");
-    // Placeholder implementation
-    Ok(vec![SearchResult {
-        title: "Placeholder".to_string(),
-        link: "placeholder".to_string(),
-        description: "This is a placeholder result.".to_string(),
-        score: 1.0,
-    }])
+    info!("Initializing storage manager for multi-repo search.");
+    let storage_manager = StorageManager::new(DEFAULT_DB_DIR).await?;
+
+    search_across_repos(
+        query,
+        repos,
+        &storage_manager,
+        ai_provider,
+        embedding_api_url,
+        embedding_model,
+    )
+    .await
 }

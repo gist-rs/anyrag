@@ -138,6 +138,7 @@ dependencies = [
  "dotenvy",
  "dyn-clone",
  "firestore",
+ "futures",
  "gcloud-sdk",
  "gcp-bigquery-client",
  "git2",
