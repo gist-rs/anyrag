@@ -1,5 +1,8 @@
 use anyhow::Result;
-use anyrag::github_ingest::{run_github_ingestion, storage::StorageManager, types::IngestionTask};
+use anyrag::{
+    github_ingest::{run_github_ingestion, storage::StorageManager, types::IngestionTask},
+    ingest::markdown::EmbeddingConfig,
+};
 use clap::Parser;
 use std::fs;
 use tracing::info;
@@ -15,6 +18,12 @@ pub struct GithubArgs {
     /// Disables the automatic processing of the generated markdown file into chunks.
     #[arg(long)]
     pub no_process: bool,
+    /// The API URL for the embedding model (optional). If provided, embeddings will be generated for chunks.
+    #[arg(long, env = "EMBEDDINGS_API_URL")]
+    pub embedding_api_url: Option<String>,
+    /// The name of the embedding model to use (required if embedding-api-url is set).
+    #[arg(long, env = "EMBEDDINGS_MODEL", requires = "embedding_api_url")]
+    pub embedding_model: Option<String>,
 }
 
 pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
@@ -27,6 +36,8 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     let task = IngestionTask {
         url: args.url.clone(),
         version: args.version.clone(),
+        embedding_api_url: args.embedding_api_url.clone(),
+        embedding_model: args.embedding_model.clone(),
     };
 
     let ingested_count = run_github_ingestion(task).await?;
@@ -102,10 +113,23 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         fs::create_dir_all(chunk_db_dir)?;
         let chunk_db_path = format!("{chunk_db_dir}/{repo_name}.db");
 
-        let count = anyrag::ingest::ingest_markdown_file(
+        let embedding_config = if let (Some(url), Some(model)) = (
+            args.embedding_api_url.as_deref(),
+            args.embedding_model.as_deref(),
+        ) {
+            Some(EmbeddingConfig {
+                api_url: url,
+                model,
+            })
+        } else {
+            None
+        };
+
+        let count = anyrag::ingest::markdown::ingest_markdown_file(
             &chunk_db_path,
             &output_filename,
             "---\n", // The separator used for joining examples
+            embedding_config,
         )
         .await?;
 

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use anyrag::ingest::ingest_markdown_file;
+use anyrag::ingest::markdown::{ingest_markdown_file, EmbeddingConfig};
 use clap::{Parser, Subcommand};
 use std::path::Path;
 use tracing::info;
@@ -27,6 +27,12 @@ struct FileArgs {
     /// The separator string used to split the file content into chunks
     #[arg(long, default_value = "\n---\n")]
     separator: String,
+    /// The API URL for the embedding model (optional). If provided, embeddings will be generated.
+    #[arg(long, env = "EMBEDDINGS_API_URL")]
+    embedding_api_url: Option<String>,
+    /// The name of the embedding model to use (required if embedding-api-url is set).
+    #[arg(long, env = "EMBEDDINGS_MODEL", requires = "embedding_api_url")]
+    embedding_model: Option<String>,
 }
 
 pub async fn handle_process(args: &ProcessArgs) -> Result<()> {
@@ -44,7 +50,17 @@ async fn handle_process_file(args: &FileArgs) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
-    let count = ingest_markdown_file(&args.db_path, &args.path, &args.separator).await?;
+    let embedding_config = args.embedding_api_url.as_deref().and_then(|url| {
+        args.embedding_model
+            .as_deref()
+            .map(|model| EmbeddingConfig {
+                api_url: url,
+                model,
+            })
+    });
+
+    let count =
+        ingest_markdown_file(&args.db_path, &args.path, &args.separator, embedding_config).await?;
 
     println!(
         "✅ Successfully ingested {} chunks from '{}' into '{}'.",

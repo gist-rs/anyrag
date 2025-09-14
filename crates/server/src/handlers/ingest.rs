@@ -725,7 +725,7 @@ pub async fn ingest_firebase_handler(
 
 /// Handler for ingesting code examples from a public GitHub repository.
 pub async fn ingest_github_handler(
-    State(_app_state): State<AppState>,
+    State(app_state): State<AppState>,
     _user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<IngestGitHubRequest>,
@@ -735,6 +735,8 @@ pub async fn ingest_github_handler(
     let task = IngestionTask {
         url: payload.url.clone(),
         version: payload.version.clone(),
+        embedding_api_url: Some(app_state.config.embedding.api_url.clone()),
+        embedding_model: Some(app_state.config.embedding.model_name.clone()),
     };
 
     let ingested_count = run_github_ingestion(task)

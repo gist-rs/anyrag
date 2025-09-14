@@ -100,4 +100,8 @@ pub struct IngestionTask {
     /// An optional version (tag, branch, commit hash) to check out.
     /// If `None`, the latest version will be determined and used.
     pub version: Option<String>,
+    /// The API URL for the embedding model.
+    pub embedding_api_url: Option<String>,
+    /// The name of the embedding model to use.
+    pub embedding_model: Option<String>,
 }

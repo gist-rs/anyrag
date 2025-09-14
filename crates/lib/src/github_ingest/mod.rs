@@ -59,6 +59,17 @@ pub async fn run_github_ingestion(task: IngestionTask) -> Result<usize, GitHubIn
         .store_examples(&tracked_repo, examples)
         .await?;
 
+    // 5. Embed new examples if embedding is configured.
+    if let (Some(url), Some(model)) = (&task.embedding_api_url, &task.embedding_model) {
+        // We only run embedding if new examples were actually stored.
+        if count > 0 {
+            info!("Starting embedding process for {} new examples.", count);
+            storage_manager
+                .embed_and_store_examples(&tracked_repo, url, model)
+                .await?;
+        }
+    }
+
     info!(
         "GitHub ingestion pipeline finished successfully. Ingested {} examples.",
         count

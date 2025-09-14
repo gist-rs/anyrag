@@ -160,6 +160,60 @@ impl StorageManager {
         Ok(examples.len())
     }
 
+    /// Generates and stores embeddings for examples that don't have them yet.
+    pub async fn embed_and_store_examples(
+        &self,
+        repo: &TrackedRepository,
+        api_url: &str,
+        model_name: &str,
+    ) -> Result<usize, GitHubIngestError> {
+        info!(
+            "Starting embedding process for repo '{}' with model '{}'",
+            repo.repo_name, model_name
+        );
+
+        let provider = SqliteProvider::new(&repo.db_path).await?;
+        let conn = provider.db.connect()?;
+
+        // Select examples that are not yet in the embeddings table.
+        // We need the ID for the foreign key and the content for embedding.
+        let mut stmt = conn
+            .prepare(
+                "SELECT ge.id, ge.content FROM generated_examples ge
+             LEFT JOIN example_embeddings ee ON ge.id = ee.example_id
+             WHERE ee.id IS NULL",
+            )
+            .await?;
+        let mut rows = stmt.query(()).await?;
+
+        let mut embed_count = 0;
+        while let Some(row) = rows.next().await? {
+            let example_id: i64 = row.get(0)?;
+            let content: String = row.get(1)?;
+
+            let vector = crate::providers::ai::generate_embedding(api_url, model_name, &content)
+                .await
+                .map_err(|e| GitHubIngestError::Internal(e.into()))?;
+
+            let vector_bytes: &[u8] = unsafe {
+                std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4)
+            };
+
+            conn.execute(
+                "INSERT INTO example_embeddings (example_id, model_name, embedding) VALUES (?, ?, ?)",
+                params![example_id, model_name.to_string(), vector_bytes],
+            )
+            .await?;
+            embed_count += 1;
+        }
+
+        info!(
+            "Embedding complete. Processed {} new examples.",
+            embed_count
+        );
+        Ok(embed_count)
+    }
+
     /// Retrieves all examples for a specific repository and version.
     pub async fn get_examples(
         &self,

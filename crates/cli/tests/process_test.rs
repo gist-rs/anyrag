@@ -80,3 +80,36 @@ fn test_process_file_command_custom_separator() {
         .success()
         .stdout(predicate::str::contains("Successfully ingested 2 chunks"));
 }
+
+#[test]
+fn test_process_file_with_embeddings() {
+    // Arrange
+    let temp_dir = tempdir().unwrap();
+    let db_path = temp_dir.path().join("test_embeddings.db");
+    let fixture_content = "This is a chunk to embed.";
+    let fixture_path = create_fixture_file(temp_dir.path(), fixture_content);
+
+    // Act
+    let mut cmd = Command::cargo_bin("cli").unwrap();
+    cmd.arg("process")
+        .arg("file")
+        .arg(fixture_path.to_str().unwrap())
+        .arg("--db-path")
+        .arg(db_path.to_str().unwrap())
+        .arg("--embedding-api-url")
+        .arg("http://127.0.0.1:12345/embeddings") // A dummy, non-existent server
+        .arg("--embedding-model")
+        .arg("test-model");
+
+    // Assert
+    // It should fail because it can't connect to the embedding server.
+    // But it should have printed the "Generating embeddings" message before failing.
+    cmd.assert()
+        .failure()
+        .stdout(predicate::str::contains(
+            "Generating embeddings for 1 new chunks",
+        ))
+        .stderr(predicate::str::contains(
+            "Process failed: Embedding generation failed",
+        ));
+}
