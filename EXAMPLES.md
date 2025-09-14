@@ -14,9 +14,11 @@ curl -X POST http://localhost:9090/some/endpoint \
   -d '{...}'
 ```
 
+---
+
 ## Knowledge Base Management API
 
-These endpoints are for building and maintaining the self-improving knowledge base.
+These endpoints are for building and maintaining the self-improving knowledge base from sources like web pages, PDFs, and RSS feeds.
 
 ### `POST /ingest/web`
 
@@ -69,7 +71,8 @@ curl -X POST http://localhost:9090/ingest/rss \
 Processes a PDF from either a direct file upload or a URL.
 
 **Query Parameters:**
-- `faq`, `embed` (see `/ingest/web`).
+- `faq` (boolean, optional): If `true` (default), runs the full AI-based pipeline to distill the content into structured Q&A pairs.
+- `embed` (boolean, optional): If `true` (default), generates and stores vector embeddings for the ingested content.
 
 **Request Body:** `multipart/form-data` containing either a `file` or a `url`.
 - `extractor`: (Optional) Can be `"local"` (default) or `"gemini"`.
@@ -162,7 +165,44 @@ Exports the FAQ knowledge base into a JSONL file suitable for fine-tuning.
 curl http://localhost:9090/knowledge/export -o finetuning_dataset.jsonl
 ```
 
+---
+
+## GitHub Code Ingestion & RAG API
+
+These endpoints are for ingesting and searching code examples from public GitHub repositories.
+
+### `POST /ingest/github`
+
+Triggers the ingestion of a public GitHub repository. The server will clone the repo, intelligently extract all code examples, generate embeddings, and store them.
+
+**Request Body:** `{"url": "...", "version": "..."}` (version is optional)
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/ingest/github \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "url": "https://github.com/tursodatabase/turso",
+    "version": "v0.90.1"
+  }'
+```
+
+### `GET /examples/{repo_name}/{version}`
+
+Retrieves a consolidated Markdown file of all extracted examples for a specific repository version.
+
+**Example:**
+```sh
+curl "http://localhost:9090/examples/tursodatabase-turso/v0.90.1" \
+  -H "Authorization: Bearer <your_jwt>"
+```
+
+---
+
 ## RAG & Search API
+
+These endpoints provide different ways to search the ingested data.
 
 ### `POST /search/knowledge`
 
@@ -180,6 +220,83 @@ curl -X POST http://localhost:9090/search/knowledge \
     "instruction": "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า"
   }'
 ```
+
+### `POST /search/examples`
+
+**This is the primary RAG endpoint for code examples.** It performs an advanced RAG search across one or more ingested GitHub repositories to find relevant code examples.
+
+**Request Body:** `{"query": "...", "repos": ["..."]}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/search/examples \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "query": "how to connect to a database with rust",
+    "repos": ["tursodatabase-turso"]
+  }'
+```
+
+### `POST /search/hybrid`
+
+Performs a hybrid search (vector + keyword) with re-ranking on the knowledge base. This is useful for testing or specific retrieval strategies.
+
+**Request Body:** `{"query": "...", "limit": 10, "mode": "rrf"}` (mode can be `rrf` or `llm_rerank`)
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/search/hybrid \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "query": "Tesla prize conditions",
+    "mode": "rrf"
+  }'
+```
+
+### `POST /search/knowledge_graph`
+
+Performs a direct search on the in-memory knowledge graph for a specific fact.
+
+**Request Body:** `{"subject": "...", "predicate": "..."}`
+
+**Example:**
+```sh
+curl -X POST http://localhost:9090/search/knowledge_graph \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "subject": "Alice",
+    "predicate": "role"
+  }'
+```
+
+---
+
+## Admin & Utility API
+
+### `GET /users`
+
+**(Admin only)** Lists all users in the system. Requires the `root` role.
+
+**Example:**
+```sh
+curl http://localhost:9090/users \
+  -H "Authorization: Bearer <your_jwt_with_root_role>"
+```
+
+### `GET /documents`
+
+Lists all documents visible to the current user. Root users see all documents, while other users see their own and guest-owned documents.
+
+**Example:**
+```sh
+curl http://localhost:9090/documents \
+  -H "Authorization: Bearer <your_jwt>"
+```
+
+---
 
 ## Advanced API
 
