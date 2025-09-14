@@ -42,3 +42,20 @@ This document tracks the implementation of the features outlined in `PLAN.md`.
     - [x] Write E2E tests for the new API endpoints (`/search/examples`). (Placeholder test implemented)
     - [x] Write a test for a versioned RAG query.
     - [x] Write a test for a multi-repo RAG query.
+
+## Phase 4: CLI Refinement and GitHub Integration Command (Completed)
+
+- [x] **Refine CLI Structure**
+  - [x] Separate Firebase-related logic into a new `cli/src/firebase.rs` module.
+  - [x] Update `cli/src/main.rs` to use the new module.
+- [x] **Implement `dump github` Command**
+  - [x] Add `github` subcommand to the `dump` command in `cli/src/main.rs`.
+  - [x] Implement the logic to call the `anyrag::github_ingest::run_github_ingestion` function.
+  - [x] Create a new handler function for the `dump github` command.
+- [x] **Generate Consolidated Markdown Output**
+  - [x] Add functionality to the CLI to generate the `tursodatabase-turso-context.md` file from the ingested examples.
+- [x] **Update Documentation**
+  - [x] Rewrite `crates/cli/README.md` to include instructions and examples for the new `dump github` command.
+- [x] **Testing**
+  - [x] Add a unit test for the CLI argument parsing.
+  - [x] Write an integration test for the end-to-end `dump github` workflow.

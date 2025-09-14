@@ -3,12 +3,10 @@
 //! This is the main entry point for the `anyrag` command-line interface.
 
 mod auth;
+mod firebase;
+mod github;
 
 use anyhow::{bail, Result};
-use anyrag::{
-    ingest::{dump_firestore_collection, DumpFirestoreOptions},
-    providers::db::sqlite::SqliteProvider,
-};
 use clap::{Parser, Subcommand};
 use keyring::Entry;
 use std::fs;
@@ -16,29 +14,6 @@ use std::path::Path;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 use turso::Value as TursoValue;
-
-// --- Helper Functions ---
-
-/// Resolves the GCP Project ID.
-///
-/// It prioritizes the explicitly provided ID, then falls back to inferring
-/// it from a `gcp_creds.json` file.
-fn resolve_project_id(project_id_arg: Option<&str>) -> Result<String> {
-    if let Some(id) = project_id_arg {
-        return Ok(id.to_string());
-    }
-
-    if let Ok(file_content) = fs::read_to_string("gcp_creds.json") {
-        let json: serde_json::Value = serde_json::from_str(&file_content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse gcp_creds.json: {e}"))?;
-        if let Some(project_id) = json["project_id"].as_str() {
-            println!("Inferred project ID '{project_id}' from gcp_creds.json.");
-            return Ok(project_id.to_string());
-        }
-    }
-
-    bail!("Project ID not provided and could not be inferred from gcp_creds.json. Please use the --project-id flag.")
-}
 
 // --- CLI Definition ---
 
@@ -76,29 +51,9 @@ struct DumpArgs {
 #[derive(Subcommand, Debug)]
 enum DumpCommands {
     /// Dump data from a Google Firestore collection
-    Firebase(FirebaseArgs),
-}
-
-#[derive(Parser, Debug)]
-struct FirebaseArgs {
-    /// The Google Cloud Project ID. If omitted, it will be inferred from `gcp_creds.json`.
-    #[arg(long)]
-    project_id: Option<String>,
-    /// The name of the Firestore collection to dump
-    #[arg(long, required = true)]
-    collection: String,
-    /// Enable incremental sync to fetch only new or updated documents
-    #[arg(long)]
-    incremental: bool,
-    /// The document field for ordering and checkpointing (required for incremental sync)
-    #[arg(long, requires = "incremental")]
-    timestamp_field: Option<String>,
-    /// Limit the number of documents to dump, useful for testing
-    #[arg(long)]
-    limit: Option<i32>,
-    /// Comma-separated list of specific fields to select. If omitted, all fields are dumped.
-    #[arg(long, value_delimiter = ',')]
-    fields: Option<Vec<String>>,
+    Firebase(firebase::FirebaseArgs),
+    /// Dump examples from a public GitHub repository
+    Github(github::GithubArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -182,34 +137,12 @@ async fn main() -> Result<()> {
 async fn handle_dump(args: &DumpArgs) -> Result<()> {
     match &args.command {
         DumpCommands::Firebase(firebase_args) => {
-            handle_dump_firebase(firebase_args).await?;
+            firebase::handle_dump_firebase(firebase_args).await?;
+        }
+        DumpCommands::Github(github_args) => {
+            github::handle_dump_github(github_args).await?;
         }
     }
-    Ok(())
-}
-
-async fn handle_dump_firebase(args: &FirebaseArgs) -> Result<()> {
-    let project_id = resolve_project_id(args.project_id.as_deref())?;
-    let db_path = format!("db/{project_id}.db");
-    fs::create_dir_all("db")?;
-
-    let sqlite_provider = SqliteProvider::new(&db_path).await?;
-    sqlite_provider.initialize_schema().await?;
-    info!("Local database at '{db_path}' is ready.");
-
-    let options = DumpFirestoreOptions {
-        project_id: &project_id,
-        collection: &args.collection,
-        incremental: args.incremental,
-        timestamp_field: args.timestamp_field.as_deref(),
-        limit: args.limit,
-        fields: args.fields.as_deref(),
-    };
-
-    dump_firestore_collection(&sqlite_provider, options)
-        .await
-        .map_err(|e| anyhow::anyhow!("Firebase dump failed: {e}"))?;
-
     Ok(())
 }
 
@@ -219,12 +152,12 @@ async fn handle_process(_args: &ProcessArgs) -> Result<()> {
 }
 
 async fn handle_list(args: &ListArgs) -> Result<()> {
-    let project_id = resolve_project_id(args.project_id.as_deref())?;
+    let project_id = firebase::resolve_project_id(args.project_id.as_deref())?;
     let db_path = format!("db/{project_id}.db");
     if !Path::new(&db_path).exists() {
         bail!("Database file '{db_path}' not found. Run a `dump` command first for project '{project_id}'.");
     }
-    let sqlite_provider = SqliteProvider::new(&db_path).await?;
+    let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
     let conn = sqlite_provider.db.connect()?;
 
     let sql = format!("SELECT * FROM {} LIMIT 10", args.table_name);
@@ -279,12 +212,12 @@ async fn handle_list(args: &ListArgs) -> Result<()> {
 }
 
 async fn handle_count(args: &CountArgs) -> Result<()> {
-    let project_id = resolve_project_id(args.project_id.as_deref())?;
+    let project_id = firebase::resolve_project_id(args.project_id.as_deref())?;
     let db_path = format!("db/{project_id}.db");
     if !Path::new(&db_path).exists() {
         bail!("Database file '{db_path}' not found. Run a `dump` command first for project '{project_id}'.");
     }
-    let sqlite_provider = SqliteProvider::new(&db_path).await?;
+    let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
     let conn = sqlite_provider.db.connect()?;
 
     let sql = format!("SELECT COUNT(*) FROM {}", args.table_name);
