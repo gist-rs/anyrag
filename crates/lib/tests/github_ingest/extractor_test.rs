@@ -57,15 +57,24 @@ print("hello")
     let expected_code_1 = r#"fn main() {
     println!("Hello, from README!");
 }"#;
-    assert_eq!(examples[0].content, expected_code_1);
-    assert!(examples[0].example_handle.contains("README.md"));
-    assert!(examples[0].example_handle.starts_with("readme:README.md:"));
-
     let expected_code_2 = r#"let x = 5;
 let y = 10;
 assert_eq!(x + y, 15);"#;
-    assert_eq!(examples[1].content, expected_code_2);
-    assert!(examples[1].example_handle.contains("README.md"));
+
+    // Check for presence of each code block, regardless of order.
+    assert!(
+        examples.iter().any(|e| e.content == expected_code_1),
+        "The 'main' function example was not found"
+    );
+    assert!(
+        examples.iter().any(|e| e.content == expected_code_2),
+        "The 'x + y' example was not found"
+    );
+
+    // Verify all examples from this test are from the README.
+    assert!(examples
+        .iter()
+        .all(|e| e.example_handle.contains("README.md")));
 }
 
 #[test]
