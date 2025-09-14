@@ -1,49 +1,43 @@
 # `anyrag` Library
 
-This crate provides the core logic for a comprehensive natural language data interaction and RAG platform. Its main functionalities include:
-1.  **Natural Language to Data:** Translating prompts into executable queries for data warehouses like Google BigQuery, or dynamically ingesting and querying data from sources like Google Sheets.
-2.  **RAG Pipeline:** A complete system for building a self-improving knowledge base from diverse sources (web pages, PDFs, text, and structured sheets) and answering questions using an advanced, multi-stage hybrid search model.
+This crate provides the core logic for a comprehensive natural language data interaction and Retrieval-Augmented Generation (RAG) platform. Its main functionalities include:
 
-It uses a pluggable AI provider for NLP and integrates with both remote (BigQuery) and local (SQLite) storage backends.
+1.  **Knowledge Base RAG Pipeline:** A complete system for building a self-improving knowledge base from diverse sources (web pages, PDFs, text, structured sheets) and answering questions using an advanced, multi-stage hybrid search model.
+2.  **GitHub Code Example RAG Pipeline:** A specialized system to crawl public Git repositories, intelligently extract versioned code examples, and use them as a foundation for a powerful code-centric RAG.
+3.  **Natural Language to Data:** Translating prompts into executable queries for data warehouses like Google BigQuery.
 
-This library is the foundation of the `anyrag` workspace and is used by the `anyrag-server` crate to expose its functionality over a REST API.
+It uses a pluggable AI provider for NLP and integrates with both remote (BigQuery) and local (SQLite) storage backends. This library is the foundation of the `anyrag` workspace and is used by the `anyrag-server` and `anyrag-cli` crates.
 
 ## Features
 
-*   **Natural Language to Query:**
-    *   Converts plain English prompts into executable SQL queries.
-    *   Can dynamically ingest and query Google Sheets when a URL is provided in the prompt.
-    *   Automatically injects the current date into the AI's context for handling time-sensitive questions.
 *   **Knowledge Base Pipeline:** A complete "virtuous cycle" for RAG:
-    *   **Multi-Source Ingestion:** Ingests and processes content from:
-        -   Web URLs (fetching and cleaning Markdown).
-        -   PDF files (from uploads or direct URLs).
-        -   Google Sheets (for structured, time-sensitive FAQs).
-        -   RSS feeds (for continuous content updates).
-        -   Raw text (with automatic chunking).
+    *   **Multi-Source Ingestion:** Ingests and processes content from web URLs, PDFs, Google Sheets, RSS feeds, and raw text.
     *   **Distill & Augment:** Uses a two-pass LLM process to extract explicit FAQs and generate new ones from unstructured content.
     *   **Store & Embed:** Saves structured Q&A pairs into a local SQLite database and generates vector embeddings for semantic search.
-    *   **Export for Fine-tuning:** Generates a dataset in the correct format for fine-tuning your base LLM.
+*   **GitHub Ingestion Pipeline:**
+    *   **Repository Crawler:** Clones public repositories, handling versioning via tags, branches, or commits.
+    *   **Intelligent Extractor:** Finds code examples from tests, doc comments, dedicated example files, and READMEs, prioritizing sources to ensure accuracy.
+    *   **Idempotent Storage:** Stores versioned examples in a dedicated database for each repository, ensuring that re-ingesting a version correctly updates its content.
 *   **Advanced Retrieval-Augmented Generation (RAG):**
-    *   Synthesizes answers to user questions by retrieving relevant facts from the knowledge base using a sophisticated, multi-stage pipeline for highly relevant and context-aware answers.
-    *   **Temporal Reasoning:** Intelligently answers time-sensitive queries (e.g., "what is the newest iPhone?") by parsing date properties and prioritizing the most recent information.
+    *   **Knowledge Base Search:** Synthesizes answers by retrieving facts from the knowledge base using a sophisticated, multi-stage pipeline with temporal reasoning for time-sensitive queries.
+    *   **Code Example Search:** Retrieves relevant code snippets from multiple repositories using an advanced hybrid search that combines metadata pre-filtering, keyword search, and vector search for maximum relevance and performance.
 *   **Pluggable Providers:** Supports different AI and storage providers (e.g., Gemini, local models, BigQuery, SQLite).
 *   **Robust and Asynchronous:** Built with Tokio for efficient, non-blocking I/O.
-*   **Identity & Ownership (`core-access` feature):** Provides a flexible user and ownership model. This allows the server to distinguish between content owned by different authenticated users and a shared "Guest User," ensuring clear data provenance.
+*   **Identity & Ownership (`core-access` feature):** Provides a flexible user and ownership model to ensure clear data provenance.
 
-### The Advanced RAG Pipeline
+### The Advanced RAG Pipelines
 
-When you ask a question, the system uses a multi-stage process involving three LLM calls to deliver a precise answer:
+Whether you're searching the knowledge base or GitHub code examples, the system uses a multi-stage process to deliver a precise answer:
 
-1.  **Query Analysis (LLM Call #1):** The user's query is first analyzed to extract key entities (e.g., "iPhone") and keyphrases (e.g., "newest").
+1.  **Query Analysis (LLM Call #1):** The user's query is first analyzed to extract key entities (e.g., "iPhone", "turso client") and keyphrases (e.g., "newest", "connect to database").
 
 2.  **Multi-Stage Candidate Retrieval:**
-    *   **Metadata Search:** A fast database query retrieves an initial set of candidate documents based on the extracted entities and keyphrases.
-    *   **Keyword & Vector Search:** In parallel, keyword and vector searches are performed. The vector search uses an **Embedding Model (LLM Call #2)** to convert the user's query into a vector.
+    *   **Metadata Pre-filtering (for Code Search):** A fast initial search finds examples that contain the extracted entities, creating a small, relevant candidate pool.
+    *   **Keyword & Vector Search:** In parallel, keyword and vector searches are performed across the knowledge base or the filtered code examples. The vector search uses an **Embedding Model (LLM Call #2)** to convert the user's query into a vector for semantic matching.
 
 3.  **Reciprocal Rank Fusion (RRF):** The results from keyword and vector searches are intelligently combined and re-ranked using the RRF algorithm to produce a single, relevance-scored list.
 
-4.  **Temporal Filtering:** The system checks the query for temporal keywords (like "newest," "latest"). If found, it filters the re-ranked list to find the single most recent document based on its date properties.
+4.  **Temporal Filtering (for Knowledge Base):** The system checks the query for temporal keywords (like "newest," "latest") and filters the re-ranked list to find the single most recent document based on its date properties.
 
 5.  **Answer Synthesis (LLM Call #3):** The final, highly-filtered context is passed to a powerful LLM, which generates a coherent, accurate answer based *only* on the provided information.
 

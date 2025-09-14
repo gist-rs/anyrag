@@ -79,21 +79,51 @@ Clones a public GitHub repository, intelligently extracts code examples from doc
 
 *   `<URL>`: **(Required)** The full URL of the public GitHub repository (e.g., `https://github.com/tursodatabase/turso`).
 *   `--version <VERSION>`: (Optional) A specific git tag, branch, or commit hash to check out. If omitted, the CLI will automatically use the latest semantic version tag it finds.
+*   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model. If provided, embeddings will be generated for all extracted examples, enabling vector search capabilities. Can also be set via the `EMBEDDINGS_API_URL` environment variable.
+*   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use (e.g., `text-embedding-ada-002`). Can also be set via the `EMBEDDINGS_MODEL` environment variable.
+*   `--no-process`: (Optional) Disables the final automatic step of chunking the generated Markdown context file.
 
-**Example:**
+**Examples:**
 
-This command will ingest the Turso repository, find all relevant examples, and generate a context file.
+**1. Basic Ingestion:**
 
+This command will ingest the Turso repository, find all relevant examples, generate a context file, and automatically process that file into a chunked database.
 ```sh
 cargo run -p cli -- dump github https://github.com/tursodatabase/turso
 ```
 
+**2. Ingestion with Embeddings:**
+
+This command does everything the basic command does, but it also generates vector embeddings for each extracted code example and for each chunk of the final context file. This is required for enabling semantic vector search.
+```sh
+cargo run -p cli -- dump github https://github.com/tursodatabase/turso \
+  --embedding-api-url "http://localhost:1234/api/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
 **Expected Output:**
 
-After a successful run, you will see messages indicating the number of examples ingested, and a new file will be created in your current directory named after the repository, such as `tursodatabase-turso-context.md`. This file contains all the extracted examples, formatted and ready to be used as a context file for an LLM.
+After a successful run, you will see messages indicating the number of examples ingested. A new context file will be created (e.g., `tursodatabase-turso-v0.90.1-context.md`), and you will see a final confirmation that the chunks from this file have also been stored in a local database (e.g., `db/github_chunks/tursodatabase-turso.db`).
 
-### `process`
+### `process file`
 
-*(This command is planned but not yet implemented).*
+Ingests a local Markdown file by splitting it into chunks and storing them in a dedicated SQLite database. This is the same logic that `dump github` uses automatically on its generated context file, but it can be used on any Markdown file.
 
-This command will be used to process and enrich the data that has been dumped into the local SQLite database, preparing it for RAG and fine-tuning.
+**Arguments:**
+
+*   `<FILE_PATH>`: **(Required)** The path to the local Markdown file to process.
+*   `--db-path <DB_PATH>`: **(Required)** The path where the output SQLite database will be created.
+*   `--separator <SEPARATOR>`: (Optional) The string used to split the file into chunks. Defaults to `"\n---\n"`.
+*   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model. If provided, embeddings will be generated for each chunk.
+*   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use.
+
+**Example:**
+
+This command will take a local context file, split it by the `---` separator, and store each chunk in a new database file named `my-project.db`, generating embeddings for each chunk.
+```sh
+cargo run -p cli -- process file my-project-context.md \
+  --db-path db/chunks/my-project.db \
+  --separator "---" \
+  --embedding-api-url "http://localhost:1234/api/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```

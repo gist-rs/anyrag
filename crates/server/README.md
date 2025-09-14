@@ -6,8 +6,8 @@ This crate provides a lightweight `axum` web server that exposes the `anyrag` li
 
 *   **RESTful API:** Exposes all core functionalities via a simple API.
 *   **Dynamic Source Querying:** Accepts Google Sheet URLs, PDF URLs, or web page URLs directly in prompts, ingesting and querying them on the fly.
-*   **Controllable Ingestion:** Endpoints for building a knowledge base from web pages, PDFs, raw text, and Google Sheets, with fine-grained control over AI-based FAQ generation and embedding.
-*   **Advanced RAG Endpoint:** A dedicated endpoint (`/search/knowledge`) to ask questions against the knowledge base, using a sophisticated, multi-stage hybrid search backend with temporal reasoning.
+*   **Controllable Ingestion:** Endpoints for building knowledge bases from web pages, PDFs, raw text, Google Sheets, and **public GitHub repositories**.
+*   **Advanced RAG Endpoints:** Dedicated endpoints for both knowledge bases (`/search/knowledge`) and code examples (`/search/examples`), using sophisticated, multi-stage hybrid search backends.
 *   **Containerized Deployment:** Includes a multi-stage `Dockerfile` for building a minimal, secure server image.
 *   **Asynchronous:** Built on top of Tokio for non-blocking, efficient request handling.
 *   **Highly Configurable:** Uses a `config.yml` file for detailed control over AI providers, prompts, and features like temporal reasoning.
@@ -146,6 +146,11 @@ RUST_LOG=info cargo test -p anyrag-server -- --nocapture
 
 ## API Endpoints
 
-The server exposes a comprehensive set of endpoints for interacting with the `anyrag` library, including knowledge base management, RAG search, and advanced data generation.
+The server exposes a comprehensive set of endpoints for interacting with the `anyrag` library. Key functionalities include:
+
+*   **Knowledge Base Management:** Ingest from URLs, PDFs, text, and more.
+*   **GitHub Ingestion:** Ingest code examples from public repositories.
+*   **Advanced RAG Search:** Dedicated endpoints for querying both knowledge bases (`/search/knowledge`) and GitHub code examples (`/search/examples`).
+*   **Advanced Data Generation:** Agentic workflows for generating content from retrieved context.
 
 For detailed `curl` examples for every endpoint, please see the **[API Usage Examples documentation](../../EXAMPLES.md)**.

@@ -17,7 +17,7 @@ The primary goal is to create a system that can crawl public GitHub repositories
     - `POST /ingest/github`: Triggers the ingestion of a repository.
     - `GET /examples/{repo_name}/{version}`: Generates and returns the consolidated Markdown for a specific version.
 - **RAG Query API:**
-    - `POST /search/examples`: A RAG endpoint to perform hybrid (keyword + vector) searches across one or more repository databases to find relevant code examples based on a natural language query.
+    - `POST /search/examples`: A RAG endpoint that uses an advanced hybrid search (metadata pre-filtering + keyword + vector) across one or more repository databases to find relevant code examples based on a natural language query.
 
 ### 2.3. Command-Line Interface (CLI)
 - **`dump firebase`:** A robust command to fetch data from a Google Firestore collection and store it in a local SQLite database. It supports full and incremental dumps, field selection, and more.
@@ -31,4 +31,4 @@ The primary goal is to create a system that can crawl public GitHub repositories
 - **Expanded Language Support:** The example extractor is currently optimized for Rust projects (`.rs` files, `Cargo.toml`). The architecture is modular and can be extended to support other languages (e.g., TypeScript, Python) by adding new extraction logic.
 - **Code Embedding & Semantic Search:** While the database schema supports storing embeddings for code examples, the pipeline to generate and utilize them for the `/search/examples` endpoint is not fully implemented. This would enable more powerful semantic search for code.
 - **Security:** Ingesting content from arbitrary repositories is handled safely by only treating files as text and not executing any code. This principle must be maintained.
-- **Advanced RAG Strategies:** The RAG pipeline could be enhanced with more sophisticated strategies. While AI-powered query analysis has been implemented, advanced techniques like metadata pre-filtering (used by the knowledge base search) have not yet been applied to the GitHub example search. Other potential enhancements include re-ranking with a cross-encoder or summarizing retrieved examples before synthesis.
+- **Advanced RAG Strategies:** The RAG pipeline has been enhanced with metadata pre-filtering for the GitHub example search. Other potential enhancements include re-ranking with a cross-encoder or summarizing retrieved examples before synthesis.

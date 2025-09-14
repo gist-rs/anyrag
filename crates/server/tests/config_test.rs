@@ -101,12 +101,12 @@ fn test_successful_config_load() {
 port: 8080
 db_url: "db/anyrag.db"
 embedding:
-  api_url: "http://localhost:11434/v1/embeddings"
+  api_url: "http://localhost:1234/v1/embeddings"
   model_name: "test-embedding-model"
 providers:
   test_provider:
     provider: "local"
-    api_url: "http://localhost:11434/v1/chat/completions"
+    api_url: "http://localhost:1234/v1/chat/completions"
     api_key: "my_secret_key"
     model_name: "test-chat-model"
 tasks:

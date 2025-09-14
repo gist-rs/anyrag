@@ -38,6 +38,6 @@ This document tracks the implementation of the features outlined in `PLAN.md`.
 - [x] **Embed Stored Code Examples**: The `dump github` command now generates and stores embeddings for extracted code examples.
 - [x] **Enhance RAG Endpoint**: The `/search/examples` endpoint now uses a hybrid search (keyword + vector) with AI-powered query analysis to retrieve relevant code examples.
 
-## Phase 8: Future - Advanced RAG (Planned)
+## Phase 8: Advanced RAG (Completed)
 
-- [ ] **Implement Metadata Pre-filtering for GitHub Search**: Apply the metadata-based pre-filtering strategy (currently used in the knowledge base search) to the GitHub example search to improve performance and relevance by using extracted entities.
+- [x] **Implement Metadata Pre-filtering for GitHub Search**: Apply the metadata-based pre-filtering strategy (currently used in the knowledge base search) to the GitHub example search to improve performance and relevance by using extracted entities.
