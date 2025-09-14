@@ -8,6 +8,7 @@ pub mod embedding;
 #[cfg(feature = "firebase")]
 pub mod firebase;
 pub mod knowledge;
+pub mod markdown;
 #[cfg(feature = "pdf")]
 pub mod pdf;
 #[cfg(feature = "rss")]
@@ -25,6 +26,7 @@ pub use embedding::{embed_article, EmbeddingError};
 #[cfg(feature = "firebase")]
 pub use firebase::{dump_firestore_collection, DumpFirestoreOptions, FirebaseIngestError};
 pub use knowledge::{export_for_finetuning, run_ingestion_pipeline, KnowledgeError};
+pub use markdown::{ingest_markdown_file, MarkdownIngestError};
 #[cfg(feature = "pdf")]
 pub use pdf::{run_pdf_ingestion_pipeline, PdfSyncExtractor};
 #[cfg(feature = "rss")]

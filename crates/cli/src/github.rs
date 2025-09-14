@@ -12,6 +12,9 @@ pub struct GithubArgs {
     /// An optional git version (tag, branch, commit hash) to ingest. Defaults to the latest release tag.
     #[arg(long)]
     pub version: Option<String>,
+    /// Disables the automatic processing of the generated markdown file into chunks.
+    #[arg(long)]
+    pub no_process: bool,
 }
 
 pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
@@ -91,6 +94,27 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     let output_filename = format!("{repo_name}-{safe_version}-context.md");
     fs::write(&output_filename, markdown_content)?;
     println!("✅ Successfully generated context file: '{output_filename}'");
+
+    // Automatically process the generated file into chunks unless disabled.
+    if !args.no_process {
+        println!("🚀 Automatically processing generated file into chunks...");
+        let chunk_db_dir = "db/github_chunks";
+        fs::create_dir_all(chunk_db_dir)?;
+        let chunk_db_path = format!("{chunk_db_dir}/{repo_name}.db");
+
+        let count = anyrag::ingest::ingest_markdown_file(
+            &chunk_db_path,
+            &output_filename,
+            "---\n", // The separator used for joining examples
+        )
+        .await?;
+
+        if count > 0 {
+            println!(
+                "✅ Successfully ingested {count} chunks from '{output_filename}' into '{chunk_db_path}'."
+            );
+        }
+    }
 
     Ok(())
 }

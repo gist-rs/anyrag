@@ -5,6 +5,7 @@
 mod auth;
 mod firebase;
 mod github;
+mod process;
 
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
@@ -32,7 +33,7 @@ enum Commands {
     /// Dump data from a remote source to the local database
     Dump(DumpArgs),
     /// Process and enrich data in the local database
-    Process(ProcessArgs),
+    Process(process::ProcessArgs),
     /// List items from a local database table
     List(ListArgs),
     /// Count items in a local database table
@@ -56,9 +57,6 @@ enum DumpCommands {
     #[command(disable_version_flag = true)]
     Github(github::GithubArgs),
 }
-
-#[derive(Parser, Debug)]
-struct ProcessArgs {}
 
 #[derive(Parser, Debug)]
 struct ListArgs {
@@ -105,27 +103,32 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     eprintln!("Login failed: {e}");
+                    std::process::exit(1);
                 }
             }
         }
         Commands::Dump(args) => {
             if let Err(e) = handle_dump(args).await {
                 eprintln!("Dump failed: {e}");
+                std::process::exit(1);
             }
         }
         Commands::Process(args) => {
             if let Err(e) = handle_process(args).await {
                 eprintln!("Process failed: {e}");
+                std::process::exit(1);
             }
         }
         Commands::List(args) => {
             if let Err(e) = handle_list(args).await {
                 eprintln!("List command failed: {e}");
+                std::process::exit(1);
             }
         }
         Commands::Count(args) => {
             if let Err(e) = handle_count(args).await {
                 eprintln!("Count command failed: {e}");
+                std::process::exit(1);
             }
         }
     }
@@ -147,9 +150,8 @@ async fn handle_dump(args: &DumpArgs) -> Result<()> {
     Ok(())
 }
 
-async fn handle_process(_args: &ProcessArgs) -> Result<()> {
-    println!("Processing local data...");
-    bail!("Processing not yet implemented.");
+async fn handle_process(args: &process::ProcessArgs) -> Result<()> {
+    process::handle_process(args).await
 }
 
 async fn handle_list(args: &ListArgs) -> Result<()> {

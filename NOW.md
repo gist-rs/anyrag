@@ -28,8 +28,12 @@ This document tracks the implementation of the features outlined in `PLAN.md`.
 - [x] **Fix Database Constraint Issue**
     - [x] Implemented a "delete then insert" strategy in `store_examples` to ensure idempotent dumps and prevent unique constraint errors.
 
-## Phase 6: Future - RAG from Consolidated Context (Planned)
+## Phase 6: RAG from Consolidated Context (Completed)
 
-- [ ] **Implement Context File Chunking**
-- [ ] **Store and Embed Chunks**
-- [ ] **Enhance RAG Endpoint**
+- [x] **Implement Context File Chunking**: The `process file` command now chunks Markdown files.
+- [x] **Store Chunks**: The `dump github` command now automatically chunks and stores the consolidated context file.
+
+## Phase 7: Future - Advanced RAG (Planned)
+
+- [ ] **Embed Stored Chunks**
+- [ ] **Enhance RAG Endpoint to use Chunks**
