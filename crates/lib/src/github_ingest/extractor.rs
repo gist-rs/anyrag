@@ -79,6 +79,8 @@ impl Extractor {
     }
 
     /// Recursively walks a directory to discover and categorize source files.
+    /// The `if/else if` structure is ordered from most to least specific to ensure
+    /// a file is only categorized once.
     fn discover_files_recursive(
         dir: &Path,
         sources: &mut DiscoveredSources,
@@ -103,13 +105,14 @@ impl Extractor {
                 let path_str = path.to_string_lossy();
                 if file_name == "readme.md" {
                     sources.readmes.push(path.clone());
-                } else if path_str.contains("/examples/") && file_name.ends_with(".rs") {
-                    sources.example_files.push(path.clone());
                 } else if (path_str.contains("/tests/") || file_name.ends_with("_test.rs"))
                     && file_name.ends_with(".rs")
                 {
                     sources.tests.push(path.clone());
+                } else if path_str.contains("/examples/") && file_name.ends_with(".rs") {
+                    sources.example_files.push(path.clone());
                 } else if file_name.ends_with(".rs") {
+                    // This is the fallback for any other Rust file (e.g., in src/)
                     sources.doc_comments.push(path.clone());
                 }
             }
@@ -307,28 +310,32 @@ impl Extractor {
         }
         Ok(examples)
     }
-    /// Resolves conflicts by keeping only the highest-priority source for identical code blocks.
+
+    /// Resolves conflicts by keeping only the highest-priority source for a given code block.
+    /// If two examples have the exact same content (ignoring whitespace), only the one
+    /// from the highest-priority source type (e.g., Test > DocComment) is kept.
     fn resolve_conflicts(examples: Vec<GeneratedExample>) -> Vec<GeneratedExample> {
         let mut best_examples: HashMap<String, GeneratedExample> = HashMap::new();
 
         for example in examples {
-            // Normalize content by trimming whitespace to improve matching of code blocks.
-            let key = example.content.trim().to_string();
-            if key.is_empty() {
-                continue;
-            }
+            // Create a key by hashing the content, normalized to ignore whitespace.
+            // This allows us to identify examples that are functionally identical
+            // even if their formatting differs slightly.
+            let normalized_content: String = example
+                .content
+                .chars()
+                .filter(|c| !c.is_whitespace())
+                .collect();
+            let content_hash = format!("{:x}", md5::compute(normalized_content.as_bytes()));
 
             best_examples
-                .entry(key)
+                .entry(content_hash)
                 .and_modify(|existing| {
                     // The `Ord` derive on `ExampleSourceType` ensures Test > DocComment > etc.
                     if example.source_type > existing.source_type {
                         info!(
-                            "Conflict resolved: Upgrading example from '{}' ({:?}) to '{}' ({:?})",
-                            existing.source_file,
-                            existing.source_type,
-                            &example.source_file,
-                            &example.source_type
+                            "Conflict resolved for content: Upgrading from {:?} in '{}' to {:?} in '{}'",
+                            existing.source_type, existing.source_file, example.source_type, example.source_file
                         );
                         *existing = example.clone();
                     }

@@ -53,6 +53,7 @@ enum DumpCommands {
     /// Dump data from a Google Firestore collection
     Firebase(firebase::FirebaseArgs),
     /// Dump examples from a public GitHub repository
+    #[command(disable_version_flag = true)]
     Github(github::GithubArgs),
 }
 

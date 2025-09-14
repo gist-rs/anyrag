@@ -101,8 +101,7 @@ impl StorageManager {
         })
     }
 
-    /// Stores a batch of extracted examples in the appropriate repository database.
-    /// This operation is idempotent; it uses `INSERT ... ON CONFLICT` to avoid duplicates.
+    /// Stores a batch of extracted examples using a "delete then insert" strategy for idempotency.
     pub async fn store_examples(
         &self,
         repo: &TrackedRepository,
@@ -112,23 +111,33 @@ impl StorageManager {
             return Ok(0);
         }
 
+        let version = &examples[0].version;
         info!(
-            "Storing {} examples for repository '{}' in database '{}'",
+            "Storing {} examples for repo '{}', version '{}'",
             examples.len(),
             repo.repo_name,
-            repo.db_path
+            version
         );
+
         let provider = SqliteProvider::new(&repo.db_path).await?;
         let conn = provider.db.connect()?;
         conn.execute("BEGIN TRANSACTION", ()).await?;
 
+        // 1. Delete all existing examples for this specific version.
+        info!(
+            "Deleting existing examples for version '{}' before insertion.",
+            version
+        );
+        conn.execute(
+            "DELETE FROM generated_examples WHERE version = ?",
+            params![version.clone()],
+        )
+        .await?;
+
+        // 2. Insert all the new examples.
         let mut stmt = conn.prepare(
             "INSERT INTO generated_examples (example_handle, content, source_file, source_type, version)
-             VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(example_handle) DO UPDATE SET
-                content=excluded.content,
-                source_file=excluded.source_file,
-                source_type=excluded.source_type"
+             VALUES (?, ?, ?, ?, ?)"
         ).await?;
 
         for example in &examples {
@@ -143,7 +152,11 @@ impl StorageManager {
         }
 
         conn.execute("COMMIT", ()).await?;
-        info!("Successfully stored {} examples.", examples.len());
+        info!(
+            "Successfully stored {} examples for version '{}'.",
+            examples.len(),
+            version
+        );
         Ok(examples.len())
     }
 

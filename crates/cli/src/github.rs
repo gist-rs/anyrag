@@ -69,7 +69,11 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     let mut sorted_examples = examples;
     sorted_examples.sort_by(|a, b| a.example_handle.cmp(&b.example_handle));
 
-    let markdown_content = sorted_examples
+    // Add a header to the markdown content that specifies the repository and version.
+    let mut markdown_content =
+        format!("# Code Examples for {repo_name} (Version: {version_to_fetch})\n\n");
+
+    let example_markdown = sorted_examples
         .iter()
         .map(|ex| {
             format!(
@@ -80,7 +84,11 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         .collect::<Vec<String>>()
         .join("---\n");
 
-    let output_filename = format!("{repo_name}-context.md");
+    markdown_content.push_str(&example_markdown);
+
+    // Sanitize version string for the filename (e.g., replace `/` with `-`)
+    let safe_version = version_to_fetch.replace('/', "-");
+    let output_filename = format!("{repo_name}-{safe_version}-context.md");
     fs::write(&output_filename, markdown_content)?;
     println!("✅ Successfully generated context file: '{output_filename}'");
 
