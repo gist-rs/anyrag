@@ -144,8 +144,8 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
         .unwrap()
         .get(0)?;
 
-    let vector_a = vec![1.0, 0.0, 0.0]; // "database" vector
-    let vector_b = vec![0.0, 1.0, 0.0]; // "http" vector
+    let vector_a = [1.0, 0.0, 0.0]; // "database" vector
+    let vector_b = [0.0, 1.0, 0.0]; // "http" vector
     let vector_a_bytes: &[u8] =
         unsafe { std::slice::from_raw_parts(vector_a.as_ptr() as *const u8, vector_a.len() * 4) };
     let vector_b_bytes: &[u8] =

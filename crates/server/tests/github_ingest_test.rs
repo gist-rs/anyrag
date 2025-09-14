@@ -10,11 +10,12 @@ use anyhow::Result;
 use anyrag::github_ingest::storage::StorageManager;
 use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
+use httpmock::Method;
 use serde_json::{json, Value};
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
-use turso::Builder;
+use turso::{params, Builder};
 
 #[tokio::test]
 async fn test_github_ingestion_e2e_workflow() -> Result<()> {
@@ -272,11 +273,112 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_search_examples_endpoint_placeholder() -> Result<()> {
+async fn test_search_examples_e2e() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
     let user_identifier = "search-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
+
+    // Create a mock git repository.
+    let remote_repo_dir = tempdir()?;
+    let remote_repo_path = remote_repo_dir.path();
+    Command::new("git")
+        .args(["init", "--bare"])
+        .current_dir(remote_repo_path)
+        .status()?;
+    let local_repo_dir = tempdir()?;
+    let local_repo_path = local_repo_dir.path();
+    Command::new("git")
+        .args(["clone", remote_repo_path.to_str().unwrap(), "."])
+        .current_dir(local_repo_path)
+        .status()?;
+    fs::write(
+        local_repo_path.join("README.md"),
+        "```rust\nfn connect() {}\n```",
+    )?;
+    Command::new("git")
+        .args([
+            "-C",
+            local_repo_path.to_str().unwrap(),
+            "config",
+            "user.email",
+            "test@example.com",
+        ])
+        .status()?;
+    Command::new("git")
+        .args([
+            "-C",
+            local_repo_path.to_str().unwrap(),
+            "config",
+            "user.name",
+            "Test User",
+        ])
+        .status()?;
+    Command::new("git")
+        .args(["-C", local_repo_path.to_str().unwrap(), "add", "."])
+        .status()?;
+    Command::new("git")
+        .args([
+            "-C",
+            local_repo_path.to_str().unwrap(),
+            "commit",
+            "-m",
+            "add example",
+        ])
+        .status()?;
+    Command::new("git")
+        .args(["-C", local_repo_path.to_str().unwrap(), "tag", "v1.0.0"])
+        .status()?;
+    Command::new("git")
+        .args([
+            "-C",
+            local_repo_path.to_str().unwrap(),
+            "push",
+            "--tags",
+            "origin",
+            "master",
+        ])
+        .status()?;
+
+    let remote_url_str = remote_repo_path.to_str().unwrap();
+    let repo_name = StorageManager::url_to_repo_name(remote_url_str);
+
+    // Ingest the repository.
+    app.client
+        .post(format!("{}/ingest/github", app.address))
+        .bearer_auth(token.clone())
+        .json(&json!({ "url": remote_url_str, "version": "v1.0.0" }))
+        .send()
+        .await?
+        .error_for_status()?;
+
+    // Manually add an embedding for the ingested example.
+    let db_path = format!("db/github_ingest/{repo_name}.db");
+    let db = Builder::new_local(&db_path).build().await?;
+    let conn = db.connect()?;
+    let example_id: i64 = conn
+        .query("SELECT id FROM generated_examples LIMIT 1", ())
+        .await?
+        .next()
+        .await?
+        .unwrap()
+        .get(0)?;
+    let vector = [1.0, 0.0, 0.0]; // "connect" vector
+    let vector_bytes: &[u8] =
+        unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
+    conn.execute(
+        "INSERT INTO example_embeddings (example_id, model_name, embedding) VALUES (?, ?, ?)",
+        params![example_id, "mock-model", vector_bytes],
+    )
+    .await?;
+
+    // Mock the embedding service for the search query.
+    let query_vector = vec![0.99, 0.01, 0.0]; // Vector very similar to "connect"
+    let embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
+        then.status(200)
+            .json_body(json!({ "data": [{ "embedding": query_vector }] }));
+    });
 
     // --- 2. Act ---
     let response = app
@@ -285,17 +387,21 @@ async fn test_search_examples_endpoint_placeholder() -> Result<()> {
         .bearer_auth(token)
         .json(&json!({
             "query": "how to connect?",
-            "repos": ["tursodatabase-turso"]
+            "repos": [format!("{}:v1.0.0", repo_name)]
         }))
         .send()
         .await?
         .error_for_status()?;
 
     // --- 3. Assert ---
+    embedding_mock.assert();
     let body: ApiResponse<Value> = response.json().await?;
     let results = body.result["results"].as_array().unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["description"], "This is a placeholder result.");
+    assert_eq!(results.len(), 1, "Expected one search result.");
+    assert!(results[0]["description"]
+        .as_str()
+        .unwrap()
+        .contains("fn connect() {}"));
 
     Ok(())
 }

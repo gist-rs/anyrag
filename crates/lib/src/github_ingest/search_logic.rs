@@ -43,9 +43,8 @@ async fn keyword_search_for_repo(
         SELECT example_handle, source_file, content
         FROM generated_examples
         WHERE version = ? AND (content LIKE ? OR example_handle LIKE ?)
-        LIMIT {}
-    ",
-        limit
+        LIMIT {limit}
+    "
     );
 
     let mut rows = conn
@@ -93,9 +92,8 @@ async fn vector_search_for_repo(
         JOIN generated_examples ge ON ee.example_id = ge.id
         WHERE ge.version = ? AND ee.embedding IS NOT NULL
         ORDER BY similarity DESC
-        LIMIT {}
-    ",
-        limit
+        LIMIT {limit}
+    "
     );
 
     let mut rows = conn.query(&sql, params![version.to_string()]).await?;
