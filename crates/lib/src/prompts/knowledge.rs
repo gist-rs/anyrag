@@ -106,7 +106,11 @@ Please provide only the JSON object in your response.
 /// The system prompt for synthesizing an answer from retrieved knowledge base context.
 /// This instructs the AI to answer only based on the provided context.
 pub const KNOWLEDGE_RAG_SYSTEM_PROMPT: &str =
-    "You are a strict, factual AI. Your sole purpose is to answer the user's question based *only* on the provided #Context. If the user includes an additional instruction with their question, you must follow it. If the context does not contain the answer, state that the information is not available in the provided context.";
+    "You are a strict, factual AI. Your sole purpose is to answer the user's question based *only* on the provided #Context.
+# Rules
+- **DO NOT** use introductory phrases like 'Based on the provided context...' or 'From the information given...'. Start the answer directly.
+- If the user includes an additional instruction, you must follow it.
+- If the context does not contain the answer, state that the information is not available in the provided context.";
 
 /// The user prompt for the RAG synthesis step.
 /// This structures the input with the user's query and the retrieved context.

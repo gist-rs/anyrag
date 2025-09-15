@@ -271,11 +271,22 @@ pub async fn knowledge_search_handler(
         AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
     })?;
 
+    // Manually combine prompt and instruction for the final synthesis step.
+    // This is safer than modifying the library's prompt templates or logic.
+    let final_prompt =
+        if let Some(instruction) = payload.instruction.as_deref().filter(|s| !s.is_empty()) {
+            // The instruction is appended to the prompt to guide the final answer synthesis.
+            // The extra newlines help separate it for the LLM.
+            format!("{}\n\n{}", payload.query, instruction)
+        } else {
+            payload.query.clone()
+        };
+
     let mut options = ExecutePromptOptions {
-        prompt: payload.query.clone(),
+        prompt: final_prompt, // Use the combined prompt
         content_type: Some(ContentType::Knowledge),
         context: Some(context.clone()),
-        instruction: payload.instruction,
+        instruction: None, // It's now part of the prompt
         ..Default::default()
     };
 

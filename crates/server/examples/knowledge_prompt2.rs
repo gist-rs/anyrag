@@ -178,7 +178,7 @@ async fn main() -> Result<()> {
     let answer2 = ask_question(app_state.clone(), auth_user.clone(), question2, None).await?;
 
     let question3 = "สร้าง My GPF ได้รับที่คะแนน";
-    let instruction3 = "สรุปเงื่อนไขการรับ GPF point, start the answer with `I THINK...`";
+    let instruction3 = "สรุปเงื่อนไขการรับ GPF point, and start the answer with `สรุปเงื่อนไขได้ว่า`";
     let answer3 = ask_question(
         app_state.clone(),
         auth_user.clone(),
@@ -191,6 +191,7 @@ async fn main() -> Result<()> {
     let answer4 = ask_question(app_state.clone(), auth_user, question4, None).await?;
 
     // --- 5. Print Final Results ---
+
     println!("\n\n✅ Knowledge RAG Workflow Complete!");
     println!("========================================");
     println!("❓ Question 1: {question1}");
@@ -204,6 +205,8 @@ async fn main() -> Result<()> {
     println!("\n========================================");
     println!("❓ Question 4: {question4}");
     println!("💡 Answer 4:\n---\n{answer4}\n---");
+
+    assert!(answer3.trim_matches('"').starts_with("สรุปเงื่อนไขได้ว่า"));
 
     Ok(())
     /* Expect

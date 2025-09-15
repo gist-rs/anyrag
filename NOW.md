@@ -1,23 +1,45 @@
-# NOW: Parallel Hybrid Search Strategy
+# Plan to Fix Ignored `instruction` in RAG Pipeline
 
-## Objective
+## 1. Problem Diagnosis
 
-The previous hybrid search implementation used a sequential, pre-filtering approach where a metadata search was performed first, and its results were used to constrain the subsequent keyword and vector searches. This was causing issues where relevant documents were being filtered out too early if the initial metadata search wasn't precise enough.
+The `instruction` field provided in the `SearchRequest` payload is not being passed to the final answer synthesis step in the RAG pipeline. This causes the AI to ignore specific formatting requests, such as the one for Question 3 in the `knowledge_prompt2` example.
 
-The new strategy addresses this by running all retrieval methods in parallel and combining their results for a more robust and comprehensive search.
+The root cause is that the `ExecutePromptOptions` struct is being created without forwarding the `instruction` from the incoming request.
 
-## New Workflow
+## 2. Locate the Bug
 
-1.  **Query Analysis**: An LLM extracts key entities and concepts from the user's query. This step remains the same.
+The error is located in the `knowledge_search_handler` function within the file:
+`anyrag/crates/server/src/handlers/knowledge.rs`
 
-2.  **Parallel Retrieval**: The following three searches are executed concurrently, each searching the entire relevant corpus without pre-filtering:
-    *   **Metadata Search**: Finds documents tagged with the extracted entities and keyphrases.
-    *   **Keyword Search**: Performs a traditional `LIKE` search using the extracted keyphrases.
-    *   **Vector Search**: Performs a semantic similarity search using an embedding of the original user query.
+## 3. Implement the Fix
 
-3.  **Reciprocal Rank Fusion (RRF)**:
-    *   All candidate documents from the three parallel searches are collected.
-    *   The results are combined and re-ranked using the RRF algorithm.
-    *   A boost is applied to candidates found via the metadata search to give them a slight priority, as they are often more precise.
+I will modify the instantiation of `ExecutePromptOptions` inside the `knowledge_search_handler` to correctly pass the `instruction` from the `payload`.
 
-This parallel approach ensures that a relevant document will be found as long as at least one of the search methods can identify it, significantly improving the accuracy of the context provided to the RAG pipeline.
+**Current (Incorrect) Code:**
+```rust
+let mut options = ExecutePromptOptions {
+    prompt: payload.query.clone(),
+    content_type: Some(ContentType::Knowledge),
+    context: Some(context.clone()),
+    // instruction is missing or hardcoded to None here
+    ..Default::default()
+};
+```
+
+**Proposed (Correct) Code:**
+```rust
+let mut options = ExecutePromptOptions {
+    prompt: payload.query.clone(),
+    content_type: Some(ContentType::Knowledge),
+    context: Some(context.clone()),
+    instruction: payload.instruction, // This line will be added/corrected
+    ..Default::default()
+};
+```
+
+## 4. Verification
+
+After applying the fix, I will run the `knowledge_prompt2` example again:
+`cargo run -p anyrag-server --example knowledge_prompt2`
+
+The expected outcome is that the answer to Question 3 will now correctly start with the phrase specified in the instruction ("สรุปเงื่อนไขได้ว่า..."), confirming that the instruction is no longer being ignored.

@@ -120,12 +120,6 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
     let mut all_unique_results: HashMap<String, SearchResult> = HashMap::new();
 
     for (set_index, results) in result_sets.iter().enumerate() {
-        let source_name = match set_index {
-            0 => "Metadata",
-            1 => "Vector",
-            2 => "Keyword",
-            _ => "Unknown",
-        };
         for (rank, result) in results.iter().enumerate() {
             let mut score = 1.0 / (k + (rank + 1) as f64);
             if set_index == 0 {
