@@ -34,12 +34,12 @@ use tracing::{info, instrument};
 /// * `task`: The `IngestionTask` specifying the repository URL and version.
 ///
 /// # Returns
-/// The number of examples that were successfully ingested.
+/// A tuple containing the number of examples ingested and the actual version string used.
 #[instrument(skip(storage_manager, task), fields(url = %task.url, version = ?task.version))]
 pub async fn run_github_ingestion(
     storage_manager: &StorageManager,
     task: IngestionTask,
-) -> Result<usize, GitHubIngestError> {
+) -> Result<(usize, String), GitHubIngestError> {
     info!("Starting GitHub ingestion pipeline.");
 
     // 1. Setup
@@ -74,7 +74,7 @@ pub async fn run_github_ingestion(
         "GitHub ingestion pipeline finished successfully. Ingested {} examples.",
         count
     );
-    Ok(count)
+    Ok((count, crawl_result.version))
 }
 
 /// Searches for examples across multiple repositories.

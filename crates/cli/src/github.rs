@@ -41,10 +41,10 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     };
 
     let storage_manager = StorageManager::new("db/github_ingest").await?;
-    let ingested_count = run_github_ingestion(&storage_manager, task).await?;
+    let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task).await?;
     println!(
-        "✅ Successfully ingested {} unique examples from '{}'.",
-        ingested_count, args.url
+        "✅ Successfully ingested {} unique examples from '{}' (version: {}).",
+        ingested_count, args.url, ingested_version
     );
 
     if ingested_count == 0 {
@@ -56,19 +56,7 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     println!("📝 Generating consolidated context file...");
     let repo_name = StorageManager::url_to_repo_name(&args.url);
 
-    // Determine which version to fetch. If a version was specified for ingestion, use that.
-    // Otherwise, ask the storage manager for the latest version it has.
-    let version_to_fetch = match &args.version {
-        Some(v) => v.clone(),
-        None => storage_manager
-            .get_latest_version(&repo_name)
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not determine latest version for '{repo_name}' after ingestion."
-                )
-            })?,
-    };
+    let version_to_fetch = ingested_version;
 
     let examples = storage_manager
         .get_examples(&repo_name, &version_to_fetch)

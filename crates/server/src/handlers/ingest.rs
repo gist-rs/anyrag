@@ -141,12 +141,18 @@ pub struct IngestGitHubRequest {
 pub struct IngestGitHubResponse {
     pub message: String,
     pub ingested_examples: usize,
+    pub version: String,
 }
 
 #[derive(Deserialize)]
-pub struct GetExamplesPath {
+pub struct GetVersionedExamplesPath {
     pub repo_name: String,
     pub version: String,
+}
+
+#[derive(Deserialize)]
+pub struct GetLatestExamplesPath {
+    pub repo_name: String,
 }
 
 #[derive(Serialize)]
@@ -742,22 +748,23 @@ pub async fn ingest_github_handler(
     let storage_manager =
         anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
 
-    let ingested_count = run_github_ingestion(&storage_manager, task)
+    let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task)
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("GitHub ingestion failed: {}", e)))?;
 
     let response = IngestGitHubResponse {
         message: "GitHub ingestion pipeline completed successfully.".to_string(),
         ingested_examples: ingested_count,
+        version: ingested_version,
     };
     let debug_info = json!({ "url": payload.url, "version": payload.version });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 
-/// Handler for retrieving a consolidated Markdown file of examples for a repository.
-pub async fn get_examples_handler(
+/// Handler for retrieving a consolidated Markdown file of examples for a specific repository version.
+pub async fn get_versioned_examples_handler(
     State(_app_state): State<AppState>,
-    Path(path): Path<GetExamplesPath>,
+    Path(path): Path<GetVersionedExamplesPath>,
     debug_params: Query<DebugParams>,
 ) -> Result<Json<ApiResponse<GetExamplesResponse>>, AppError> {
     info!(
@@ -799,6 +806,69 @@ pub async fn get_examples_handler(
     };
 
     let debug_info = json!({ "repo_name": path.repo_name, "version": path.version, "example_count": examples.len() });
+    Ok(wrap_response(response, debug_params, Some(debug_info)))
+}
+
+/// Handler for retrieving examples for the latest version of a repository.
+pub async fn get_latest_examples_handler(
+    State(_app_state): State<AppState>,
+    Path(path): Path<GetLatestExamplesPath>,
+    debug_params: Query<DebugParams>,
+) -> Result<Json<ApiResponse<GetExamplesResponse>>, AppError> {
+    info!(
+        "Received request for latest examples for repo '{}'",
+        path.repo_name
+    );
+
+    let storage_manager =
+        anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
+
+    let latest_version = storage_manager
+        .get_latest_version(&path.repo_name)
+        .await?
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Could not determine latest version for repo '{}'",
+                path.repo_name
+            ))
+        })?;
+
+    info!(
+        "Found latest version for repo '{}': {}",
+        path.repo_name, latest_version
+    );
+
+    let examples = storage_manager
+        .get_examples(&path.repo_name, &latest_version)
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to retrieve examples: {}", e)))?;
+
+    if examples.is_empty() {
+        let response = GetExamplesResponse {
+            content: format!(
+                "# No examples found for repository '{}' version '{}'.",
+                path.repo_name, latest_version
+            ),
+        };
+        return Ok(wrap_response(response, debug_params, None));
+    }
+
+    let markdown_content = examples
+        .iter()
+        .map(|ex| {
+            format!(
+                "## `{}`\n**Source:** `{}` (`{}`)\n\n```rust\n{}\n```\n",
+                ex.example_handle, ex.source_file, ex.source_type, ex.content
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("---\n");
+
+    let response = GetExamplesResponse {
+        content: markdown_content,
+    };
+
+    let debug_info = json!({ "repo_name": path.repo_name, "version_retrieved": latest_version, "example_count": examples.len() });
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }
 

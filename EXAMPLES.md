@@ -173,28 +173,46 @@ These endpoints are for ingesting and searching code examples from public GitHub
 
 ### `POST /ingest/github`
 
-Triggers the ingestion of a public GitHub repository. The server will clone the repo, intelligently extract all code examples, generate embeddings, and store them.
+Triggers the ingestion of a public GitHub repository. The server will clone the repo, intelligently extract all code examples, generate embeddings, and store them. The response will include the version that was ingested, which is useful when no version is specified in the request.
 
 **Request Body:** `{"url": "...", "version": "..."}` (version is optional)
 
-**Example:**
+**Example (auto-detect latest version):**
 ```sh
 curl -X POST http://localhost:9090/ingest/github \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <your_jwt>" \
   -d '{
-    "url": "https://github.com/tursodatabase/turso",
-    "version": "v0.90.1"
+    "url": "https://github.com/tursodatabase/turso"
   }'
+```
+
+**Example Response:**
+```json
+{
+  "result": {
+    "message": "GitHub ingestion pipeline completed successfully.",
+    "ingested_examples": 95,
+    "version": "v0.100.0"
+  }
+}
+```
+
+### `GET /examples/{repo_name}`
+
+Retrieves a consolidated Markdown file of all extracted examples for the **latest ingested version** of a repository.
+
+**Example:**
+```sh
+curl "http://localhost:9090/examples/tursodatabase-turso"
 ```
 
 ### `GET /examples/{repo_name}/{version}`
 
-Retrieves a consolidated Markdown file of all extracted examples for a specific repository version.
+Retrieves a consolidated Markdown file of all extracted examples for a **specific repository version**.
 
 **Example:**
 ```sh
-curl "http://localhost:9090/examples/tursodatabase-turso/v0.90.1" \
+curl "http://localhost:9090/examples/tursodatabase-turso/v0.100.0" \
   -H "Authorization: Bearer <your_jwt>"
 ```
 

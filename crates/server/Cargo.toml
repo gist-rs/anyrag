@@ -76,6 +76,7 @@ harness = true
 name = "content_type_test"
 path = "tests/content_type_test.rs"
 harness = true
+required-features = ["rss"]
 
 [[test]]
 name = "ingest_test"
