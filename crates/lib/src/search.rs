@@ -183,9 +183,14 @@ where
     .map_err(SearchError::QueryAnalysis)?;
 
     // --- Parallel Retrieval ---
+    // Augment AI-extracted keyphrases with raw keywords from the original query for robustness.
+    let mut keyphrases_meta = analyzed_query.keyphrases.clone();
+    keyphrases_meta.extend(options.query_text.split_whitespace().map(String::from));
+    keyphrases_meta.sort();
+    keyphrases_meta.dedup();
+
     let provider_meta = Arc::clone(&provider);
     let entities_meta = analyzed_query.entities.clone();
-    let keyphrases_meta = analyzed_query.keyphrases.clone();
     let owner_id_meta = options.owner_id.clone();
     let limit_meta = options.limit;
     let metadata_handle = tokio::spawn(async move {
