@@ -421,12 +421,12 @@ pub async fn distill_and_augment(
         .await?;
     debug!("LLM extraction response: {}", llm_response);
     let cleaned_response = clean_llm_response(&llm_response);
-    let mut extracted_data: RawExtractedKnowledge = match serde_json::from_str(cleaned_response) {
+    let mut extracted_data: RawExtractedKnowledge = match serde_json::from_str(&cleaned_response) {
         Ok(data) => data,
         Err(e) => {
             warn!(
                 "Failed to parse extraction response JSON. Error: {}. Raw response: '{}'",
-                e, cleaned_response
+                e, &cleaned_response
             );
             return Err(e.into());
         }
@@ -496,7 +496,7 @@ pub async fn distill_and_augment(
             .await?;
 
         let cleaned_response = clean_llm_response(&llm_response);
-        match serde_json::from_str::<AugmentationResponse>(cleaned_response) {
+        match serde_json::from_str::<AugmentationResponse>(&cleaned_response) {
             Ok(parsed) => {
                 let mut augmented_faqs = Vec::new();
                 for aug_faq in parsed.augmented_faqs {
@@ -637,14 +637,14 @@ pub async fn extract_and_store_metadata(
     let cleaned_response = clean_llm_response(&llm_response);
 
     let parsed_metadata: Vec<ContentMetadata> =
-        if let Ok(items) = serde_json::from_str(cleaned_response) {
+        if let Ok(items) = serde_json::from_str(&cleaned_response) {
             items
-        } else if let Ok(response) = serde_json::from_str::<MetadataResponse>(cleaned_response) {
+        } else if let Ok(response) = serde_json::from_str::<MetadataResponse>(&cleaned_response) {
             response.metadata
         } else {
             warn!(
             "Failed to parse metadata response as array or object, skipping. Raw response: '{}'",
-            cleaned_response
+            &cleaned_response
         );
             return Ok(Vec::new());
         };
@@ -732,7 +732,7 @@ pub async fn extract_and_store_metadata(
 // --- Helper Functions ---
 
 /// Cleans the raw JSON response from an LLM, removing markdown code fences.
-pub fn clean_llm_response(response: &str) -> &str {
+pub fn clean_llm_response(response: &str) -> String {
     response
         .trim()
         .strip_prefix("```json")
@@ -740,6 +740,7 @@ pub fn clean_llm_response(response: &str) -> &str {
         .strip_suffix("```")
         .unwrap_or(response)
         .trim()
+        .replace("\\*", "*")
 }
 
 // --- Stage 5: Fine-Tuning Export ---

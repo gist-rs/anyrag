@@ -100,12 +100,12 @@ async fn analyze_query(
     debug!("LLM query analysis response: {}", llm_response);
     let cleaned_response = clean_llm_response(&llm_response);
 
-    match serde_json::from_str(cleaned_response) {
+    match serde_json::from_str(&cleaned_response) {
         Ok(parsed) => Ok(parsed),
         Err(e) => {
             warn!(
                 "Failed to parse query analysis JSON, falling back to using full query as keyphrase. Error: {}. Raw response: '{}'",
-                e, cleaned_response
+                e, &cleaned_response
             );
             // Fallback: use the original query as a keyphrase
             Ok(AnalyzedQuery {
