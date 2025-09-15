@@ -15,6 +15,16 @@ use tracing::{debug, info, warn};
 use turso::{params, Connection, Database};
 use uuid::Uuid;
 
+/// Defines the strategy for fetching web content.
+#[derive(Debug, Clone, Copy, Default)]
+pub enum WebIngestStrategy<'a> {
+    /// Fetch raw HTML and convert it to Markdown. This is the default.
+    #[default]
+    RawHtml,
+    /// Use the Jina Reader API to get clean Markdown.
+    Jina { api_key: Option<&'a str> },
+}
+
 // --- Error Definitions ---
 
 #[derive(Error, Debug)]
@@ -35,6 +45,8 @@ pub enum KnowledgeError {
     TypeConversion,
     #[error("An internal error occurred: {0}")]
     Internal(#[from] anyhow::Error),
+    #[error("HTML to Markdown conversion failed: {0}")]
+    HtmlConversion(String),
 }
 
 // --- Data Structures ---
@@ -110,10 +122,10 @@ pub async fn run_ingestion_pipeline(
     url: &str,
     owner_id: Option<&str>,
     prompts: IngestionPrompts<'_>,
-    jina_api_key: Option<&str>,
+    web_ingest_strategy: WebIngestStrategy<'_>,
 ) -> Result<usize, KnowledgeError> {
     let (document_id, ingested_document) =
-        match ingest_and_cache_url(db, url, owner_id, jina_api_key).await {
+        match ingest_and_cache_url(db, url, owner_id, web_ingest_strategy).await {
             Ok(content) => content,
             Err(KnowledgeError::ContentUnchanged(url)) => {
                 info!("Content for {} is unchanged, pipeline finished.", url);
@@ -152,49 +164,72 @@ pub async fn run_ingestion_pipeline(
 
 // --- Stage 1: Ingestion & Caching ---
 
-pub async fn fetch_markdown_from_url(
+pub async fn fetch_web_content(
     url: &str,
-    jina_api_key: Option<&str>,
+    strategy: WebIngestStrategy<'_>,
 ) -> Result<String, KnowledgeError> {
-    let fetch_url = if url.ends_with(".md") {
+    if url.ends_with(".md") {
         info!("Fetching raw markdown directly from: {url}");
-        url.to_string()
-    } else {
-        let jina_url = format!("https://r.jina.ai/{url}");
-        info!("Fetching clean markdown from: {jina_url}");
-        jina_url
-    };
+        return reqwest::get(url)
+            .await?
+            .text()
+            .await
+            .map_err(KnowledgeError::Fetch);
+    }
 
-    let client = reqwest::Client::new();
-    let mut request_builder = client.get(&fetch_url);
-
-    if let Some(key) = jina_api_key {
-        if !key.is_empty() {
-            info!("Using Jina API key for request.");
-            request_builder = request_builder.header("Authorization", format!("Bearer {key}"));
+    match strategy {
+        WebIngestStrategy::RawHtml => {
+            info!("Fetching raw HTML from: {url}");
+            let client = reqwest::Client::new();
+            let response = client.get(url).send().await?;
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let body = response.text().await.unwrap_or_default();
+                // We can reuse the Jina error type for a generic fetch failure
+                return Err(KnowledgeError::JinaReaderFailed { status, body });
+            }
+            let html = response.text().await?;
+            htmd::HtmlToMarkdown::new()
+                .convert(&html)
+                .map_err(|e| KnowledgeError::HtmlConversion(e.to_string()))
         }
-    } else {
-        warn!("No Jina API key provided. You may be subject to a 20 RPM rate limit.");
-    }
+        WebIngestStrategy::Jina { api_key } => {
+            let fetch_url = format!("https://r.jina.ai/{url}");
+            info!("Fetching clean markdown from: {fetch_url}");
 
-    let response = request_builder.send().await?;
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        let body = response.text().await.unwrap_or_default();
-        return Err(KnowledgeError::JinaReaderFailed { status, body });
+            let client = reqwest::Client::new();
+            let mut request_builder = client.get(&fetch_url);
+
+            if let Some(key) = api_key {
+                if !key.is_empty() {
+                    info!("Using Jina API key for request.");
+                    request_builder =
+                        request_builder.header("Authorization", format!("Bearer {key}"));
+                }
+            } else {
+                warn!("No Jina API key provided. You may be subject to a 20 RPM rate limit.");
+            }
+
+            let response = request_builder.send().await?;
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                let body = response.text().await.unwrap_or_default();
+                return Err(KnowledgeError::JinaReaderFailed { status, body });
+            }
+            response.text().await.map_err(KnowledgeError::Fetch)
+        }
     }
-    response.text().await.map_err(KnowledgeError::Fetch)
 }
 
 pub async fn ingest_and_cache_url(
     db: &Database,
     url: &str,
     owner_id: Option<&str>,
-    jina_api_key: Option<&str>,
+    strategy: WebIngestStrategy<'_>,
 ) -> Result<(String, IngestedDocument), KnowledgeError> {
     let conn = db.connect()?;
 
-    let markdown_content = fetch_markdown_from_url(url, jina_api_key).await?;
+    let markdown_content = fetch_web_content(url, strategy).await?;
     let new_content_hash = format!("{:x}", md5::compute(markdown_content.as_bytes()));
 
     // Extract a cleaner title from the markdown content.

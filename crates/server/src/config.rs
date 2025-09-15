@@ -78,6 +78,9 @@ pub struct AppConfig {
     /// An optional API key for the Jina Reader service. Loaded from `JINA_API_KEY` env var.
     #[serde(default)]
     pub jina_api_key: Option<String>,
+    /// The web ingestion strategy to use ("raw_html" or "jina"). Loaded from `WEB_INGEST_STRATEGY` env var.
+    #[serde(default = "default_web_ingest_strategy")]
+    pub web_ingest_strategy: String,
 
     /// Configuration for temporal reasoning.
     #[serde(default)]
@@ -98,6 +101,11 @@ fn default_port() -> u16 {
 /// Provides a default value for the `db_url` field if not set in the environment.
 fn default_db_url() -> String {
     "db/anyrag.db".to_string()
+}
+
+/// Provides a default value for the `web_ingest_strategy` field.
+fn default_web_ingest_strategy() -> String {
+    "raw_html".to_string()
 }
 
 /// Configuration for the embedding model provider.

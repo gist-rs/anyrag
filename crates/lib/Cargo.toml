@@ -37,6 +37,7 @@ firestore = { version = "0.47.0", optional = true }
 futures = "0.3.30"
 wiremock = "0.6.5"
 git2 = "0.19.0"
+htmd = "0.2.0"
 tempfile = "3.10.1"
 semver = "1.0.26"
 toml = "0.8.14"
@@ -46,6 +47,7 @@ dotenvy = "0.15.7"
 tracing-subscriber = { workspace = true }
 tempfile = "3.21.0"
 anyhow = { workspace = true }
+url = "2.5.7"
 
 [features]
 default = ["graph_db", "firebase", "pdf", "sheets"]
@@ -81,6 +83,10 @@ path = "tests/github_ingest_test.rs"
 [[test]]
 name = "github_search_logic_test"
 path = "tests/github_search_logic_test.rs"
+
+[[test]]
+name = "web_ingest_test"
+path = "tests/web_ingest_test.rs"
 
 [[example]]
 name = "knowledge"

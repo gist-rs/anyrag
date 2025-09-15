@@ -24,7 +24,10 @@
 
 use anyhow::Result;
 use anyrag::{
-    ingest::{knowledge::IngestionPrompts, run_ingestion_pipeline, KnowledgeError},
+    ingest::{
+        knowledge::{IngestionPrompts, WebIngestStrategy},
+        run_ingestion_pipeline, KnowledgeError,
+    },
     prompts::knowledge::{
         AUGMENTATION_SYSTEM_PROMPT, KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
         KNOWLEDGE_EXTRACTION_USER_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
@@ -82,6 +85,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         env::var("EMBEDDINGS_MODEL").expect("EMBEDDINGS_MODEL environment variable not set");
     // Read the Jina API key from the environment. It is optional.
     let jina_api_key = env::var("JINA_API_KEY").ok();
+    // Choose the ingestion strategy. Defaults to RawHtml.
+    // Set INGEST_STRATEGY=jina to use the Jina Reader API.
+    let ingest_strategy_name =
+        env::var("INGEST_STRATEGY").unwrap_or_else(|_| "raw_html".to_string());
+
+    let web_ingest_strategy = match ingest_strategy_name.as_str() {
+        "jina" => {
+            info!("Using Jina API for web ingestion.");
+            WebIngestStrategy::Jina {
+                api_key: jina_api_key.as_deref(),
+            }
+        }
+        _ => {
+            info!("Using raw HTML for web ingestion.");
+            WebIngestStrategy::RawHtml
+        }
+    };
 
     // --- Build AI Provider ---
     let ai_provider: Box<dyn AiProvider> = match ai_provider_name.as_str() {
@@ -125,7 +145,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ingest_url,
         Some(&user.id),
         prompts,
-        jina_api_key.as_deref(), // Pass the Jina API key here.
+        web_ingest_strategy,
     )
     .await
     {

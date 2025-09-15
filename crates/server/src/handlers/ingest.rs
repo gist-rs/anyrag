@@ -11,7 +11,7 @@ use anyrag::{
     github_ingest::{run_github_ingestion, search_examples, types::IngestionTask},
     ingest::{
         dump_firestore_collection, ingest_faq_from_google_sheet, ingest_from_google_sheet_url,
-        knowledge::{extract_and_store_metadata, IngestionPrompts},
+        knowledge::{extract_and_store_metadata, IngestionPrompts, WebIngestStrategy},
         run_ingestion_pipeline, run_pdf_ingestion_pipeline, sheet_url_to_export_url_and_table_name,
         text::{chunk_text, ingest_chunks_as_documents},
         DumpFirestoreOptions, PdfSyncExtractor,
@@ -508,7 +508,18 @@ pub async fn ingest_web_handler(
         metadata_extraction_system_prompt: &meta_task_config.system_prompt,
     };
 
-    let jina_api_key = app_state.config.jina_api_key.as_deref();
+    let web_ingest_strategy = match app_state.config.web_ingest_strategy.as_str() {
+        "jina" => {
+            info!("Using Jina API for web ingestion.");
+            WebIngestStrategy::Jina {
+                api_key: app_state.config.jina_api_key.as_deref(),
+            }
+        }
+        _ => {
+            info!("Using raw HTML for web ingestion.");
+            WebIngestStrategy::RawHtml
+        }
+    };
 
     let ingested_count = run_ingestion_pipeline(
         &app_state.sqlite_provider.db,
@@ -516,7 +527,7 @@ pub async fn ingest_web_handler(
         &payload.url,
         owner_id.as_deref(),
         prompts,
-        jina_api_key,
+        web_ingest_strategy,
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {e}")))?;

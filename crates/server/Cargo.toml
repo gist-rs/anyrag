@@ -73,12 +73,6 @@ path = "tests/server_test.rs"
 harness = true
 
 [[test]]
-name = "content_type_test"
-path = "tests/content_type_test.rs"
-harness = true
-required-features = ["rss"]
-
-[[test]]
 name = "ingest_test"
 path = "tests/ingest_test.rs"
 harness = true
