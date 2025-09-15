@@ -10,7 +10,7 @@ use crate::{
     prompts::knowledge::{
         GITHUB_EXAMPLE_SEARCH_ANALYSIS_SYSTEM_PROMPT, GITHUB_EXAMPLE_SEARCH_ANALYSIS_USER_PROMPT,
     },
-    providers::ai::{generate_embedding, AiProvider},
+    providers::ai::{generate_embeddings_batch, AiProvider},
     rerank::reciprocal_rank_fusion,
     PromptError, SearchResult,
 };
@@ -268,10 +268,19 @@ pub async fn search_across_repos(
     };
 
     // 2. Generate an embedding for the original, full query for vector search.
-    let query_vector =
-        generate_embedding(embedding_api_url, embedding_model, query, embedding_api_key)
-            .await
-            .map_err(|e| GitHubIngestError::Internal(e.into()))?;
+    let query_vector = generate_embeddings_batch(
+        embedding_api_url,
+        embedding_model,
+        &[query],
+        embedding_api_key,
+    )
+    .await
+    .map_err(|e| GitHubIngestError::Internal(e.into()))?
+    .into_iter()
+    .next()
+    .ok_or(GitHubIngestError::Prompt(PromptError::AiApi(
+        "Embedding generation returned no vector for the query".to_string(),
+    )))?;
 
     let mut search_handles = vec![];
 

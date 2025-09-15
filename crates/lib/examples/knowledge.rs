@@ -34,7 +34,9 @@ use anyrag::{
         QUERY_ANALYSIS_SYSTEM_PROMPT, QUERY_ANALYSIS_USER_PROMPT,
     },
     providers::{
-        ai::{gemini::GeminiProvider, generate_embedding, local::LocalAiProvider, AiProvider},
+        ai::{
+            gemini::GeminiProvider, generate_embeddings_batch, local::LocalAiProvider, AiProvider,
+        },
         db::sqlite::SqliteProvider,
     },
     search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
@@ -186,13 +188,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let text_to_embed = format!("{title}. {content}");
 
         let api_key = std::env::var("AI_API_KEY").ok();
-        let vector = generate_embedding(
+        let vector = generate_embeddings_batch(
             &embeddings_api_url,
             &embeddings_model,
-            &text_to_embed,
+            &[&text_to_embed],
             api_key.as_deref(),
         )
-        .await?;
+        .await?
+        .into_iter()
+        .next()
+        .ok_or("Embedding API returned no vector")?;
         let vector_bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
 

@@ -6,7 +6,7 @@
 
 use crate::{
     ingest::text::ingest_chunks_as_documents,
-    providers::{ai::generate_embedding, db::sqlite::SqliteProvider},
+    providers::{ai::generate_embeddings_batch, db::sqlite::SqliteProvider},
     PromptError,
 };
 use thiserror::Error;
@@ -73,24 +73,19 @@ pub async fn ingest_markdown_file(
                 ingested_ids.len(),
                 config.model
             );
+            let texts_to_embed: Vec<&str> = chunks.iter().map(AsRef::as_ref).collect();
+
+            let embeddings = generate_embeddings_batch(
+                config.api_url,
+                config.model,
+                &texts_to_embed,
+                config.api_key,
+            )
+            .await
+            .map_err(MarkdownIngestError::Embedding)?;
+
             let mut embedded_count = 0;
-            // Pair the returned IDs with their original content. The order is preserved.
-            let id_chunk_pairs: Vec<_> = ingested_ids
-                .iter()
-                .cloned()
-                .zip(chunks.into_iter())
-                .collect();
-
-            for (doc_id, chunk_content) in id_chunk_pairs {
-                let vector = generate_embedding(
-                    config.api_url,
-                    config.model,
-                    &chunk_content,
-                    config.api_key,
-                )
-                .await
-                .map_err(MarkdownIngestError::Embedding)?;
-
+            for (doc_id, vector) in ingested_ids.iter().zip(embeddings) {
                 // Convert Vec<f32> to &[u8] for BLOB storage
                 let vector_bytes: &[u8] = unsafe {
                     std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4)
@@ -98,7 +93,7 @@ pub async fn ingest_markdown_file(
 
                 conn.execute(
                     "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-                    params![doc_id, config.model.to_string(), vector_bytes],
+                    params![doc_id.clone(), config.model.to_string(), vector_bytes],
                 )
                 .await?;
                 embedded_count += 1;

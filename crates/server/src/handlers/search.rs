@@ -7,7 +7,7 @@ use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
     providers::{
-        ai::generate_embedding,
+        ai::generate_embeddings_batch,
         db::storage::{KeywordSearch, VectorSearch},
     },
     rerank::{llm_rerank, reciprocal_rank_fusion},
@@ -53,7 +53,15 @@ pub async fn vector_search_handler(
     let model = &app_state.config.embedding.model_name;
     let api_key = app_state.config.embedding.api_key.as_deref();
 
-    let query_vector = generate_embedding(api_url, model, &payload.query, api_key).await?;
+    let query_vector = generate_embeddings_batch(api_url, model, &[&payload.query], api_key)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Embedding API returned no vector for the query"
+            ))
+        })?;
     let results = app_state
         .sqlite_provider
         .vector_search(query_vector, limit, owner_id.as_deref(), None)
@@ -102,7 +110,15 @@ pub async fn hybrid_search_handler(
     let model = &app_state.config.embedding.model_name;
     let api_key = app_state.config.embedding.api_key.as_deref();
 
-    let query_vector = generate_embedding(api_url, model, &payload.query, api_key).await?;
+    let query_vector = generate_embeddings_batch(api_url, model, &[&payload.query], api_key)
+        .await?
+        .into_iter()
+        .next()
+        .ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!(
+                "Embedding API returned no vector for the query"
+            ))
+        })?;
 
     // --- Stage 1: Fetch Candidates Concurrently ---
     let (vector_results, keyword_results) = tokio::join!(

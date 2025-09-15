@@ -1,45 +1,96 @@
-# Plan to Fix Ignored `instruction` in RAG Pipeline
+# Plan: Implement Batch Embedding for Gemini
 
-## 1. Problem Diagnosis
+## 1. Goal
 
-The `instruction` field provided in the `SearchRequest` payload is not being passed to the final answer synthesis step in the RAG pipeline. This causes the AI to ignore specific formatting requests, such as the one for Question 3 in the `knowledge_prompt2` example.
+The current embedding process sends one API request for each document, which is inefficient. The goal is to implement batch embedding for the Gemini provider to significantly improve performance and reduce the number of API calls, as supported by the Gemini API.
 
-The root cause is that the `ExecutePromptOptions` struct is being created without forwarding the `instruction` from the incoming request.
+## 2. Diagnosis
 
-## 2. Locate the Bug
+The inefficiency lies in two key areas:
+1.  The `embed_new_handler` in `anyrag/crates/server/src/handlers/knowledge.rs` loops through each document and calls `generate_embedding` individually.
+2.  The `generate_embedding` function in `anyrag/crates/lib/src/providers/ai/embedding.rs` is designed to accept only a single text input.
 
-The error is located in the `knowledge_search_handler` function within the file:
-`anyrag/crates/server/src/handlers/knowledge.rs`
+## 3. Implementation Plan
 
-## 3. Implement the Fix
+### 3.1. Modify the Core Embedding Function (`generate_embedding`)
 
-I will modify the instantiation of `ExecutePromptOptions` inside the `knowledge_search_handler` to correctly pass the `instruction` from the `payload`.
+The `generate_embedding` function will be refactored to handle batches of text.
 
-**Current (Incorrect) Code:**
+**File to Modify**: `anyrag/crates/lib/src/providers/ai/embedding.rs`
+
+**Changes**:
+1.  **Update Function Signature**: Change the function to accept a slice of strings (`&[&str]`) and return a vector of embeddings (`Vec<Vec<f32>>`).
+2.  **Update Gemini Request/Response Structs**: Modify the JSON structures to match the batch format.
+
+**Current (Simplified) Gemini Structs:**
 ```rust
-let mut options = ExecutePromptOptions {
-    prompt: payload.query.clone(),
-    content_type: Some(ContentType::Knowledge),
-    context: Some(context.clone()),
-    // instruction is missing or hardcoded to None here
-    ..Default::default()
-};
+struct GeminiEmbeddingRequest<'a> {
+    model: String,
+    content: GeminiEmbeddingContent<'a>,
+}
+
+struct GeminiEmbeddingContent<'a> {
+    parts: Vec<GeminiEmbeddingPart<'a>>,
+}
 ```
 
-**Proposed (Correct) Code:**
+**Proposed (Batch-enabled) Gemini Structs:**
 ```rust
-let mut options = ExecutePromptOptions {
-    prompt: payload.query.clone(),
-    content_type: Some(ContentType::Knowledge),
-    context: Some(context.clone()),
-    instruction: payload.instruction, // This line will be added/corrected
-    ..Default::default()
-};
+// The top-level request will now contain a Vec of content items
+struct GeminiBatchEmbeddingRequest<'a> {
+    model: String,
+    content: Vec<GeminiEmbeddingContent<'a>>,
+}
+
+// The response will contain a Vec of embeddings
+struct GeminiBatchEmbeddingResponse {
+    embeddings: Vec<GeminiEmbeddingValue>,
+}
+```
+3. **Update Logic**: Modify the function's implementation to build the batch request and parse the batch response correctly.
+
+### 3.2. Update the Embedding Handler (`embed_new_handler`)
+
+The handler will be updated to collect all document texts into a batch before making a single API call.
+
+**File to Modify**: `anyrag/crates/server/src/handlers/knowledge.rs`
+
+**Current (Incorrect) Logic:**
+```rust
+// Simplified for clarity
+for (doc_id, title, content) in docs_to_embed {
+    let text_to_embed = format!("{title}. {content}");
+    // This is called inside a loop
+    match generate_embedding(api_url, model, &text_to_embed, api_key).await {
+        // ... store single embedding
+    }
+}
+```
+
+**Proposed (Correct) Logic:**
+```rust
+// Simplified for clarity
+// 1. Collect all texts into a batch
+let texts_to_embed: Vec<String> = docs_to_embed
+    .iter()
+    .map(|(_, title, content)| format!("{title}. {content}"))
+    .collect();
+
+let text_slices: Vec<&str> = texts_to_embed.iter().map(AsRef::as_ref).collect();
+
+// 2. Make a single batch API call
+let embeddings = generate_embedding(api_url, model, &text_slices, api_key).await?;
+
+// 3. Loop through the results to store them
+for ((doc_id, _, _), vector) in docs_to_embed.iter().zip(embeddings) {
+    // ... store the embedding for the corresponding doc_id
+}
 ```
 
 ## 4. Verification
 
-After applying the fix, I will run the `knowledge_prompt2` example again:
-`cargo run -p anyrag-server --example knowledge_prompt2`
+After implementing the changes, I will run the `knowledge_prompt2` example to verify the fix:
 
-The expected outcome is that the answer to Question 3 will now correctly start with the phrase specified in the instruction ("สรุปเงื่อนไขได้ว่า..."), confirming that the instruction is no longer being ignored.
+`RUST_LOG=info cargo run -p anyrag-server --example knowledge_prompt2`
+
+The expected outcome is that the example completes successfully, and the logs from `embed_new_handler` will show that all documents were found and processed in a single batch operation, confirming the new logic is working correctly.

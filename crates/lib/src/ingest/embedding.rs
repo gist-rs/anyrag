@@ -4,7 +4,7 @@
 //! that has been ingested, such as articles from an RSS feed. This is a key
 //! step in preparing the data for semantic search.
 
-use crate::providers::ai::generate_embedding;
+use crate::providers::ai::generate_embeddings_batch;
 use thiserror::Error;
 use tracing::info;
 use turso::{params, Database, Value as TursoValue};
@@ -67,13 +67,20 @@ pub async fn embed_article(
     info!("Generating embedding for article ID: {article_id} with text: \"{text_to_embed}\"");
 
     // 2. Generate the embedding.
-    let vector = generate_embedding(
+    let vector = generate_embeddings_batch(
         embeddings_api_url,
         embeddings_model,
-        &text_to_embed,
+        &[&text_to_embed],
         embeddings_api_key,
     )
-    .await?;
+    .await?
+    .into_iter()
+    .next()
+    .ok_or_else(|| {
+        EmbeddingError::Embedding(crate::errors::PromptError::AiApi(
+            "Embedding API returned no vector".to_string(),
+        ))
+    })?;
 
     // 3. Convert Vec<f32> to &[u8] for BLOB storage.
     let vector_bytes: &[u8] =

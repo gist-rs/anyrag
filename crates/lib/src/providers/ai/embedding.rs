@@ -13,7 +13,7 @@ use tracing::debug;
 #[derive(Serialize, Debug)]
 struct OpenAIEmbeddingRequest<'a> {
     model: &'a str,
-    input: &'a str,
+    input: &'a [&'a str],
 }
 
 #[derive(Deserialize, Debug)]
@@ -27,6 +27,11 @@ struct OpenAIEmbeddingData {
 }
 
 // --- Gemini-specific request and response structures ---
+
+#[derive(Serialize, Debug)]
+struct GeminiBatchEmbeddingRequest<'a> {
+    requests: Vec<GeminiEmbeddingRequest<'a>>,
+}
 
 #[derive(Serialize, Debug)]
 struct GeminiEmbeddingRequest<'a> {
@@ -45,8 +50,8 @@ struct GeminiEmbeddingPart<'a> {
 }
 
 #[derive(Deserialize, Debug)]
-struct GeminiEmbeddingResponse {
-    embedding: GeminiEmbeddingValue,
+struct GeminiBatchEmbeddingResponse {
+    embeddings: Vec<GeminiEmbeddingValue>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -54,46 +59,60 @@ struct GeminiEmbeddingValue {
     values: Vec<f32>,
 }
 
-/// Generates a vector embedding for a given text input using an external API.
+/// Generates vector embeddings for a given batch of text inputs using an external API.
 ///
 /// This function dynamically constructs the correct JSON payload based on whether
 /// the `api_url` is for a Gemini or an OpenAI-compatible endpoint.
-pub async fn generate_embedding(
+pub async fn generate_embeddings_batch(
     api_url: &str,
     model: &str,
-    input: &str,
+    inputs: &[&str],
     api_key: Option<&str>,
-) -> Result<Vec<f32>, PromptError> {
-    // info!("Generating embedding using model '{model}' with API URL: {api_url}");
-    // info!(text_to_embed = %input, "Sending text for embedding");
+) -> Result<Vec<Vec<f32>>, PromptError> {
+    if inputs.is_empty() {
+        return Ok(Vec::new());
+    }
+
     let client = ReqwestClient::new();
-    let mut request_builder = client.post(api_url);
-    let is_gemini = api_url.contains("generativelanguage.googleapis.com");
+    // The Gemini batch endpoint is different.
+    let final_api_url = if api_url.ends_with(":embedContent") {
+        api_url.replace(":embedContent", ":batchEmbedContents")
+    } else {
+        api_url.to_string()
+    };
+    let mut request_builder = client.post(&final_api_url);
+    let is_gemini = final_api_url.contains("generativelanguage.googleapis.com");
 
     // --- 1. Construct the appropriate request body and apply auth ---
     if is_gemini {
-        // Gemini requires the model name to be prefixed with "models/" in the payload.
         let gemini_model_name = if model.starts_with("models/") {
             model.to_string()
         } else {
             format!("models/{model}")
         };
 
-        let request_body = GeminiEmbeddingRequest {
-            model: gemini_model_name,
-            content: GeminiEmbeddingContent {
-                parts: vec![GeminiEmbeddingPart { text: input }],
-            },
-        };
-        debug!(payload = ?request_body, "--> Sending request to Gemini Embeddings API");
+        let requests = inputs
+            .iter()
+            .map(|&text| GeminiEmbeddingRequest {
+                model: gemini_model_name.clone(),
+                content: GeminiEmbeddingContent {
+                    parts: vec![GeminiEmbeddingPart { text }],
+                },
+            })
+            .collect();
+
+        let request_body = GeminiBatchEmbeddingRequest { requests };
+        debug!(payload = ?request_body, "--> Sending BATCH request to Gemini Embeddings API");
         request_builder = request_builder.json(&request_body);
         if let Some(key) = api_key {
-            // Gemini uses an `x-goog-api-key` header for embeddings, not a query param.
             request_builder = request_builder.header("x-goog-api-key", key);
         }
     } else {
-        let request_body = OpenAIEmbeddingRequest { model, input };
-        debug!(payload = ?request_body, "--> Sending request to OpenAI-compatible Embeddings API");
+        let request_body = OpenAIEmbeddingRequest {
+            model,
+            input: inputs,
+        };
+        debug!(payload = ?request_body, "--> Sending BATCH request to OpenAI-compatible Embeddings API");
         request_builder = request_builder.json(&request_body);
         if let Some(key) = api_key {
             request_builder = request_builder.bearer_auth(key);
@@ -112,24 +131,25 @@ pub async fn generate_embedding(
     }
 
     if is_gemini {
-        let gemini_response: GeminiEmbeddingResponse = response
+        let gemini_response: GeminiBatchEmbeddingResponse = response
             .json()
             .await
             .map_err(PromptError::AiDeserialization)?;
-        Ok(gemini_response.embedding.values)
+        Ok(gemini_response
+            .embeddings
+            .into_iter()
+            .map(|e| e.values)
+            .collect())
     } else {
         let openai_response: OpenAIEmbeddingResponse = response
             .json()
             .await
             .map_err(PromptError::AiDeserialization)?;
 
-        openai_response
+        Ok(openai_response
             .data
             .into_iter()
-            .next()
             .map(|d| d.embedding)
-            .ok_or_else(|| {
-                PromptError::AiApi("OpenAI-compatible API returned no embeddings".to_string())
-            })
+            .collect())
     }
 }

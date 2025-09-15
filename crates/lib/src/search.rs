@@ -9,7 +9,7 @@
 use crate::ingest::knowledge::clean_llm_response;
 use crate::{
     providers::{
-        ai::{generate_embedding, AiProvider},
+        ai::{generate_embeddings_batch, AiProvider},
         db::storage::{KeywordSearch, MetadataSearch, TemporalSearch, VectorSearch},
     },
     rerank::reciprocal_rank_fusion,
@@ -229,14 +229,21 @@ where
     let limit_vec = options.limit;
     let vector_handle = tokio::spawn(async move {
         if options.use_vector_search {
-            let query_vector = generate_embedding(
+            let query_vector = generate_embeddings_batch(
                 &embedding_api_url,
                 &embedding_model,
-                &query_text_vec,
+                &[&query_text_vec],
                 embedding_api_key.as_deref(),
             )
             .await
-            .map_err(SearchError::Embedding)?;
+            .map_err(SearchError::Embedding)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                SearchError::Embedding(PromptError::AiApi(
+                    "Embedding API returned no vector".to_string(),
+                ))
+            })?;
 
             provider_vec
                 .vector_search(query_vector, limit_vec * 2, owner_id_vec.as_deref(), None)

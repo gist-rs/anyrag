@@ -5,7 +5,7 @@ pub mod local;
 use crate::errors::PromptError;
 use async_trait::async_trait;
 use dyn_clone::DynClone;
-pub use embedding::generate_embedding;
+pub use embedding::generate_embeddings_batch;
 use std::fmt::Debug;
 
 /// A trait for interacting with an AI provider.

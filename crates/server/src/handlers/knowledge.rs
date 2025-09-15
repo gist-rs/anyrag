@@ -9,7 +9,7 @@ use super::{
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
     ingest::export_for_finetuning,
-    providers::ai::generate_embedding,
+    providers::ai::generate_embeddings_batch,
     search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
 };
@@ -97,32 +97,58 @@ pub async fn embed_new_handler(
         return Ok(wrap_response(response, debug_params, Some(debug_info)));
     }
 
+    // 1. Prepare texts for batch embedding
+    let texts_to_embed: Vec<String> = docs_to_embed
+        .iter()
+        .map(|(_, title, content)| format!("{title}. {content}"))
+        .collect();
+    let text_slices: Vec<&str> = texts_to_embed.iter().map(AsRef::as_ref).collect();
+
+    // 2. Call the batch embedding function
+    let embeddings = match generate_embeddings_batch(api_url, model, &text_slices, api_key).await {
+        Ok(vectors) => vectors,
+        Err(e) => {
+            error!("Batch embedding generation failed: {e}");
+            return Err(AppError::Embedding(
+                anyrag::ingest::EmbeddingError::Embedding(e),
+            ));
+        }
+    };
+
+    if docs_to_embed.len() != embeddings.len() {
+        error!(
+            "Mismatch between number of documents ({}) and embeddings received ({}). Aborting.",
+            docs_to_embed.len(),
+            embeddings.len()
+        );
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "Embedding count mismatch."
+        )));
+    }
+
+    // 3. Store the embeddings in a transaction
     let mut embedded_ids = Vec::new();
-    for (doc_id, title, content) in docs_to_embed {
-        let text_to_embed = format!("{title}. {content}");
-        match generate_embedding(api_url, model, &text_to_embed, api_key).await {
-            Ok(vector) => {
-                let vector_bytes: &[u8] = unsafe {
-                    std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4)
-                };
-                if let Err(e) = conn
-                    .execute(
-                        "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
-                        params![doc_id.clone(), model.clone(), vector_bytes],
-                    )
-                    .await
-                {
-                    error!("Failed to insert embedding for document ID: {doc_id}. Error: {e}");
-                } else {
-                    // info!("Successfully embedded document ID: {}", doc_id);
-                    embedded_ids.push(doc_id);
-                }
-            }
-            Err(e) => {
-                error!("Failed to generate embedding for document ID: {doc_id}. Error: {e}");
-            }
+    conn.execute("BEGIN TRANSACTION", ()).await?;
+    let mut stmt = conn
+        .prepare(
+            "INSERT INTO document_embeddings (document_id, model_name, embedding) VALUES (?, ?, ?)",
+        )
+        .await?;
+
+    for ((doc_id, _, _), vector) in docs_to_embed.iter().zip(embeddings) {
+        let vector_bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
+
+        if let Err(e) = stmt
+            .execute(params![doc_id.clone(), model.clone(), vector_bytes])
+            .await
+        {
+            error!("Failed to insert embedding for document ID: {doc_id}. Error: {e}");
+        } else {
+            embedded_ids.push(doc_id.clone());
         }
     }
+    conn.execute("COMMIT", ()).await?;
 
     let success_count = embedded_ids.len();
     let response = EmbedNewResponse {

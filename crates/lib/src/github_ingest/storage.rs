@@ -192,10 +192,21 @@ impl StorageManager {
             let example_id: i64 = row.get(0)?;
             let content: String = row.get(1)?;
 
-            let vector =
-                crate::providers::ai::generate_embedding(api_url, model_name, &content, api_key)
-                    .await
-                    .map_err(|e| GitHubIngestError::Internal(e.into()))?;
+            let vector = crate::providers::ai::generate_embeddings_batch(
+                api_url,
+                model_name,
+                &[&content],
+                api_key,
+            )
+            .await
+            .map_err(|e| GitHubIngestError::Internal(e.into()))?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                GitHubIngestError::Internal(anyhow::anyhow!(
+                    "Embedding API returned no vector for content"
+                ))
+            })?;
 
             let vector_bytes: &[u8] = unsafe {
                 std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4)
