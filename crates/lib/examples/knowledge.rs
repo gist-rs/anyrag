@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ai_provider: Box<dyn AiProvider> = match ai_provider_name.as_str() {
         "gemini" => {
             let key = ai_api_key.expect("AI_API_KEY is required for gemini provider");
-            let gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent";
+            let gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
             Box::new(GeminiProvider::new(gemini_url.to_string(), key)?)
         }
         "local" => Box::new(LocalAiProvider::new(
