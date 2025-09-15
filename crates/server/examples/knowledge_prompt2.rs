@@ -174,11 +174,30 @@ async fn main() -> Result<()> {
     let question1 = "GPF Point แจกถึงวันไหน";
     let answer1 = ask_question(app_state.clone(), auth_user.clone(), question1, None).await?;
 
+    let question2 = "สร้าง My GPF ได้รับที่คะแนน";
+    let instruction2 = "สรุปเงื่อนไขการรับ GPF Point";
+    let answer2 = ask_question(
+        app_state.clone(),
+        auth_user.clone(),
+        question2,
+        Some(instruction2),
+    )
+    .await?;
+
+    let question3 = "มีเงิน 2 หมื่นออมต่อได้มั้ย";
+    let answer3 = ask_question(app_state.clone(), auth_user, question3, None).await?;
+
     // --- 5. Print Final Results ---
     println!("\n\n✅ Knowledge RAG Workflow Complete!");
     println!("========================================");
     println!("❓ Question 1: {question1}");
     println!("💡 Answer 1:\n---\n{answer1}\n---");
+    println!("\n========================================");
+    println!("❓ Question 2: {question2}");
+    println!("💡 Answer 2:\n---\n{answer2}\n---");
+    println!("\n========================================");
+    println!("❓ Question 3: {question3}");
+    println!("💡 Answer 3:\n---\n{answer3}\n---");
 
     Ok(())
 }
