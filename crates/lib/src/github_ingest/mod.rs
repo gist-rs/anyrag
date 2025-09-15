@@ -65,7 +65,12 @@ pub async fn run_github_ingestion(
         if count > 0 {
             info!("Starting embedding process for {} new examples.", count);
             storage_manager
-                .embed_and_store_examples(&tracked_repo, url, model)
+                .embed_and_store_examples(
+                    &tracked_repo,
+                    url,
+                    model,
+                    task.embedding_api_key.as_deref(),
+                )
                 .await?;
         }
     }
@@ -85,6 +90,7 @@ pub async fn search_examples(
     ai_provider: Arc<dyn AiProvider>,
     embedding_api_url: &str,
     embedding_model: &str,
+    embedding_api_key: Option<&str>,
 ) -> Result<Vec<SearchResult>, GitHubIngestError> {
     search_across_repos(
         query,
@@ -93,6 +99,7 @@ pub async fn search_examples(
         ai_provider,
         embedding_api_url,
         embedding_model,
+        embedding_api_key,
     )
     .await
 }

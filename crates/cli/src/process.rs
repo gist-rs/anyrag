@@ -50,12 +50,14 @@ async fn handle_process_file(args: &FileArgs) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
 
+    let embedding_api_key = std::env::var("AI_API_KEY").ok();
     let embedding_config = args.embedding_api_url.as_deref().and_then(|url| {
         args.embedding_model
             .as_deref()
             .map(|model| EmbeddingConfig {
                 api_url: url,
                 model,
+                api_key: embedding_api_key.as_deref(),
             })
     });
 

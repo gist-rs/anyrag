@@ -244,6 +244,7 @@ pub async fn search_across_repos(
     ai_provider: Arc<dyn AiProvider>,
     embedding_api_url: &str,
     embedding_model: &str,
+    embedding_api_key: Option<&str>,
 ) -> Result<Vec<SearchResult>, GitHubIngestError> {
     info!(
         "Starting multi-repo search for query: '{}' in repos: {:?}",
@@ -267,9 +268,10 @@ pub async fn search_across_repos(
     };
 
     // 2. Generate an embedding for the original, full query for vector search.
-    let query_vector = generate_embedding(embedding_api_url, embedding_model, query)
-        .await
-        .map_err(|e| GitHubIngestError::Internal(e.into()))?;
+    let query_vector =
+        generate_embedding(embedding_api_url, embedding_model, query, embedding_api_key)
+            .await
+            .map_err(|e| GitHubIngestError::Internal(e.into()))?;
 
     let mut search_handles = vec![];
 
@@ -348,7 +350,10 @@ pub async fn search_across_repos(
                     }
                 };
 
-                Ok(reciprocal_rank_fusion(vector_results, keyword_results))
+                Ok(reciprocal_rank_fusion(vec![
+                    vector_results,
+                    keyword_results,
+                ]))
             });
         search_handles.push(handle);
     }

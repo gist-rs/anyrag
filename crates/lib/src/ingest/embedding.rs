@@ -37,6 +37,7 @@ pub async fn embed_article(
     db: &Database,
     embeddings_api_url: &str,
     embeddings_model: &str,
+    embeddings_api_key: Option<&str>,
     article_id: i64,
 ) -> Result<(), EmbeddingError> {
     let conn = db.connect().map_err(EmbeddingError::Database)?;
@@ -66,7 +67,13 @@ pub async fn embed_article(
     info!("Generating embedding for article ID: {article_id} with text: \"{text_to_embed}\"");
 
     // 2. Generate the embedding.
-    let vector = generate_embedding(embeddings_api_url, embeddings_model, &text_to_embed).await?;
+    let vector = generate_embedding(
+        embeddings_api_url,
+        embeddings_model,
+        &text_to_embed,
+        embeddings_api_key,
+    )
+    .await?;
 
     // 3. Convert Vec<f32> to &[u8] for BLOB storage.
     let vector_bytes: &[u8] =

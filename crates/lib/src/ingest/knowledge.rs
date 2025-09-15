@@ -9,6 +9,8 @@
 
 use crate::{errors::PromptError, providers::ai::AiProvider};
 use md5;
+
+use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -157,9 +159,32 @@ pub async fn run_ingestion_pipeline(
 
     // Handle results
     let faq_items = faq_result?;
-    metadata_result?; // Propagate metadata errors
+    let metadata_items = metadata_result?;
 
-    store_structured_knowledge(db, &document_id, owner_id, faq_items).await
+    let count = store_faqs_as_documents(
+        db,
+        &ingested_document.source_url,
+        owner_id,
+        &faq_items,
+        &metadata_items,
+    )
+    .await?;
+
+    // Set the original document's content to an empty string to exclude it from search results,
+    // while preserving its row for caching purposes.
+    if count > 0 {
+        conn.execute(
+            "UPDATE documents SET content = ? WHERE id = ?",
+            params!["", document_id.clone()],
+        )
+        .await?;
+        info!(
+            "Cleared content of source document '{}' after extracting FAQs.",
+            document_id
+        );
+    }
+
+    Ok(count)
 }
 
 // --- Stage 1: Ingestion & Caching ---
@@ -189,9 +214,59 @@ pub async fn fetch_web_content(
                 return Err(KnowledgeError::JinaReaderFailed { status, body });
             }
             let html = response.text().await?;
-            htmd::HtmlToMarkdown::new()
-                .convert(&html)
-                .map_err(|e| KnowledgeError::HtmlConversion(e.to_string()))
+
+            // --- Robust HTML Parsing with `scraper` ---
+            // This logic specifically finds text nodes starting with "Q :" and "A :"
+            // and reconstructs them into a clean Markdown format, ignoring all other
+            // text nodes like navigation links, headers, etc.
+            let document = Html::parse_document(&html);
+            let body_selector = Selector::parse("body").unwrap();
+
+            let mut content_builder = String::new();
+            if let Some(body) = document.select(&body_selector).next() {
+                let mut current_qa = String::new();
+                for text_node in body.text() {
+                    let text = text_node.trim();
+                    if text.is_empty() {
+                        continue;
+                    }
+
+                    // The "- " prefix is inconsistent, so we trim it before checking.
+                    let clean_text = text.strip_prefix('-').unwrap_or(text).trim();
+
+                    if clean_text.starts_with("Q :") {
+                        if !current_qa.is_empty() {
+                            content_builder.push_str(current_qa.trim());
+                            content_builder.push_str("\n\n");
+                        }
+                        // Start a new Q&A block, using the cleaned text
+                        current_qa = format!("## {clean_text}\n");
+                    } else if clean_text.starts_with("A :") {
+                        // Append the answer to the current Q&A
+                        current_qa.push_str(clean_text);
+                    } else if !current_qa.is_empty() && !current_qa.ends_with(clean_text) {
+                        // This text belongs to the previous line (likely part of an answer)
+                        current_qa.push(' ');
+                        current_qa.push_str(clean_text);
+                    }
+                }
+                // Flush the last Q&A block
+                if !current_qa.is_empty() {
+                    content_builder.push_str(current_qa.trim());
+                    content_builder.push_str("\n\n");
+                }
+            }
+
+            if content_builder.is_empty() {
+                warn!(
+                    "Scraper could not find any Q&A content, falling back to full text conversion."
+                );
+                return htmd::HtmlToMarkdown::new()
+                    .convert(&html)
+                    .map_err(|e| KnowledgeError::HtmlConversion(e.to_string()));
+            }
+
+            Ok(content_builder)
         }
         WebIngestStrategy::Jina { api_key } => {
             let fetch_url = format!("https://r.jina.ai/{url}");
@@ -453,49 +528,88 @@ pub async fn distill_and_augment(
 
 // --- Stage 3: Structured Storage ---
 
-pub async fn store_structured_knowledge(
+pub async fn store_faqs_as_documents(
     db: &Database,
-    document_id: &str,
+    parent_source_url: &str,
     owner_id: Option<&str>,
-    faq_items: Vec<FaqItem>,
+    faq_items: &[FaqItem],
+    metadata: &[ContentMetadata],
 ) -> Result<usize, KnowledgeError> {
     if faq_items.is_empty() {
-        info!("No structured knowledge to store for document: {document_id}");
+        info!("No FAQs to store as documents for source: {parent_source_url}");
         return Ok(0);
     }
     let conn = db.connect()?;
     info!(
-        "Storing {} FAQ items for document: {}",
+        "Storing {} FAQs as individual documents for source: {}",
         faq_items.len(),
-        document_id
+        parent_source_url
     );
 
-    // We should delete old FAQs for this document before inserting new ones.
+    // First, remove old FAQ documents derived from this parent source URL to ensure idempotency.
+    let url_pattern = format!("{parent_source_url}#faq_%");
     conn.execute(
-        "DELETE FROM faq_items WHERE document_id = ?",
-        params![document_id],
+        "DELETE FROM documents WHERE source_url LIKE ?",
+        params![url_pattern],
     )
     .await?;
+
     conn.execute("BEGIN TRANSACTION", ()).await?;
     let mut stmt = conn
         .prepare(
-            r#"INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)"#,
+            r#"INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)"#,
         )
         .await?;
 
-    for faq in &faq_items {
+    let mut new_document_ids = Vec::new();
+    for (i, faq) in faq_items.iter().enumerate() {
+        // Create a stable, unique ID and a unique source URL for each FAQ document.
+        let faq_source_url = format!("{parent_source_url}#faq_{i}");
+        let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, faq_source_url.as_bytes()).to_string();
+        new_document_ids.push(document_id.clone());
+
         stmt.execute(params![
             document_id,
             owner_id,
-            faq.question.clone(),
-            faq.answer.clone(),
+            faq_source_url,
+            faq.question.clone(), // The question becomes the title
+            faq.answer.clone(),   // The answer becomes the content
         ])
         .await?;
     }
 
+    // --- Propagate Metadata ---
+    // If metadata was extracted from the parent, associate it with all the new FAQ documents.
+    if !metadata.is_empty() && !new_document_ids.is_empty() {
+        info!(
+            "Propagating {} metadata items to {} new FAQ documents.",
+            metadata.len(),
+            new_document_ids.len()
+        );
+        let mut meta_stmt = conn
+            .prepare(
+                "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+            )
+            .await?;
+
+        for doc_id in &new_document_ids {
+            for item in metadata {
+                meta_stmt
+                    .execute(params![
+                        doc_id.to_string(),
+                        owner_id.map(|s| s.to_string()),
+                        item.metadata_type.to_uppercase(),
+                        item.subtype.clone(),
+                        item.value.clone(),
+                    ])
+                    .await?;
+            }
+        }
+    }
+
     conn.execute("COMMIT", ()).await?;
     info!(
-        "Successfully stored {} new FAQs for document: {document_id}",
+        "Successfully stored {} new FAQ documents for source: {parent_source_url}",
         faq_items.len()
     );
     Ok(faq_items.len())
@@ -510,7 +624,7 @@ pub async fn extract_and_store_metadata(
     owner_id: Option<&str>,
     content: &str,
     system_prompt: &str,
-) -> Result<(), KnowledgeError> {
+) -> Result<Vec<ContentMetadata>, KnowledgeError> {
     info!(
         "Starting metadata extraction for document ID: {}",
         document_id
@@ -532,7 +646,7 @@ pub async fn extract_and_store_metadata(
             "Failed to parse metadata response as array or object, skipping. Raw response: '{}'",
             cleaned_response
         );
-            return Ok(());
+            return Ok(Vec::new());
         };
 
     // --- Programmatic Filtering and Limiting (Safety Net) ---
@@ -572,7 +686,7 @@ pub async fn extract_and_store_metadata(
 
     if metadata_items.is_empty() {
         info!("No metadata extracted for document: {document_id}");
-        return Ok(());
+        return Ok(metadata_items);
     }
 
     info!(
@@ -612,7 +726,7 @@ pub async fn extract_and_store_metadata(
         metadata_items.len()
     );
 
-    Ok(())
+    Ok(metadata_items)
 }
 
 // --- Helper Functions ---
@@ -645,7 +759,7 @@ pub async fn export_for_finetuning(db: &Database) -> Result<String, KnowledgeErr
     info!("Exporting knowledge base for fine-tuning.");
     let conn = db.connect()?;
     let mut stmt = conn
-        .prepare("SELECT question, answer FROM faq_items")
+        .prepare("SELECT title, content FROM documents WHERE source_url LIKE '%#faq_%'")
         .await?;
     let mut rows = stmt.query(()).await?;
     let system_prompt = "You are a helpful assistant. Provide clear, accurate answers based on the retrieved context.";

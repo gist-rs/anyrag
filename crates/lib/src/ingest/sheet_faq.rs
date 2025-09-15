@@ -4,7 +4,7 @@
 //! from a public Google Sheet into the `faq_kb` knowledge base table.
 
 use crate::ingest::{
-    knowledge::{store_structured_knowledge, FaqItem},
+    knowledge::{store_faqs_as_documents, FaqItem},
     shared::{construct_export_url_and_table_name, download_csv, SheetError},
 };
 use thiserror::Error;
@@ -144,7 +144,7 @@ pub async fn ingest_faq_from_google_sheet(
 
     info!("Found {} FAQ items to ingest.", faq_items.len());
 
-    let stored_count = store_structured_knowledge(db, &document_id, owner_id, faq_items)
+    let stored_count = store_faqs_as_documents(db, sheet_url, owner_id, &faq_items, &[])
         .await
         .map_err(|e| IngestSheetFaqError::Process(e.to_string()))?;
 

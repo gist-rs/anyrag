@@ -27,7 +27,7 @@ use anyrag_server::{
     state::{build_app_state, AppState},
 };
 use axum::serve;
-use httpmock::{Method, MockServer};
+use httpmock::{prelude::*, Method};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use reqwest::Client;
 use serde_json::json;
@@ -69,16 +69,17 @@ impl TestApp {
         let mock_server = MockServer::start();
 
         // --- Default Mocks ---
-        // Add a default mock for any embedding requests. This prevents tests
-        // that trigger embedding from failing if they don't set up their own specific mock.
+
+        // Add a default mock for any chat completion requests that are NOT for query analysis.
         mock_server.mock(|when, then| {
-            when.method(Method::POST).path("/v1/embeddings");
-            then.status(200)
-                .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
-        });
-        // Add a default mock for any chat completion requests
-        mock_server.mock(|when, then| {
-            when.method(Method::POST).path("/v1/chat/completions");
+            when.method(Method::POST)
+                .path("/v1/chat/completions")
+                .matches(|req| {
+                    let body_str =
+                        String::from_utf8_lossy(req.body.as_deref().unwrap_or_default());
+                    !body_str.contains("expert query analyst")
+                        && !body_str.contains("strict, factual AI")
+                });
             then.status(200)
                 .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "Default mock response."}}]}));
         });

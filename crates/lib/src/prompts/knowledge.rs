@@ -13,8 +13,10 @@ pub const KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT: &str = r#"You are an expert data e
 2.  Identify two types of information:
     -   **Explicit FAQs**: Sections that are clearly formatted as a question and its corresponding answer, often under a "FAQ" or "คำถามที่พบบ่อย" heading.
     -   **Informational Content**: Paragraphs or sections that describe a topic, feature, or set of instructions but are not in a Q&A format. This is the main content of the document.
-3.  **Data Reconciliation Rule**: If you find conflicting information between the main content and a separate FAQ section (e.g., different dates, terms, conditions), you **MUST** prioritize the information from the main content body as the source of truth. The data in the FAQ section should be considered secondary if a conflict exists.
-4.  Return a single JSON object with two main keys: `faqs` and `content_chunks`.
+3.  **Content Filtering Rule**: You **MUST** ignore navigation menus, lists of links, headers, footers, and any other non-substantive content. Focus exclusively on the main paragraphs and Q&A sections that provide real information.
+4.  **Data Reconciliation Rule**: If you find conflicting information between the main content and a separate FAQ section (e.g., different dates, terms, conditions), you **MUST** prioritize the information from the main content body as the source of truth. The data in the FAQ section should be considered secondary if a conflict exists.
+5.  **Crucial Language Rule**: You **MUST** preserve the original language of the content. Do NOT translate any of the text. For example, if the content is in Thai, all extracted `question`, `answer`, and `content` fields in your JSON response MUST be in Thai.
+6.  Return a single JSON object with two main keys: `faqs` and `content_chunks`.
     -   The `faqs` key should contain a list of all found explicit FAQs.
     -   The `content_chunks` key should contain a list of all other informational content sections.
 
@@ -104,14 +106,15 @@ Please provide only the JSON object in your response.
 /// The system prompt for synthesizing an answer from retrieved knowledge base context.
 /// This instructs the AI to answer only based on the provided context.
 pub const KNOWLEDGE_RAG_SYSTEM_PROMPT: &str =
-    "You are a strict, factual AI. Your sole purpose is to answer the user's
-      question based *only* on the provided #Context.";
+    "You are a strict, factual AI. Your sole purpose is to answer the user's question based *only* on the provided #Context. If the user includes an additional instruction with their question, you must follow it. If the context does not contain the answer, state that the information is not available in the provided context.";
 
 /// The user prompt for the RAG synthesis step.
 /// This structures the input with the user's query and the retrieved context.
-/// Placeholders: `{prompt}`, `{context}`
+/// The `{instruction}` placeholder will be empty if no instruction is provided, which is harmless.
+/// Placeholders: `{prompt}`, `{instruction}`, `{context}`
 pub const KNOWLEDGE_RAG_USER_PROMPT: &str = r#"# User Question
 {prompt}
+{instruction}
 
 # Context
 {context}

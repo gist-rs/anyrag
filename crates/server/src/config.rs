@@ -114,6 +114,7 @@ fn default_web_ingest_strategy() -> String {
 pub struct EmbeddingConfig {
     pub api_url: String,
     pub model_name: String,
+    pub api_key: Option<String>,
 }
 
 /// A reusable configuration for a specific AI provider instance.

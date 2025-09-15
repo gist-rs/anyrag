@@ -31,6 +31,7 @@ pub enum MarkdownIngestError {
 pub struct EmbeddingConfig<'a> {
     pub api_url: &'a str,
     pub model: &'a str,
+    pub api_key: Option<&'a str>,
 }
 
 /// Reads a Markdown file, splits it into chunks by a separator, and ingests them.
@@ -81,9 +82,14 @@ pub async fn ingest_markdown_file(
                 .collect();
 
             for (doc_id, chunk_content) in id_chunk_pairs {
-                let vector = generate_embedding(config.api_url, config.model, &chunk_content)
-                    .await
-                    .map_err(MarkdownIngestError::Embedding)?;
+                let vector = generate_embedding(
+                    config.api_url,
+                    config.model,
+                    &chunk_content,
+                    config.api_key,
+                )
+                .await
+                .map_err(MarkdownIngestError::Embedding)?;
 
                 // Convert Vec<f32> to &[u8] for BLOB storage
                 let vector_bytes: &[u8] = unsafe {

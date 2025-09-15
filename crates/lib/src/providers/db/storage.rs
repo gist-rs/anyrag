@@ -59,6 +59,7 @@ pub trait KeywordSearch: Send + Sync + DynClone + Debug {
         query: &str,
         limit: u32,
         owner_id: Option<&str>,
+        document_ids: Option<&[String]>,
     ) -> Result<Vec<SearchResult>, SearchError>;
 }
 
@@ -67,14 +68,14 @@ dyn_clone::clone_trait_object!(KeywordSearch);
 /// A trait for providers that support metadata search.
 #[async_trait]
 pub trait MetadataSearch: Send + Sync + DynClone + Debug {
-    /// Performs a search on the metadata table for document IDs.
+    /// Performs a search on the metadata table for documents.
     async fn metadata_search(
         &self,
         entities: &[String],
         keyphrases: &[String],
         owner_id: Option<&str>,
         limit: u32,
-    ) -> Result<Vec<String>, SearchError>;
+    ) -> Result<Vec<SearchResult>, SearchError>;
 }
 
 dyn_clone::clone_trait_object!(MetadataSearch);

@@ -444,45 +444,72 @@ impl KeywordSearch for SqliteProvider {
         query: &str,
         limit: u32,
         owner_id: Option<&str>,
+        document_ids: Option<&[String]>,
     ) -> Result<Vec<SearchResult>, SearchError> {
         info!("Executing keyword search for: '{query}' for owner: {owner_id:?}");
         let conn = self.db.connect()?;
-        let pattern = format!("%{}%", query.to_lowercase());
         let mut search_results = Vec::new();
+        let keywords: Vec<_> = query.split_whitespace().filter(|s| !s.is_empty()).collect();
+        if keywords.is_empty() {
+            return Ok(vec![]);
+        }
 
-        // --- Part 1: Search Documents ---
-        let mut doc_conditions =
-            vec!["(lower(d.content) LIKE ? OR lower(d.title) LIKE ?)".to_string()];
-        let mut doc_params = vec![
-            TursoValue::Text(pattern.clone()),
-            TursoValue::Text(pattern.clone()),
-        ];
+        let mut doc_params: Vec<TursoValue> = Vec::new();
+        let keyword_conditions: Vec<_> = keywords
+            .iter()
+            .map(|k| {
+                let pattern = format!("%{}%", k.to_lowercase());
+                doc_params.push(TursoValue::Text(pattern.clone()));
+                doc_params.push(TursoValue::Text(pattern));
+                "(lower(d.content) LIKE ? OR lower(d.title) LIKE ?)"
+            })
+            .collect();
 
-        #[cfg(feature = "core-access")]
-        {
-            let guest_user_id =
-                Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
-            if let Some(owner) = owner_id {
-                if owner == guest_user_id {
-                    doc_conditions.push("d.owner_id = ?".to_string());
-                    doc_params.push(TursoValue::Text(guest_user_id.clone()));
-                } else {
-                    doc_conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
-                    doc_params.push(TursoValue::Text(owner.to_string()));
-                    doc_params.push(TursoValue::Text(guest_user_id.clone()));
+        // Combine all keyword conditions with OR for better recall.
+        let mut doc_conditions = vec![format!("({})", keyword_conditions.join(" OR "))];
+
+        if let Some(ids) = document_ids {
+            if !ids.is_empty() {
+                let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+                doc_conditions.push(format!("d.id IN ({placeholders})"));
+                for id in ids {
+                    doc_params.push(TursoValue::Text(id.to_string()));
                 }
             } else {
-                doc_conditions.push("d.owner_id = ?".to_string());
-                doc_params.push(TursoValue::Text(guest_user_id.clone()));
+                // If a filter is provided but it's empty, no results should be returned.
+                return Ok(Vec::new());
             }
         }
-        #[cfg(not(feature = "core-access"))]
-        {
-            if let Some(owner) = owner_id {
-                doc_conditions.push("d.owner_id = ?".to_string());
-                doc_params.push(TursoValue::Text(owner.to_string()));
-            } else {
-                doc_conditions.push("d.owner_id IS NULL".to_string());
+
+        // Only apply owner_id filter if not already filtering by specific doc IDs.
+        if document_ids.is_none() {
+            #[cfg(feature = "core-access")]
+            {
+                let guest_user_id =
+                    Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes())
+                        .to_string();
+                if let Some(owner) = owner_id {
+                    if owner == guest_user_id {
+                        doc_conditions.push("d.owner_id = ?".to_string());
+                        doc_params.push(TursoValue::Text(guest_user_id.clone()));
+                    } else {
+                        doc_conditions.push("(d.owner_id = ? OR d.owner_id = ?)".to_string());
+                        doc_params.push(TursoValue::Text(owner.to_string()));
+                        doc_params.push(TursoValue::Text(guest_user_id.clone()));
+                    }
+                } else {
+                    doc_conditions.push("d.owner_id = ?".to_string());
+                    doc_params.push(TursoValue::Text(guest_user_id.clone()));
+                }
+            }
+            #[cfg(not(feature = "core-access"))]
+            {
+                if let Some(owner) = owner_id {
+                    doc_conditions.push("d.owner_id = ?".to_string());
+                    doc_params.push(TursoValue::Text(owner.to_string()));
+                } else {
+                    doc_conditions.push("d.owner_id IS NULL".to_string());
+                }
             }
         }
 
@@ -501,67 +528,7 @@ impl KeywordSearch for SqliteProvider {
             });
         }
 
-        // --- Part 2: Search FAQs ---
-        let mut faq_conditions =
-            vec!["(lower(fi.question) LIKE ? OR lower(fi.answer) LIKE ?)".to_string()];
-        let mut faq_params = vec![TursoValue::Text(pattern.clone()), TursoValue::Text(pattern)];
-
-        #[cfg(feature = "core-access")]
-        {
-            let guest_user_id =
-                Uuid::new_v5(&Uuid::NAMESPACE_URL, GUEST_USER_IDENTIFIER.as_bytes()).to_string();
-            if let Some(owner) = owner_id {
-                if owner == guest_user_id {
-                    faq_conditions.push("fi.owner_id = ?".to_string());
-                    faq_params.push(TursoValue::Text(guest_user_id));
-                } else {
-                    faq_conditions.push("(fi.owner_id = ? OR fi.owner_id = ?)".to_string());
-                    faq_params.push(TursoValue::Text(owner.to_string()));
-                    faq_params.push(TursoValue::Text(guest_user_id));
-                }
-            } else {
-                faq_conditions.push("fi.owner_id = ?".to_string());
-                faq_params.push(TursoValue::Text(guest_user_id));
-            }
-        }
-        #[cfg(not(feature = "core-access"))]
-        {
-            if let Some(owner) = owner_id {
-                faq_conditions.push("fi.owner_id = ?".to_string());
-                faq_params.push(TursoValue::Text(owner.to_string()));
-            } else {
-                faq_conditions.push("fi.owner_id IS NULL".to_string());
-            }
-        }
-
-        let faq_where = faq_conditions.join(" AND ");
-        let faq_sql = format!(
-            "SELECT fi.question as title, d.source_url, fi.answer as content \
-             FROM faq_items fi JOIN documents d ON fi.document_id = d.id \
-             WHERE {faq_where} LIMIT {limit}"
-        );
-
-        let mut faq_rows = conn.query(&faq_sql, faq_params).await?;
-        while let Some(row) = faq_rows.next().await? {
-            search_results.push(SearchResult {
-                title: row.get::<String>(0)?,
-                link: row.get::<String>(1)?,
-                description: row.get::<String>(2)?,
-                score: 0.5,
-            });
-        }
-
-        // --- Part 3: Combine, Deduplicate, and Limit ---
-        let mut final_results_map = std::collections::HashMap::new();
-        for result in search_results {
-            final_results_map
-                .entry(result.link.clone())
-                .or_insert(result);
-        }
-        let mut final_results: Vec<SearchResult> = final_results_map.into_values().collect();
-        final_results.truncate(limit as usize);
-
-        Ok(final_results)
+        Ok(search_results)
     }
 }
 
@@ -573,7 +540,7 @@ impl MetadataSearch for SqliteProvider {
         keyphrases: &[String],
         owner_id: Option<&str>,
         limit: u32,
-    ) -> Result<Vec<String>, SearchError> {
+    ) -> Result<Vec<SearchResult>, SearchError> {
         info!("Executing metadata search for entities: {entities:?}, keyphrases: {keyphrases:?}");
         let conn = self.db.connect()?;
 
@@ -651,11 +618,11 @@ impl MetadataSearch for SqliteProvider {
         };
 
         let sql = format!(
-            "SELECT cm.document_id, COUNT(cm.document_id) as relevance_score
+            "SELECT d.title, d.source_url, d.content, COUNT(d.id) as relevance_score
              FROM content_metadata cm
              JOIN documents d on cm.document_id = d.id
              {where_clause}
-             GROUP BY cm.document_id
+             GROUP BY d.id, d.title, d.source_url, d.content
              ORDER BY relevance_score DESC
              LIMIT {limit}"
         );
@@ -663,15 +630,26 @@ impl MetadataSearch for SqliteProvider {
         info!(sql = %sql, params = ?params, "Executing metadata search SQL");
 
         let mut results = conn.query(&sql, params).await?;
-        let mut doc_ids = Vec::new();
+        let mut search_results = Vec::new();
 
         while let Some(row) = results.next().await? {
-            if let Ok(TursoValue::Text(id)) = row.get_value(0) {
-                doc_ids.push(id);
-            }
+            let title = row.get::<String>(0)?;
+            let link = row.get::<String>(1)?;
+            let description = row.get::<String>(2)?;
+            let score = match row.get_value(3)? {
+                TursoValue::Integer(i) => i as f64,
+                _ => 0.0,
+            };
+
+            search_results.push(SearchResult {
+                title,
+                link,
+                description,
+                score,
+            });
         }
 
-        Ok(doc_ids)
+        Ok(search_results)
     }
 }
 

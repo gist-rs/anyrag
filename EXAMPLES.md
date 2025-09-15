@@ -239,6 +239,16 @@ curl -X POST http://localhost:9090/search/knowledge \
   }'
 ```
 
+**Example 2:**
+```sh
+curl -X POST http://localhost:9090/search/knowledge \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your_jwt>" \
+  -d '{
+    "query": "สร้าง My Twin เอา point ได้ถึงวันไหน"
+  }'
+```
+
 ### `POST /search/examples`
 
 **This is the primary RAG endpoint for code examples.** It performs an advanced RAG search across one or more ingested GitHub repositories to find relevant code examples.

@@ -4,6 +4,7 @@ jina_api_key: "${JINA_API_KEY}"
 
 embedding:
   api_url: "${EMBEDDINGS_API_URL}"
+  api_key: null
   model_name: "text-embedding-qwen3-embedding-8b"
 
 providers:

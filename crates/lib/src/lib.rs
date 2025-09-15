@@ -211,12 +211,23 @@ impl PromptClient {
                 .replace("{language}", language)
                 .replace("{db_name}", self.storage_provider.name());
 
+            let instruction_block = if let Some(instruction) =
+                options.instruction.as_deref().filter(|s| !s.is_empty())
+            {
+                // Format the instruction into a separate block if it exists.
+                format!("\n# Instruction\n{instruction}")
+            } else {
+                // Otherwise, provide an empty string to effectively remove the placeholder.
+                "".to_string()
+            };
+
             let user_prompt = options
                 .user_prompt_template
                 .clone()
                 .unwrap_or_else(|| user_template.to_string())
                 .replace("{context}", &final_context)
                 .replace("{prompt}", &options.prompt)
+                .replace("{instruction}", &instruction_block)
                 .replace("{language}", language)
                 .replace("{alias_instruction}", &alias_instruction)
                 .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES);

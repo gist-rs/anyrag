@@ -102,7 +102,9 @@ async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
         when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("strict, factual AI")
+            .body_contains(user_query)
             .body_contains("The grand prize for the campaign is a Tesla Model 3.")
+            .body_contains("User Question")
             .matches(|req| {
                 !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default())
                     .contains("You must use the True App")

@@ -104,4 +104,6 @@ pub struct IngestionTask {
     pub embedding_api_url: Option<String>,
     /// The name of the embedding model to use.
     pub embedding_model: Option<String>,
+    /// The API key for the embedding model.
+    pub embedding_api_key: Option<String>,
 }

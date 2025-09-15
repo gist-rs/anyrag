@@ -10,7 +10,7 @@
 #[cfg(feature = "pdf")]
 use crate::{
     ingest::knowledge::{
-        distill_and_augment, extract_and_store_metadata, store_structured_knowledge, KnowledgeError,
+        distill_and_augment, extract_and_store_metadata, store_faqs_as_documents, KnowledgeError,
     },
     prompts::pdf::PDF_REFINEMENT_SYSTEM_PROMPT,
     providers::ai::AiProvider,
@@ -153,7 +153,7 @@ pub async fn run_pdf_ingestion_pipeline(
     }
 
     // Now that we have valid FAQs, we can extract metadata...
-    extract_and_store_metadata(
+    let metadata_items = extract_and_store_metadata(
         &conn,
         ai_provider,
         &document_id,
@@ -164,7 +164,7 @@ pub async fn run_pdf_ingestion_pipeline(
     .await?;
 
     // ...and finally, store the structured knowledge.
-    store_structured_knowledge(db, &document_id, owner_id, faq_items).await
+    store_faqs_as_documents(db, source_identifier, owner_id, &faq_items, &metadata_items).await
 }
 
 // --- Helper Functions ---

@@ -51,8 +51,9 @@ pub async fn vector_search_handler(
 
     let api_url = &app_state.config.embedding.api_url;
     let model = &app_state.config.embedding.model_name;
+    let api_key = app_state.config.embedding.api_key.as_deref();
 
-    let query_vector = generate_embedding(api_url, model, &payload.query).await?;
+    let query_vector = generate_embedding(api_url, model, &payload.query, api_key).await?;
     let results = app_state
         .sqlite_provider
         .vector_search(query_vector, limit, owner_id.as_deref(), None)
@@ -76,7 +77,7 @@ pub async fn keyword_search_handler(
     let limit = payload.limit.unwrap_or(10);
     let results = app_state
         .sqlite_provider
-        .keyword_search(&payload.query, limit, owner_id.as_deref())
+        .keyword_search(&payload.query, limit * 2, owner_id.as_deref(), None)
         .await?;
     info!("Keyword search found {} results.", results.len());
     let debug_info = json!({ "query": payload.query, "limit": limit, "owner_id": owner_id });
@@ -99,8 +100,9 @@ pub async fn hybrid_search_handler(
 
     let api_url = &app_state.config.embedding.api_url;
     let model = &app_state.config.embedding.model_name;
+    let api_key = app_state.config.embedding.api_key.as_deref();
 
-    let query_vector = generate_embedding(api_url, model, &payload.query).await?;
+    let query_vector = generate_embedding(api_url, model, &payload.query, api_key).await?;
 
     // --- Stage 1: Fetch Candidates Concurrently ---
     let (vector_results, keyword_results) = tokio::join!(
@@ -110,9 +112,12 @@ pub async fn hybrid_search_handler(
             owner_id.as_deref(),
             None
         ),
-        app_state
-            .sqlite_provider
-            .keyword_search(&payload.query, limit * 2, owner_id.as_deref())
+        app_state.sqlite_provider.keyword_search(
+            &payload.query,
+            limit * 2,
+            owner_id.as_deref(),
+            None
+        )
     );
 
     let vector_results = vector_results?;
@@ -161,7 +166,7 @@ pub async fn hybrid_search_handler(
                 .map_err(|e| AppError::Internal(anyhow::anyhow!("LLM Reranking failed: {e}")))?
             }
         }
-        SearchMode::Rrf => reciprocal_rank_fusion(vector_results, keyword_results),
+        SearchMode::Rrf => reciprocal_rank_fusion(vec![vector_results, keyword_results]),
     };
 
     ranked_results.truncate(limit as usize);

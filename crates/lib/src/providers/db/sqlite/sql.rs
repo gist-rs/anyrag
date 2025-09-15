@@ -40,19 +40,6 @@ pub const CREATE_DOCUMENT_EMBEDDINGS_TABLE_SQL: &str = "
     CREATE INDEX IF NOT EXISTS idx_embeddings_document_id ON document_embeddings(document_id);
 ";
 
-/// SQL to create the `faq_items` table for structured Q&A data.
-pub const CREATE_FAQ_ITEMS_TABLE_SQL: &str = "
-    CREATE TABLE IF NOT EXISTS faq_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        document_id TEXT NOT NULL,
-        owner_id TEXT, -- Denormalized for efficient filtering
-        question TEXT NOT NULL,
-        answer TEXT NOT NULL,
-        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
-        FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-";
-
 /// SQL to create the `content_metadata` table for fast, hybrid metadata filtering.
 pub const CREATE_CONTENT_METADATA_TABLE_SQL: &str = "
     CREATE TABLE IF NOT EXISTS content_metadata (
@@ -75,6 +62,5 @@ pub const ALL_TABLE_CREATION_SQL: &[&str] = &[
     CREATE_USERS_TABLE_SQL,
     CREATE_DOCUMENTS_TABLE_SQL,
     CREATE_DOCUMENT_EMBEDDINGS_TABLE_SQL,
-    CREATE_FAQ_ITEMS_TABLE_SQL,
     CREATE_CONTENT_METADATA_TABLE_SQL,
 ];

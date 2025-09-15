@@ -62,6 +62,7 @@ pub async fn embed_new_handler(
     // Get embedding config from AppState
     let api_url = &app_state.config.embedding.api_url;
     let model = &app_state.config.embedding.model_name;
+    let api_key = app_state.config.embedding.api_key.as_deref();
 
     let conn = app_state.sqlite_provider.db.connect()?;
     let sql = format!(
@@ -99,7 +100,7 @@ pub async fn embed_new_handler(
     let mut embedded_ids = Vec::new();
     for (doc_id, title, content) in docs_to_embed {
         let text_to_embed = format!("{title}. {content}");
-        match generate_embedding(api_url, model, &text_to_embed).await {
+        match generate_embedding(api_url, model, &text_to_embed, api_key).await {
             Ok(vector) => {
                 let vector_bytes: &[u8] = unsafe {
                     std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4)
@@ -113,7 +114,7 @@ pub async fn embed_new_handler(
                 {
                     error!("Failed to insert embedding for document ID: {doc_id}. Error: {e}");
                 } else {
-                    info!("Successfully embedded document ID: {}", doc_id);
+                    // info!("Successfully embedded document ID: {}", doc_id);
                     embedded_ids.push(doc_id);
                 }
             }
@@ -194,6 +195,7 @@ pub async fn knowledge_search_handler(
         use_vector_search: true,
         embedding_api_url: &app_state.config.embedding.api_url,
         embedding_model: &app_state.config.embedding.model_name,
+        embedding_api_key: app_state.config.embedding.api_key.as_deref(),
         temporal_ranking_config,
     };
 

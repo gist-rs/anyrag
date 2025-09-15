@@ -2,7 +2,8 @@
 jina_api_key: "${JINA_API_KEY}"
 
 embedding:
-  api_url: "${EMBEDDINGS_API_URL}"
+  api_url: "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent"
+  api_key: "${AI_API_KEY}"
   model_name: "gemini-embedding-001"
 
 providers:

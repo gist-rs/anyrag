@@ -106,48 +106,46 @@ pub async fn llm_rerank<T: Rerankable>(
     Ok(final_results)
 }
 
-/// Re-ranks search results using Reciprocal Rank Fusion.
-pub fn reciprocal_rank_fusion(
-    vector_results: Vec<SearchResult>,
-    keyword_results: Vec<SearchResult>,
-) -> Vec<SearchResult> {
-    info!("Re-ranking using Reciprocal Rank Fusion.");
-
-    // Early return if one of the result sets is empty to avoid unnecessary work.
-    if vector_results.is_empty() && keyword_results.is_empty() {
-        return Vec::new();
-    }
-    if vector_results.is_empty() {
-        // No need to re-score, just return the keyword results.
-        return keyword_results;
-    }
-    if keyword_results.is_empty() {
-        // No need to re-score, just return the vector results.
-        return vector_results;
-    }
+/// Re-ranks search results from multiple sources using Reciprocal Rank Fusion.
+pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<SearchResult> {
+    info!(
+        "Re-ranking using Reciprocal Rank Fusion for {} result sets.",
+        result_sets.len()
+    );
 
     let mut rrf_scores: HashMap<String, f64> = HashMap::new();
-    let k = 60.0;
-    let keyword_boost = 1.2;
+    let k = 60.0; // Standard RRF constant
+    let metadata_boost = 1.5; // Give a boost to the first result set (metadata)
 
-    for (i, result) in vector_results.iter().enumerate() {
-        let rank = (i + 1) as f64;
-        *rrf_scores.entry(result.link.clone()).or_insert(0.0) += 1.0 / (k + rank);
+    let mut all_unique_results: HashMap<String, SearchResult> = HashMap::new();
+
+    for (set_index, results) in result_sets.iter().enumerate() {
+        let source_name = match set_index {
+            0 => "Metadata",
+            1 => "Vector",
+            2 => "Keyword",
+            _ => "Unknown",
+        };
+        for (rank, result) in results.iter().enumerate() {
+            let mut score = 1.0 / (k + (rank + 1) as f64);
+            if set_index == 0 {
+                // Apply boost to the first set (metadata results)
+                score *= metadata_boost;
+            }
+            *rrf_scores.entry(result.link.clone()).or_insert(0.0) += score;
+
+            // Collect unique results by link
+            all_unique_results
+                .entry(result.link.clone())
+                .or_insert_with(|| result.clone());
+        }
     }
 
-    for (i, result) in keyword_results.iter().enumerate() {
-        let rank = (i + 1) as f64;
-        let score = (1.0 / (k + rank)) * keyword_boost;
-        *rrf_scores.entry(result.link.clone()).or_insert(0.0) += score;
+    if all_unique_results.is_empty() {
+        return Vec::new();
     }
 
-    let mut combined_results: Vec<SearchResult> = vector_results
-        .into_iter()
-        .chain(keyword_results)
-        .map(|res| (res.link.clone(), res))
-        .collect::<HashMap<_, _>>()
-        .into_values()
-        .collect();
+    let mut combined_results: Vec<SearchResult> = all_unique_results.into_values().collect();
 
     combined_results.sort_by(|a, b| {
         let score_a = rrf_scores.get(&a.link).unwrap_or(&0.0);
@@ -157,8 +155,7 @@ pub fn reciprocal_rank_fusion(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    info!("RRF sorted results: {:?}", combined_results);
-
+    // Update the final score in each result for debugging/transparency
     for result in &mut combined_results {
         result.score = *rrf_scores.get(&result.link).unwrap_or(&0.0);
     }

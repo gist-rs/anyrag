@@ -143,6 +143,7 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
         use_vector_search: true,
         embedding_api_url: &embedding_api_url,
         embedding_model: "mock-model",
+        embedding_api_key: Some("test_api_key"),
         temporal_ranking_config: None,
     };
 
@@ -188,7 +189,7 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
 
     // Assert RAG Synthesis call (most important assertion)
     let (system_prompt_2, user_prompt_2) = &history[1];
-    assert!(system_prompt_2.contains("strict, factual AI"));
+    assert!(system_prompt_2.contains("helpful AI assistant"));
     assert!(user_prompt_2.contains("The grand prize is a Tesla."));
     assert!(!user_prompt_2.contains("This is another document."));
 

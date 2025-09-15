@@ -9,7 +9,7 @@ mod common;
 use anyhow::Result;
 use anyrag::{
     ingest::knowledge::{
-        distill_and_augment, export_for_finetuning, store_structured_knowledge, IngestedDocument,
+        distill_and_augment, export_for_finetuning, store_faqs_as_documents, IngestedDocument,
     },
     providers::ai::local::LocalAiProvider,
 };
@@ -84,7 +84,7 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
         .await?;
 
     let stored_count =
-        store_structured_knowledge(&db, &ingested_document.id, None, faq_items).await?;
+        store_faqs_as_documents(&db, &ingested_document.source_url, None, &faq_items, &[]).await?;
     assert_eq!(stored_count, 2);
     info!("-> Storage successful. Stored 2 FAQs.");
 
@@ -94,7 +94,7 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
 
     let conn = db.connect()?;
     let mut stmt = conn
-        .prepare("SELECT question, answer FROM faq_items")
+        .prepare("SELECT title, content FROM documents WHERE source_url LIKE '%#faq_%'")
         .await?;
     let mut rows = stmt.query(()).await?;
 
@@ -104,19 +104,19 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
 
     while let Some(row) = rows.next().await? {
         found_items += 1;
-        let q = match row.get_value(0)? {
+        let title = match row.get_value(0)? {
             TursoValue::Text(s) => s,
-            v => panic!("Expected text for question, got {v:?}"),
+            v => panic!("Expected text for title, got {v:?}"),
         };
-        let a = match row.get_value(1)? {
+        let content = match row.get_value(1)? {
             TursoValue::Text(s) => s,
-            v => panic!("Expected text for answer, got {v:?}"),
+            v => panic!("Expected text for content, got {v:?}"),
         };
 
-        if q == "What is this?" && a == "It is a test." {
+        if title == "What is this?" && content == "It is a test." {
             found_explicit = true;
-        } else if q == "What is mentioned in the details section?"
-            && a == "This section contains important details."
+        } else if title == "What is mentioned in the details section?"
+            && content == "This section contains important details."
         {
             found_augmented = true;
         }
@@ -132,9 +132,20 @@ async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
     let lines: Vec<&str> = export_body.trim().lines().collect();
     assert_eq!(lines.len(), 2, "Expected two lines in the JSONL output.");
 
-    let line1: Value = serde_json::from_str(lines[0])?;
-    assert_eq!(line1["messages"][1]["content"], "What is this?");
-    assert_eq!(line1["messages"][2]["content"], "It is a test.");
+    // The order of exported lines is not guaranteed, so we parse both and check for presence.
+    let mut exported_faqs = std::collections::HashSet::new();
+    for line in lines {
+        let json: Value = serde_json::from_str(line)?;
+        let question = json["messages"][1]["content"].as_str().unwrap().to_string();
+        let answer = json["messages"][2]["content"].as_str().unwrap().to_string();
+        exported_faqs.insert((question, answer));
+    }
+
+    assert!(exported_faqs.contains(&("What is this?".to_string(), "It is a test.".to_string())));
+    assert!(exported_faqs.contains(&(
+        "What is mentioned in the details section?".to_string(),
+        "This section contains important details.".to_string()
+    )));
 
     info!("-> Fine-tuning export verified successfully.");
 

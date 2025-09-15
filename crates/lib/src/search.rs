@@ -3,9 +3,8 @@
 //! This module provides the core logic for the multi-stage hybrid search pipeline.
 //! The flow is designed to be both fast and relevant:
 //! 1.  **Query Analysis**: An LLM extracts key entities and concepts from the user's query.
-//! 2.  **Metadata Pre-Filtering**: A fast SQL query finds documents tagged with that metadata.
-//! 3.  **Vector Re-Ranking**: A semantic vector search is performed *only* on the pre-filtered
-//!     documents to find the final, most relevant results.
+//! 2.  **Parallel Retrieval**: Metadata, keyword, and vector searches are run concurrently to gather a wide set of candidate documents.
+//! 3.  **Re-ranking**: The results from all sources are combined and re-ranked using Reciprocal Rank Fusion to produce the final, most relevant results.
 
 use crate::ingest::knowledge::clean_llm_response;
 use crate::{
@@ -61,6 +60,7 @@ pub struct HybridSearchOptions<'a> {
     pub use_vector_search: bool,
     pub embedding_api_url: &'a str,
     pub embedding_model: &'a str,
+    pub embedding_api_key: Option<&'a str>,
     pub temporal_ranking_config: Option<TemporalRankingConfig<'a>>,
 }
 
@@ -126,10 +126,7 @@ async fn temporally_rank_results<P>(
 where
     P: TemporalSearch + Send + Sync + 'static,
 {
-    let doc_ids: Vec<&str> = results
-        .iter()
-        .filter_map(|r| r.link.split('/').next_back())
-        .collect();
+    let doc_ids: Vec<&str> = results.iter().map(|r| r.link.as_str()).collect();
 
     if doc_ids.is_empty() {
         return results;
@@ -152,8 +149,7 @@ where
     let mut dated_results: Vec<(SearchResult, NaiveDate)> = results
         .into_iter()
         .filter_map(|r| {
-            let doc_id = r.link.split('/').next_back().unwrap_or_default();
-            properties.get(doc_id).and_then(|date_str| {
+            properties.get(&r.link).and_then(|date_str| {
                 NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
                     .ok()
                     .map(|date| (r, date))
@@ -186,29 +182,33 @@ where
     .await
     .map_err(SearchError::QueryAnalysis)?;
 
-    let candidate_doc_ids = provider
-        .metadata_search(
-            &analyzed_query.entities,
-            &analyzed_query.keyphrases,
-            options.owner_id.as_deref(),
-            options.limit * 5,
-        )
-        .await?;
-
-    info!(
-        "[hybrid_search] Metadata search returned {} candidate doc IDs: {:?}",
-        candidate_doc_ids.len(),
-        candidate_doc_ids
-    );
+    // --- Parallel Retrieval ---
+    let provider_meta = Arc::clone(&provider);
+    let entities_meta = analyzed_query.entities.clone();
+    let keyphrases_meta = analyzed_query.keyphrases.clone();
+    let owner_id_meta = options.owner_id.clone();
+    let limit_meta = options.limit;
+    let metadata_handle = tokio::spawn(async move {
+        provider_meta
+            .metadata_search(
+                &entities_meta,
+                &keyphrases_meta,
+                owner_id_meta.as_deref(),
+                limit_meta * 2,
+            )
+            .await
+    });
 
     let provider_kw = Arc::clone(&provider);
-    let keyword_query = analyzed_query.keyphrases.join(" ");
+    // Use the original query for the keyword search to make it more robust against
+    // variable LLM analysis. The analysis is still used for metadata search.
+    let keyword_query = options.query_text.clone();
     let owner_id_kw = options.owner_id.clone();
     let limit_kw = options.limit;
     let keyword_handle = tokio::spawn(async move {
         if options.use_keyword_search && !keyword_query.is_empty() {
             provider_kw
-                .keyword_search(&keyword_query, limit_kw * 2, owner_id_kw.as_deref())
+                .keyword_search(&keyword_query, limit_kw * 2, owner_id_kw.as_deref(), None)
                 .await
         } else {
             Ok(Vec::new())
@@ -219,38 +219,53 @@ where
     let owner_id_vec = options.owner_id.clone();
     let embedding_api_url = options.embedding_api_url.to_string();
     let embedding_model = options.embedding_model.to_string();
+    let embedding_api_key = options.embedding_api_key.map(|s| s.to_string());
     let query_text_vec = options.query_text.clone();
     let limit_vec = options.limit;
     let vector_handle = tokio::spawn(async move {
         if options.use_vector_search {
-            let query_vector =
-                generate_embedding(&embedding_api_url, &embedding_model, &query_text_vec)
-                    .await
-                    .map_err(SearchError::Embedding)?;
-            // If metadata search returned no candidates, search all documents.
-            // Otherwise, search only within the filtered candidate set.
-            let doc_ids_filter = if candidate_doc_ids.is_empty() {
-                None
-            } else {
-                Some(candidate_doc_ids.as_slice())
-            };
+            let query_vector = generate_embedding(
+                &embedding_api_url,
+                &embedding_model,
+                &query_text_vec,
+                embedding_api_key.as_deref(),
+            )
+            .await
+            .map_err(SearchError::Embedding)?;
 
             provider_vec
-                .vector_search(
-                    query_vector,
-                    limit_vec * 2,
-                    owner_id_vec.as_deref(),
-                    doc_ids_filter,
-                )
+                .vector_search(query_vector, limit_vec * 2, owner_id_vec.as_deref(), None)
                 .await
         } else {
             Ok(Vec::new())
         }
     });
 
-    let (keyword_results, vector_results) = (keyword_handle.await, vector_handle.await);
+    let (metadata_results, keyword_results, vector_results) = (
+        metadata_handle.await,
+        keyword_handle.await,
+        vector_handle.await,
+    );
 
     // Soft-fail: If a task panics or returns an error, log it and proceed with an empty result set.
+    let metadata_candidates = match metadata_results {
+        Ok(Ok(res)) => {
+            info!(
+                "[hybrid_search] Metadata search returned {} candidates.",
+                res.len()
+            );
+            res
+        }
+        Ok(Err(e)) => {
+            warn!("Metadata search task failed: {}", e);
+            Vec::new()
+        }
+        Err(e) => {
+            warn!("Metadata search task panicked: {}", e);
+            Vec::new()
+        }
+    };
+
     let keyword_candidates = match keyword_results {
         Ok(Ok(res)) => {
             info!(
@@ -287,7 +302,11 @@ where
         }
     };
 
-    let mut final_results = reciprocal_rank_fusion(vector_candidates, keyword_candidates);
+    let mut final_results = reciprocal_rank_fusion(vec![
+        metadata_candidates,
+        vector_candidates,
+        keyword_candidates,
+    ]);
 
     // --- Temporal Ranking Step ---
     if let Some(config) = &options.temporal_ranking_config {

@@ -185,8 +185,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let content: String = row.get(2)?;
         let text_to_embed = format!("{title}. {content}");
 
-        let vector =
-            generate_embedding(&embeddings_api_url, &embeddings_model, &text_to_embed).await?;
+        let api_key = std::env::var("AI_API_KEY").ok();
+        let vector = generate_embedding(
+            &embeddings_api_url,
+            &embeddings_model,
+            &text_to_embed,
+            api_key.as_deref(),
+        )
+        .await?;
         let vector_bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
 
@@ -196,7 +202,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await?;
         embed_count += 1;
-        info!("Successfully embedded document ID: {}", doc_id);
+        // info!("Successfully embedded document ID: {}", doc_id);
     }
     info!(
         "Embedding complete. Processed {} new documents.",
@@ -209,6 +215,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let instruction = "สรุปเงื่อนไขการรับสิทธิ์ลุ้นเทสล่า";
     let provider = Arc::new(sqlite_provider.clone());
 
+    let embedding_api_key = env::var("AI_API_KEY").ok();
     let search_options = HybridSearchOptions {
         query_text: question.to_string(),
         owner_id: Some(user.id.clone()),
@@ -221,10 +228,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         use_vector_search: true,
         embedding_api_url: &embeddings_api_url,
         embedding_model: &embeddings_model,
+        embedding_api_key: embedding_api_key.as_deref(),
         temporal_ranking_config: None,
     };
 
-    let search_results = hybrid_search(provider, ai_provider.clone(), search_options).await?;
+    let search_results =
+        hybrid_search(provider.clone(), ai_provider.clone(), search_options).await?;
 
     let context = search_results
         .iter()

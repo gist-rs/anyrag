@@ -38,6 +38,7 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         version: args.version.clone(),
         embedding_api_url: args.embedding_api_url.clone(),
         embedding_model: args.embedding_model.clone(),
+        embedding_api_key: std::env::var("AI_API_KEY").ok(),
     };
 
     let storage_manager = StorageManager::new("db/github_ingest").await?;
@@ -101,13 +102,15 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         fs::create_dir_all(chunk_db_dir)?;
         let chunk_db_path = format!("{chunk_db_dir}/{repo_name}.db");
 
-        let embedding_config = if let (Some(url), Some(model)) = (
-            args.embedding_api_url.as_deref(),
-            args.embedding_model.as_deref(),
-        ) {
+        let api_key = std::env::var("AI_API_KEY").ok();
+
+        let url_opt = args.embedding_api_url.as_deref();
+        let model_opt = args.embedding_model.as_deref();
+        let embedding_config = if let (Some(url), Some(model)) = (url_opt, model_opt) {
             Some(EmbeddingConfig {
                 api_url: url,
                 model,
+                api_key: api_key.as_deref(),
             })
         } else {
             None

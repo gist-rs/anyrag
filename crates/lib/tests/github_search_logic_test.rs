@@ -97,6 +97,7 @@ async fn test_github_search_with_metadata_prefiltering() {
         ai_provider,
         &embedding_api_url,
         "mock-model",
+        Some("test_api_key"),
     )
     .await
     .expect("Search failed");

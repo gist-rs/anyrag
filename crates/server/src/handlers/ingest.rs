@@ -754,6 +754,7 @@ pub async fn ingest_github_handler(
         version: payload.version.clone(),
         embedding_api_url: Some(app_state.config.embedding.api_url.clone()),
         embedding_model: Some(app_state.config.embedding.model_name.clone()),
+        embedding_api_key: app_state.config.embedding.api_key.clone(),
     };
 
     let storage_manager =
@@ -913,6 +914,7 @@ pub async fn search_examples_handler(
         .clone();
     let embedding_api_url = &app_state.config.embedding.api_url;
     let embedding_model = &app_state.config.embedding.model_name;
+    let embedding_api_key = app_state.config.embedding.api_key.as_deref();
 
     let storage_manager =
         anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
@@ -924,6 +926,7 @@ pub async fn search_examples_handler(
         std::sync::Arc::from(ai_provider),
         embedding_api_url,
         embedding_model,
+        embedding_api_key,
     )
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Example search failed: {}", e)))?;
