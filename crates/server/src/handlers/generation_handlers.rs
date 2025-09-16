@@ -54,11 +54,11 @@ struct AgentDecision {
     query: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 struct DeconstructedQuery {
     search_query: String,
     #[serde(default)]
-    generative_intent: String,
+    pub generative_intent: String,
 }
 
 // --- Generation Handlers ---
@@ -122,6 +122,8 @@ pub async fn gen_text_handler(
                 ("knowledge_search", context_prompt.clone())
             };
             info!("User explicitly selected tool: '{}'", tool);
+            // When bypassing the agent, the original `context_prompt` becomes the generative intent.
+            generative_intent = context_prompt.clone();
             AgentDecision {
                 tool: tool.to_string(),
                 query,
@@ -187,7 +189,7 @@ pub async fn gen_text_handler(
             match agent_result {
                 Ok((deconstructed, decision)) => {
                     // Success: Use the agent's decision and store the deconstructed query for debugging.
-                    debug_context["deconstructed_query"] = json!(deconstructed);
+                    debug_context["deconstructed_query"] = json!(deconstructed.clone());
                     generative_intent = deconstructed.generative_intent;
                     if generative_intent.is_empty() {
                         generative_intent = context_prompt.clone();
@@ -196,11 +198,13 @@ pub async fn gen_text_handler(
                 }
                 Err(e) => {
                     // Fallback: If the agent failed, default to text_to_sql with the original prompt.
+                    // Also, ensure the generative intent is carried over from the original prompt.
                     info!(
                         "Agent workflow failed with error: {:?}. Falling back to text_to_sql.",
                         e
                     );
                     debug_context["agent_fallback_reason"] = json!(format!("{:?}", e));
+                    generative_intent = context_prompt.clone();
                     AgentDecision {
                         tool: "text_to_sql".to_string(),
                         query: context_prompt.clone(),
