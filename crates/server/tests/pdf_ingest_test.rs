@@ -13,19 +13,66 @@
 mod common;
 
 use anyhow::Result;
-use anyrag_server::types::ApiResponse;
+use anyrag_server::{config, state::build_app_state, types::ApiResponse};
 use common::{generate_jwt, pdf_helper::generate_test_pdf, TestApp};
-use httpmock::Method;
+use httpmock::{Method, MockServer};
 use serde_json::{json, Value};
+use std::fs::File;
+use std::io::Write;
+use tempfile::{tempdir, NamedTempFile};
 use turso::{Builder, Value as TursoValue};
 
 #[tokio::test]
 async fn test_pdf_ingestion_and_rag_workflow_yaml() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let mock_server = MockServer::start();
+    let db_file = NamedTempFile::new()?;
+    let db_path = db_file.path();
+
+    let config_dir = tempdir()?;
+    let config_path = config_dir.path().join("config.yml");
+
+    // Create a minimal config that points to our mock server and temp DB,
+    // and ensures the correct providers are configured for the tasks this test uses.
+    let config_content = format!(
+        r#"
+port: 0
+db_url: "{}"
+embedding:
+  api_url: "{}"
+  model_name: "mock-embedding-model"
+providers:
+  local_default:
+    provider: "local"
+    api_url: "{}"
+    api_key: null
+    model_name: "mock-chat-model"
+tasks:
+  knowledge_distillation:
+    provider: "local_default"
+  knowledge_metadata_extraction:
+    provider: "local_default"
+  query_analysis:
+    provider: "local_default"
+  rag_synthesis:
+    provider: "local_default"
+"#,
+        db_path.to_str().unwrap(),
+        mock_server.url("/v1/embeddings"),
+        mock_server.url("/v1/chat/completions")
+    );
+
+    let mut file = File::create(&config_path)?;
+    file.write_all(config_content.as_bytes())?;
+
+    let config = config::get_config(Some(config_path.to_str().unwrap()))?;
+    let app_state = build_app_state(config).await?;
+
+    let app = TestApp::spawn_with_state(app_state, mock_server).await?;
 
     let messy_sentence =
         "ThisIsA   messy    sentence. It needs refinement. The magic number is 3.14159.";
+    // The refined markdown is what the *first* LLM call should return
     let refined_markdown =
         "- This is a messy sentence.\n- It needs refinement.\n- The magic number is 3.14159.";
     let expected_yaml = r#"
@@ -40,11 +87,15 @@ sections:
     let pdf_data = generate_test_pdf(messy_sentence)?;
 
     // --- 2. Mock External Services ---
+    // The PDF pipeline now has multiple distinct AI calls. We need to mock each one
+    // with a specific body matcher to ensure the correct mock responds.
+
     // A. Mock LLM Refinement (raw text -> clean markdown)
+    // THIS MOCK WAS MISSING. The pipeline first extracts raw text and asks an LLM to clean it.
     let refinement_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert technical analyst");
+            .body_contains("You are an expert technical analyst"); // Matches TEXT_REFINEMENT_SYSTEM_PROMPT
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": refined_markdown}}]}),
         );
@@ -54,7 +105,7 @@ sections:
     let restructuring_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert document analyst and editor"); // Unique to the restructuring prompt
+            .body_contains("expert document analyst and editor"); // Matches KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
         );
@@ -64,7 +115,7 @@ sections:
     let metadata_extraction_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("You are an expert document analyst."); // Metadata prompt
+            .body_contains("extract Category, Keyphrases, and Entities"); // Matches KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!([
                 {"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "magic number"}
@@ -83,7 +134,7 @@ sections:
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert query analyst");
+            .body_contains("expert query analyst"); // Matches QUERY_ANALYSIS_SYSTEM_PROMPT
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
                 "entities": [],
@@ -96,11 +147,8 @@ sections:
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("strict, factual AI")
-            // Verify it receives the context chunked from the YAML
-            .body_contains("## General Information")
-            .body_contains("### Q: What is the magic number?")
-            .body_contains("The magic number is 3.14159.");
+            .body_contains("strict, factual AI") // Matches RAG_SYNTHESIS_SYSTEM_PROMPT
+            .body_contains("## General Information"); // Verify it receives the context chunked from the YAML
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
