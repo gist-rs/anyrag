@@ -11,6 +11,7 @@ use crate::{errors::PromptError, providers::ai::AiProvider};
 use html;
 
 use md5;
+use serde_yaml;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -65,34 +66,6 @@ pub struct IngestedDocument {
     pub content_hash: String,
 }
 
-/// The public-facing, validated struct for a Q&A pair.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FaqItem {
-    pub question: String,
-    pub answer: String,
-    pub is_explicit: bool,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct ContentChunk {
-    #[serde(default)]
-    topic: String,
-    #[serde(default)]
-    content: String,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct AugmentedFaq {
-    id: usize,
-    #[serde(default)]
-    question: String,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct AugmentationResponse {
-    augmented_faqs: Vec<AugmentedFaq>,
-}
-
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ContentMetadata {
     #[serde(rename = "type")]
@@ -112,9 +85,7 @@ pub struct MetadataResponse {
 
 /// A struct to hold the prompts for the various LLM calls in the ingestion pipeline.
 pub struct IngestionPrompts<'a> {
-    pub extraction_system_prompt: &'a str,
-    pub extraction_user_prompt_template: &'a str,
-    pub augmentation_system_prompt: &'a str,
+    pub restructuring_system_prompt: &'a str,
     pub metadata_extraction_system_prompt: &'a str,
 }
 
@@ -141,64 +112,47 @@ pub async fn run_ingestion_pipeline(
 
     let conn = db.connect()?;
 
-    // --- Sequential Execution for better metadata ---
-
-    // 1. First, distill the raw content into structured FAQs.
-    let faq_items = distill_and_augment(
+    // --- Stage 2: LLM-Powered Restructuring ---
+    let structured_yaml = restructure_with_llm(
         ai_provider,
-        &ingested_document,
-        prompts.extraction_system_prompt,
-        prompts.extraction_user_prompt_template,
-        prompts.augmentation_system_prompt,
+        &ingested_document.content,
+        prompts.restructuring_system_prompt,
     )
     .await?;
 
-    // 2. Then, extract metadata from the *clean* FAQ data, not the noisy source.
-    let content_for_metadata = if faq_items.is_empty() {
-        // If no FAQs, fall back to the original content for metadata extraction.
-        ingested_document.content.clone()
-    } else {
-        faq_items
-            .iter()
-            .map(|faq| format!("Q: {}\nA: {}", faq.question, faq.answer))
-            .collect::<Vec<_>>()
-            .join("\n\n---\n\n")
-    };
+    if structured_yaml.trim().is_empty() {
+        warn!(
+            "LLM restructuring resulted in empty content for source: {}",
+            url
+        );
+        return Ok(0);
+    }
 
-    let metadata_items = extract_and_store_metadata(
+    // --- Stage 3: Update Document and Extract Metadata ---
+    // Update the document's content with the clean, structured YAML.
+    conn.execute(
+        "UPDATE documents SET content = ? WHERE id = ?",
+        params![structured_yaml.clone(), document_id.clone()],
+    )
+    .await?;
+    info!(
+        "Successfully updated document '{}' with structured YAML content.",
+        document_id
+    );
+
+    // Now, extract metadata from the clean YAML content.
+    let _metadata_items = extract_and_store_metadata(
         &conn,
         ai_provider,
         &document_id,
         owner_id,
-        &content_for_metadata,
+        &structured_yaml,
         prompts.metadata_extraction_system_prompt,
     )
     .await?;
 
-    let count = store_faqs_as_documents(
-        db,
-        &ingested_document.source_url,
-        owner_id,
-        &faq_items,
-        &metadata_items,
-    )
-    .await?;
-
-    // Set the original document's content to an empty string to exclude it from search results,
-    // while preserving its row for caching purposes.
-    if count > 0 {
-        conn.execute(
-            "UPDATE documents SET content = ? WHERE id = ?",
-            params!["", document_id.clone()],
-        )
-        .await?;
-        info!(
-            "Cleared content of source document '{}' after extracting FAQs.",
-            document_id
-        );
-    }
-
-    Ok(count)
+    // The pipeline now processes one document and updates it in place.
+    Ok(1)
 }
 
 // --- Stage 1: Ingestion & Caching ---
@@ -328,238 +282,32 @@ pub async fn ingest_and_cache_url(
     Ok((document_id, ingested_document))
 }
 
-// --- Stage 2: Distillation & Augmentation (Batched) ---
+// --- Stage 2: LLM-Powered Restructuring ---
 
-pub async fn distill_and_augment(
+/// Uses an LLM to restructure messy Markdown into a clean, structured YAML format.
+pub async fn restructure_with_llm(
     ai_provider: &dyn AiProvider,
-    ingested_doc: &IngestedDocument,
-    extraction_system_prompt: &str,
-    extraction_user_prompt_template: &str,
-    augmentation_system_prompt: &str,
-) -> Result<Vec<FaqItem>, KnowledgeError> {
-    info!(
-        "Starting Pass 1: Extraction for document ID: {}",
-        ingested_doc.id
-    );
+    markdown_content: &str,
+    system_prompt: &str,
+) -> Result<String, KnowledgeError> {
+    info!("Starting LLM-powered restructuring of Markdown content.");
 
-    // Define temporary structs that can handle nullable fields from the LLM.
-    // This makes the initial parsing robust against `null` values.
-    #[derive(Deserialize)]
-    struct RawFaqItem {
-        #[serde(default)]
-        question: Option<String>,
-        #[serde(default)]
-        answer: Option<String>,
-        is_explicit: bool,
-    }
+    // The user prompt is simply the markdown content, as the system prompt contains all instructions.
+    let user_prompt = format!("# Markdown Content to Process:\n{markdown_content}");
 
-    #[derive(Deserialize)]
-    struct RawExtractedKnowledge {
-        #[serde(default)]
-        faqs: Vec<RawFaqItem>,
-        #[serde(default)]
-        content_chunks: Vec<ContentChunk>,
-    }
+    let llm_response = ai_provider.generate(system_prompt, &user_prompt).await?;
 
-    let user_prompt =
-        extraction_user_prompt_template.replace("{markdown_content}", &ingested_doc.content);
-    let llm_response = ai_provider
-        .generate(extraction_system_prompt, &user_prompt)
-        .await?;
-    debug!("LLM extraction response: {}", llm_response);
-    let cleaned_response = clean_llm_response(&llm_response);
-    let mut extracted_data: RawExtractedKnowledge = match serde_json::from_str(&cleaned_response) {
-        Ok(data) => data,
-        Err(e) => {
-            warn!(
-                "Failed to parse extraction response JSON. Error: {}. Raw response: '{}'",
-                e, &cleaned_response
-            );
-            return Err(e.into());
-        }
-    };
+    // The response should be the raw YAML, so we just clean the code fences if they exist.
+    let cleaned_yaml = llm_response
+        .trim()
+        .strip_prefix("```yaml")
+        .unwrap_or(&llm_response)
+        .strip_suffix("```")
+        .unwrap_or(&llm_response)
+        .trim();
 
-    // Filter and map the raw, potentially noisy data into the clean, validated FaqItem struct.
-    // This removes any items where the question or answer was null, missing, or just an empty string.
-    let mut clean_faqs: Vec<FaqItem> = extracted_data
-        .faqs
-        .into_iter()
-        .filter_map(|raw_faq| {
-            match (raw_faq.question, raw_faq.answer) {
-                (Some(q), Some(a)) if !q.trim().is_empty() && !a.trim().is_empty() => {
-                    Some(FaqItem {
-                        question: q,
-                        answer: a,
-                        is_explicit: raw_faq.is_explicit,
-                    })
-                }
-                _ => None, // Discard if question or answer is None or empty
-            }
-        })
-        .collect();
-
-    let original_chunk_count = extracted_data.content_chunks.len();
-    extracted_data
-        .content_chunks
-        .retain(|chunk| chunk.content.chars().any(|c| c.is_alphabetic()));
-    let cleaned_chunk_count = extracted_data.content_chunks.len();
-
-    if original_chunk_count > cleaned_chunk_count {
-        info!(
-            "Filtered out {} low-quality or separator-only chunks.",
-            original_chunk_count - cleaned_chunk_count
-        );
-    }
-
-    info!(
-        "Pass 1 complete. Found {} explicit FAQs and {} valid content chunks.",
-        clean_faqs.len(),
-        cleaned_chunk_count
-    );
-
-    if extracted_data.content_chunks.is_empty() {
-        info!("No content chunks found, skipping augmentation step.");
-    } else {
-        info!(
-            "Starting Pass 2: Augmentation for {} content chunks.",
-            extracted_data.content_chunks.len()
-        );
-
-        let batched_content = extracted_data
-            .content_chunks
-            .iter()
-            .enumerate()
-            .map(|(i, chunk)| {
-                format!(
-                    "---\nID: {}\nTOPIC: {}\nCONTENT:\n{}\n---\n",
-                    i, chunk.topic, chunk.content
-                )
-            })
-            .collect::<String>();
-
-        let augmentation_user_prompt = format!("# Content Chunks to Analyze:\n{batched_content}");
-        let llm_response = ai_provider
-            .generate(augmentation_system_prompt, &augmentation_user_prompt)
-            .await?;
-
-        let cleaned_response = clean_llm_response(&llm_response);
-        match serde_json::from_str::<AugmentationResponse>(&cleaned_response) {
-            Ok(parsed) => {
-                let mut augmented_faqs = Vec::new();
-                for aug_faq in parsed.augmented_faqs {
-                    if let Some(original_chunk) = extracted_data.content_chunks.get(aug_faq.id) {
-                        if !aug_faq.question.trim().is_empty() {
-                            augmented_faqs.push(FaqItem {
-                                question: aug_faq.question,
-                                answer: original_chunk.content.clone(),
-                                is_explicit: false,
-                            });
-                        }
-                    }
-                }
-                info!(
-                    "Pass 2 complete. Generated {} new FAQs from batch.",
-                    augmented_faqs.len()
-                );
-                clean_faqs.extend(augmented_faqs);
-            }
-            Err(e) => warn!(
-                "Failed to parse batched augmentation response, skipping augmentation. Error: {}",
-                e
-            ),
-        }
-    }
-
-    Ok(clean_faqs)
-}
-
-// --- Stage 3: Structured Storage ---
-
-pub async fn store_faqs_as_documents(
-    db: &Database,
-    parent_source_url: &str,
-    owner_id: Option<&str>,
-    faq_items: &[FaqItem],
-    metadata: &[ContentMetadata],
-) -> Result<usize, KnowledgeError> {
-    if faq_items.is_empty() {
-        info!("No FAQs to store as documents for source: {parent_source_url}");
-        return Ok(0);
-    }
-    let conn = db.connect()?;
-    info!(
-        "Storing {} FAQs as individual documents for source: {}",
-        faq_items.len(),
-        parent_source_url
-    );
-
-    // First, remove old FAQ documents derived from this parent source URL to ensure idempotency.
-    let url_pattern = format!("{parent_source_url}#faq_%");
-    conn.execute(
-        "DELETE FROM documents WHERE source_url LIKE ?",
-        params![url_pattern],
-    )
-    .await?;
-
-    conn.execute("BEGIN TRANSACTION", ()).await?;
-    let mut stmt = conn
-        .prepare(
-            r#"INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)"#,
-        )
-        .await?;
-
-    let mut new_document_ids = Vec::new();
-    for (i, faq) in faq_items.iter().enumerate() {
-        // Create a stable, unique ID and a unique source URL for each FAQ document.
-        let faq_source_url = format!("{parent_source_url}#faq_{i}");
-        let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, faq_source_url.as_bytes()).to_string();
-        new_document_ids.push(document_id.clone());
-
-        stmt.execute(params![
-            document_id,
-            owner_id,
-            faq_source_url,
-            faq.question.clone(), // The question becomes the title
-            faq.answer.clone(),   // The answer becomes the content
-        ])
-        .await?;
-    }
-
-    // --- Propagate Metadata ---
-    // If metadata was extracted from the parent, associate it with all the new FAQ documents.
-    if !metadata.is_empty() && !new_document_ids.is_empty() {
-        info!(
-            "Propagating {} metadata items to {} new FAQ documents.",
-            metadata.len(),
-            new_document_ids.len()
-        );
-        let mut meta_stmt = conn
-            .prepare(
-                "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
-            )
-            .await?;
-
-        for doc_id in &new_document_ids {
-            for item in metadata {
-                meta_stmt
-                    .execute(params![
-                        doc_id.to_string(),
-                        owner_id.map(|s| s.to_string()),
-                        item.metadata_type.to_uppercase(),
-                        item.subtype.clone(),
-                        item.value.clone(),
-                    ])
-                    .await?;
-            }
-        }
-    }
-
-    conn.execute("COMMIT", ()).await?;
-    info!(
-        "Successfully stored {} new FAQ documents for source: {parent_source_url}",
-        faq_items.len()
-    );
-    Ok(faq_items.len())
+    info!("Successfully restructured content into YAML format.");
+    Ok(cleaned_yaml.to_string())
 }
 
 // --- Stage 2.5: Hybrid Metadata Extraction ---
@@ -704,46 +452,74 @@ struct FinetuningMessage<'a> {
 }
 
 pub async fn export_for_finetuning(db: &Database) -> Result<String, KnowledgeError> {
-    info!("Exporting knowledge base for fine-tuning.");
+    info!("Exporting knowledge base for fine-tuning from structured YAML.");
     let conn = db.connect()?;
     let mut stmt = conn
-        .prepare("SELECT title, content FROM documents WHERE source_url LIKE '%#faq_%'")
+        .prepare(
+            "SELECT content FROM documents WHERE source_url NOT LIKE '%#faq_%' AND content IS NOT NULL AND content != ''",
+        )
         .await?;
     let mut rows = stmt.query(()).await?;
-    let system_prompt = "You are a helpful assistant. Provide clear, accurate answers based on the retrieved context.";
+    let system_prompt =
+        "You are a helpful assistant. Provide clear, accurate answers based on the retrieved context.";
     let mut jsonl_output = String::new();
 
-    while let Some(row) = rows.next().await? {
-        let question = if let Ok(turso::Value::Text(s)) = row.get_value(0) {
-            s
-        } else {
-            continue;
-        };
-        let answer = if let Ok(turso::Value::Text(s)) = row.get_value(1) {
-            s
-        } else {
-            continue;
-        };
-        let entry = FinetuningEntry {
-            messages: vec![
-                FinetuningMessage {
-                    role: "system",
-                    content: system_prompt,
-                },
-                FinetuningMessage {
-                    role: "user",
-                    content: &question,
-                },
-                FinetuningMessage {
-                    role: "assistant",
-                    content: &answer,
-                },
-            ],
-        };
-        let line = serde_json::to_string(&entry)?;
-        jsonl_output.push_str(&line);
-        jsonl_output.push('\n');
+    #[derive(Deserialize, Debug)]
+    struct Faq {
+        question: String,
+        answer: String,
     }
+
+    #[derive(Deserialize, Debug)]
+    struct Section {
+        faqs: Vec<Faq>,
+    }
+
+    #[derive(Deserialize, Debug)]
+    struct YamlContent {
+        sections: Vec<Section>,
+    }
+
+    while let Some(row) = rows.next().await? {
+        let yaml_content = if let Ok(turso::Value::Text(s)) = row.get_value(0) {
+            s
+        } else {
+            continue;
+        };
+
+        let parsed_yaml: YamlContent = match serde_yaml::from_str(&yaml_content) {
+            Ok(data) => data,
+            Err(e) => {
+                warn!("Failed to parse YAML content for fine-tuning export, skipping document. Error: {}", e);
+                continue;
+            }
+        };
+
+        for section in parsed_yaml.sections {
+            for faq in section.faqs {
+                let entry = FinetuningEntry {
+                    messages: vec![
+                        FinetuningMessage {
+                            role: "system",
+                            content: system_prompt,
+                        },
+                        FinetuningMessage {
+                            role: "user",
+                            content: &faq.question,
+                        },
+                        FinetuningMessage {
+                            role: "assistant",
+                            content: &faq.answer,
+                        },
+                    ],
+                };
+                let line = serde_json::to_string(&entry)?;
+                jsonl_output.push_str(&line);
+                jsonl_output.push('\n');
+            }
+        }
+    }
+
     info!(
         "Generated fine-tuning data with {} entries.",
         jsonl_output.lines().count()

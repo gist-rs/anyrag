@@ -18,6 +18,7 @@ use crate::{
 };
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+use serde_yaml;
 
 use std::sync::Arc;
 use thiserror::Error;
@@ -72,6 +73,23 @@ struct AnalyzedQuery {
     entities: Vec<String>,
     #[serde(default)]
     keyphrases: Vec<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct Faq {
+    question: String,
+    answer: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct Section {
+    title: String,
+    faqs: Vec<Faq>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct YamlContent {
+    sections: Vec<Section>,
 }
 
 /// Custom error types for the search process.
@@ -288,11 +306,51 @@ where
         Vec::new()
     };
 
-    let mut final_results = reciprocal_rank_fusion(vec![
+    let ranked_parent_documents = reciprocal_rank_fusion(vec![
         metadata_candidates,
         vector_candidates,
         keyword_candidates,
     ]);
+
+    // --- Step 4: Parse YAML and Expand into Contextual Chunks ---
+    let mut contextual_chunks = Vec::new();
+    for parent_doc in ranked_parent_documents {
+        match serde_yaml::from_str::<YamlContent>(&parent_doc.description) {
+            Ok(yaml_content) => {
+                for section in yaml_content.sections {
+                    let chunk_content = format!(
+                        "## {}\n\n{}",
+                        section.title,
+                        section
+                            .faqs
+                            .iter()
+                            .map(|faq| format!("### Q: {}\n\n{}", faq.question, faq.answer))
+                            .collect::<Vec<_>>()
+                            .join("\n\n")
+                    );
+
+                    contextual_chunks.push(SearchResult {
+                        title: section.title.clone(),
+                        link: format!("{}#{}", parent_doc.link, section.title.replace(' ', "_")),
+                        description: chunk_content,
+                        score: parent_doc.score, // Inherit score from parent
+                    });
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to parse content of document '{}' as YAML, skipping. Error: {}",
+                    parent_doc.link, e
+                );
+                // If parsing fails, we can still use the parent document as a fallback chunk.
+                contextual_chunks.push(parent_doc);
+            }
+        }
+    }
+
+    // --- Step 5: Final Ranking and Truncation ---
+    // The chunks are already roughly ordered by their parent's RRF score.
+    let mut final_results = contextual_chunks;
 
     // --- Temporal Ranking Step ---
     if let Some(config) = &options.temporal_ranking_config {

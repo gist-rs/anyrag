@@ -81,6 +81,43 @@ pub const AUGMENTATION_SYSTEM_PROMPT: &str = r#"You are an expert content analys
 Please provide only the JSON object in your response. Do not add any extra text or explanations.
 "#;
 
+/// The system prompt for the new LLM-powered restructuring step.
+/// This instructs the model to take messy Markdown and reformat it into a
+/// structured YAML document, identifying sections and grouping Q&A pairs.
+pub const KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT: &str = r#"You are an expert document analyst and editor. Your task is to take unstructured, messy Markdown content and reformat it into a clean, structured YAML document.
+
+# Primary Goal
+Transform the provided Markdown into a structured YAML format with a clear hierarchy. The final output should be a single YAML document that is both human-readable and machine-parsable.
+
+# Instructions
+1.  **Identify Sections**: Read through the entire document and identify logical sections. Each section is usually preceded by a heading or a strong thematic break.
+2.  **Extract Section Title**: For each section you identify, extract its title.
+3.  **Extract FAQs**: Within each section, identify all question-and-answer pairs.
+4.  **Preserve Content**: You MUST preserve the original text and language of the questions and answers. Do NOT translate or summarize. Preserve markdown formatting within the answer like lists or bold text.
+5.  **Construct YAML**: Assemble the extracted information into a YAML structure following the schema below. Each distinct section of the source document should become a single item in the top-level `sections` list.
+6.  **Crucial Output Rule**: Your response MUST be a single, valid YAML document. Do not include any other text, explanations, or markdown code fences like ` ```yaml `.
+
+# YAML Output Schema
+```yaml
+sections:
+  - title: "The title of the first section identified in the document"
+    faqs:
+      - question: "The first question found in this section."
+        answer: |
+          The full, multi-line answer corresponding to the first question.
+          - Lists should be preserved.
+          - **Bold text** should also be preserved.
+      - question: "The second question found in this section."
+        answer: |
+          The full answer to the second question.
+  - title: "The title of the second section"
+    faqs:
+      - question: "A question from the second section."
+        answer: |
+          The answer to the question from the second section.
+```
+"#;
+
 // --- Metadata Extraction ---
 
 /// System prompt for extracting structured metadata (Entities and Keyphrases) from content.

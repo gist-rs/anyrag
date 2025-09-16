@@ -29,8 +29,7 @@ use anyrag::{
         run_ingestion_pipeline, KnowledgeError,
     },
     prompts::knowledge::{
-        AUGMENTATION_SYSTEM_PROMPT, KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
-        KNOWLEDGE_EXTRACTION_USER_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
+        KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
         QUERY_ANALYSIS_SYSTEM_PROMPT, QUERY_ANALYSIS_USER_PROMPT,
     },
     providers::{
@@ -136,9 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Content will be ingested for owner_id: {}", user.id);
 
     let prompts = IngestionPrompts {
-        extraction_system_prompt: KNOWLEDGE_EXTRACTION_SYSTEM_PROMPT,
-        extraction_user_prompt_template: KNOWLEDGE_EXTRACTION_USER_PROMPT,
-        augmentation_system_prompt: AUGMENTATION_SYSTEM_PROMPT,
+        restructuring_system_prompt: KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT,
         metadata_extraction_system_prompt: METADATA_EXTRACTION_SYSTEM_PROMPT,
     };
     match run_ingestion_pipeline(

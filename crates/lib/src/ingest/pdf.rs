@@ -9,9 +9,7 @@
 
 #[cfg(feature = "pdf")]
 use crate::{
-    ingest::knowledge::{
-        distill_and_augment, extract_and_store_metadata, store_faqs_as_documents, KnowledgeError,
-    },
+    ingest::knowledge::{extract_and_store_metadata, restructure_with_llm, KnowledgeError},
     prompts::pdf::PDF_REFINEMENT_SYSTEM_PROMPT,
     providers::ai::AiProvider,
 };
@@ -36,9 +34,7 @@ pub enum PdfSyncExtractor {
 /// Defines the prompts for the PDF ingestion pipeline.
 #[derive(Debug)]
 pub struct PdfIngestionPrompts<'a> {
-    pub distillation_system_prompt: &'a str,
-    pub distillation_user_prompt_template: &'a str,
-    pub augmentation_system_prompt: &'a str,
+    pub restructuring_system_prompt: &'a str,
     pub metadata_extraction_system_prompt: &'a str,
 }
 
@@ -70,7 +66,7 @@ pub async fn run_pdf_ingestion_pipeline(
         source_identifier, extractor
     );
 
-    let content_hash = format!("{:x}", md5::compute(&pdf_data));
+    let _content_hash = format!("{:x}", md5::compute(&pdf_data));
 
     // --- Stage 1 & 2: Extraction and Refinement ---
     let refined_markdown = match extractor {
@@ -125,46 +121,44 @@ pub async fn run_pdf_ingestion_pipeline(
         source_identifier
     );
 
-    // --- Stage 4: Distill & Augment (Sequential) ---
-    let ingested_document = crate::ingest::knowledge::IngestedDocument {
-        id: document_id.clone(),
-        source_url: source_identifier.to_string(),
-        content: refined_markdown,
-        content_hash,
-    };
-
-    let faq_items = distill_and_augment(
+    // --- Stage 4: Restructure content into structured YAML ---
+    let structured_yaml = restructure_with_llm(
         ai_provider,
-        &ingested_document,
-        prompts.distillation_system_prompt,
-        prompts.distillation_user_prompt_template,
-        prompts.augmentation_system_prompt,
+        &refined_markdown,
+        prompts.restructuring_system_prompt,
     )
     .await?;
 
-    // --- Stage 5: Conditional Metadata Extraction and Storage ---
-    // Only proceed if the primary distillation was successful and produced content.
-    if faq_items.is_empty() {
-        info!(
-            "Distillation of '{}' produced no FAQs. Halting pipeline.",
+    if structured_yaml.trim().is_empty() {
+        warn!(
+            "LLM restructuring of PDF content for '{}' resulted in empty YAML. Halting pipeline.",
             source_identifier
         );
         return Ok(0);
     }
 
-    // Now that we have valid FAQs, we can extract metadata...
-    let metadata_items = extract_and_store_metadata(
+    // --- Stage 5: Update Document with YAML and Extract Metadata ---
+    conn.execute(
+        "UPDATE documents SET content = ? WHERE id = ?",
+        params![structured_yaml.clone(), document_id.clone()],
+    )
+    .await?;
+    info!(
+        "Updated document '{}' with structured YAML from PDF source.",
+        document_id
+    );
+
+    let _metadata_items = extract_and_store_metadata(
         &conn,
         ai_provider,
         &document_id,
         owner_id,
-        &ingested_document.content,
+        &structured_yaml,
         prompts.metadata_extraction_system_prompt,
     )
     .await?;
 
-    // ...and finally, store the structured knowledge.
-    store_faqs_as_documents(db, source_identifier, owner_id, &faq_items, &metadata_items).await
+    Ok(1)
 }
 
 // --- Helper Functions ---

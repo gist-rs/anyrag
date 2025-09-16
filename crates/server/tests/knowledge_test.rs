@@ -1,15 +1,15 @@
-//! # Knowledge Base Pipeline Integration Test
+//! # Knowledge Base Pipeline Integration Test (Refactored)
 //!
-//! This file tests the core logic of the knowledge base system, from distillation
-//! to exporting, by bypassing the initial web fetch. It mocks the LLM responses
-//! and verifies data transformations and database state.
+//! This file tests the new, refactored knowledge base ingestion pipeline.
+//! It verifies the end-to-end flow from fetching a web page to storing structured
+//! YAML in the database and then correctly exporting it for fine-tuning.
 
 mod common;
 
 use anyhow::Result;
 use anyrag::{
     ingest::knowledge::{
-        distill_and_augment, export_for_finetuning, store_faqs_as_documents, IngestedDocument,
+        export_for_finetuning, run_ingestion_pipeline, IngestionPrompts, WebIngestStrategy,
     },
     providers::ai::local::LocalAiProvider,
 };
@@ -20,132 +20,124 @@ use tracing::info;
 use turso::{Builder, Value as TursoValue};
 
 #[tokio::test]
-async fn test_knowledge_ingest_and_export_pipeline() -> Result<()> {
+async fn test_new_knowledge_ingestion_and_export_pipeline() -> Result<()> {
     // --- 1. Arrange ---
     let app = TestApp::spawn().await?;
     let db_path = app.db_path.clone();
+    let page_url = app.mock_server.url("/test-page");
 
-    // The test starts with pre-existing raw content.
-    let page_url = "http://mock.com/page";
-    let markdown_content = "# Main Title\n\n## FAQ Section\n\n**Q: What is this?**\n\nA: It is a test.\n\n## Details\n\nThis section contains important details.";
-    let ingested_document = IngestedDocument {
-        id: page_url.to_string(),
-        source_url: page_url.to_string(),
-        content: markdown_content.to_string(),
-        content_hash: format!("{:x}", md5::compute(markdown_content.as_bytes())),
-    };
+    // A. Mock the source web page content.
+    let html_content = "<html><head><title>Test Page</title></head><body><h1>Main Title</h1><p>Q: What is this?</p><p>A: It is a test.</p></body></html>";
+    let source_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::GET).path("/test-page");
+        then.status(200).body(html_content);
+    });
 
-    // --- 2. Mock LLM Services ---
+    // B. Mock the LLM Restructuring call.
+    // The AI provider will receive markdown converted from the HTML above.
+    // It should respond with the structured YAML.
+    let expected_yaml_output = r#"
+sections:
+  - title: "Main Title"
+    faqs:
+      - question: "What is this?"
+        answer: "It is a test."
+"#;
+    // This mock is for the restructuring call
+    let llm_restructure_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            // The key part of the converted markdown to expect.
+            .body_contains("Q: What is this?");
+        then.status(200)
+            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml_output}}]}));
+    });
+
+    // C. Mock the Metadata Extraction call (it will be called after restructuring)
+    let metadata_response =
+        json!({"metadata": [{"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "testing"}]});
+    let llm_metadata_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            // Match based on the YAML content being sent for metadata extraction
+            .body_contains("faqs:");
+        then.status(200)
+            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": metadata_response.to_string()}}]}));
+    });
+
+    // D. Setup the AI provider to point to our mock server.
     let ai_provider =
         LocalAiProvider::new(app.mock_server.url("/v1/chat/completions"), None, None)?;
-
-    // A. Mock the LLM Extraction call (Pass 1).
-    let extraction_response = json!({
-        "faqs": [{ "question": "What is this?", "answer": "It is a test.", "is_explicit": true }],
-        "content_chunks": [{ "topic": "Important Details", "content": "This section contains important details." }]
-    });
-    let extraction_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("## FAQ Section");
-        then.status(200)
-            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": extraction_response.to_string()}}]}));
-    });
-
-    // B. Mock the LLM Augmentation call (Pass 2).
-    // This mock now returns the expected structure for `AugmentationResponse`.
-    let augmentation_response = json!({
-        "augmented_faqs": [{ "id": 0, "question": "What is mentioned in the details section?" }]
-    });
-    let augmentation_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            // Match based on content unique to the augmentation prompt.
-            .body_contains("Content Chunks to Analyze");
-        then.status(200)
-            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": augmentation_response.to_string()}}]}));
-    });
-
-    // --- 3. Act ---
-    // Manually run the pipeline stages, skipping the initial fetch.
-    let faq_items = distill_and_augment(
-        &ai_provider,
-        &ingested_document,
-        "You are an expert data extraction agent.",
-        "Content: {markdown_content}",
-        "You are an expert content analyst.",
-    )
-    .await?;
-    assert_eq!(faq_items.len(), 2);
-    info!("-> Distillation successful. Found 2 FAQs.");
-
     let db = Builder::new_local(db_path.to_str().unwrap())
         .build()
         .await?;
+    db.connect()?
+        .execute("PRAGMA journal_mode=WAL;", ())
+        .await?;
 
-    let stored_count =
-        store_faqs_as_documents(&db, &ingested_document.source_url, None, &faq_items, &[]).await?;
-    assert_eq!(stored_count, 2);
-    info!("-> Storage successful. Stored 2 FAQs.");
+    // --- 2. Act ---
+    // Run the entire ingestion pipeline.
+    let prompts = IngestionPrompts {
+        restructuring_system_prompt: "You are an expert document analyst.",
+        metadata_extraction_system_prompt: "You are an expert metadata extractor.",
+    };
 
-    // --- 4. Assert Database State ---
-    extraction_mock.assert();
-    augmentation_mock.assert();
+    let ingested_count = run_ingestion_pipeline(
+        &db,
+        &ai_provider,
+        &page_url,
+        None, // No owner for this test
+        prompts,
+        WebIngestStrategy::RawHtml,
+    )
+    .await?;
+
+    // --- 3. Assert Database State ---
+    info!(
+        "Ingestion pipeline finished. Ingested {} documents.",
+        ingested_count
+    );
+    assert_eq!(
+        ingested_count, 1,
+        "Expected the pipeline to process 1 document."
+    );
+
+    // Verify mocks were called as expected.
+    source_mock.assert();
+    llm_restructure_mock.assert();
+    llm_metadata_mock.assert();
 
     let conn = db.connect()?;
     let mut stmt = conn
-        .prepare("SELECT title, content FROM documents WHERE source_url LIKE '%#faq_%'")
+        .prepare("SELECT content FROM documents WHERE source_url = ?")
         .await?;
-    let mut rows = stmt.query(()).await?;
+    let mut rows = stmt.query(vec![TursoValue::Text(page_url)]).await?;
 
-    let mut found_items = 0;
-    let mut found_explicit = false;
-    let mut found_augmented = false;
+    let row = rows
+        .next()
+        .await?
+        .expect("Expected to find the ingested document in the database.");
 
-    while let Some(row) = rows.next().await? {
-        found_items += 1;
-        let title = match row.get_value(0)? {
-            TursoValue::Text(s) => s,
-            v => panic!("Expected text for title, got {v:?}"),
-        };
-        let content = match row.get_value(1)? {
-            TursoValue::Text(s) => s,
-            v => panic!("Expected text for content, got {v:?}"),
-        };
+    let stored_content = match row.get_value(0)? {
+        TursoValue::Text(s) => s,
+        v => panic!("Expected text for content, got {v:?}"),
+    };
 
-        if title == "What is this?" && content == "It is a test." {
-            found_explicit = true;
-        } else if title == "What is mentioned in the details section?"
-            && content == "This section contains important details."
-        {
-            found_augmented = true;
-        }
-    }
+    // The stored content should be the clean YAML from the LLM.
+    assert_eq!(stored_content.trim(), expected_yaml_output.trim());
+    info!("-> Database state verified successfully. Stored content is correct.");
 
-    assert_eq!(found_items, 2, "Expected to find 2 items in the database");
-    assert!(found_explicit, "Did not find the explicit FAQ");
-    assert!(found_augmented, "Did not find the augmented FAQ");
-    info!("-> Database state verified successfully.");
-
-    // --- 5. Act & Assert: Export for Fine-Tuning ---
+    // --- 4. Act & Assert: Export for Fine-Tuning ---
     let export_body = export_for_finetuning(&db).await?;
     let lines: Vec<&str> = export_body.trim().lines().collect();
-    assert_eq!(lines.len(), 2, "Expected two lines in the JSONL output.");
+    assert_eq!(lines.len(), 1, "Expected one line in the JSONL output.");
 
-    // The order of exported lines is not guaranteed, so we parse both and check for presence.
-    let mut exported_faqs = std::collections::HashSet::new();
-    for line in lines {
-        let json: Value = serde_json::from_str(line)?;
-        let question = json["messages"][1]["content"].as_str().unwrap().to_string();
-        let answer = json["messages"][2]["content"].as_str().unwrap().to_string();
-        exported_faqs.insert((question, answer));
-    }
+    let json: Value = serde_json::from_str(lines[0])?;
+    let question = json["messages"][1]["content"].as_str().unwrap();
+    let answer = json["messages"][2]["content"].as_str().unwrap();
 
-    assert!(exported_faqs.contains(&("What is this?".to_string(), "It is a test.".to_string())));
-    assert!(exported_faqs.contains(&(
-        "What is mentioned in the details section?".to_string(),
-        "This section contains important details.".to_string()
-    )));
+    assert_eq!(question, "What is this?");
+    assert_eq!(answer, "It is a test.");
 
     info!("-> Fine-tuning export verified successfully.");
 

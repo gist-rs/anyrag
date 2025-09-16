@@ -409,7 +409,7 @@ pub async fn ingest_pdf_handler(
         ))
     })?;
 
-    let augmentation_task_config =
+    let _augmentation_task_config =
         app_state
             .tasks
             .get("knowledge_augmentation")
@@ -433,9 +433,7 @@ pub async fn ingest_pdf_handler(
     };
 
     let prompts = anyrag::ingest::pdf::PdfIngestionPrompts {
-        distillation_system_prompt: &task_config.system_prompt,
-        distillation_user_prompt_template: &task_config.user_prompt,
-        augmentation_system_prompt: &augmentation_task_config.system_prompt,
+        restructuring_system_prompt: &task_config.system_prompt,
         metadata_extraction_system_prompt: &metadata_task_config.system_prompt,
     };
 
@@ -490,7 +488,7 @@ pub async fn ingest_web_handler(
     })?;
 
     let aug_task_name = "knowledge_augmentation";
-    let aug_task_config = app_state.tasks.get(aug_task_name).ok_or_else(|| {
+    let _aug_task_config = app_state.tasks.get(aug_task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
             "Task '{aug_task_name}' not found in config"
         ))
@@ -504,9 +502,7 @@ pub async fn ingest_web_handler(
     })?;
 
     let prompts = IngestionPrompts {
-        extraction_system_prompt: &task_config.system_prompt,
-        extraction_user_prompt_template: &task_config.user_prompt,
-        augmentation_system_prompt: &aug_task_config.system_prompt,
+        restructuring_system_prompt: &task_config.system_prompt,
         metadata_extraction_system_prompt: &meta_task_config.system_prompt,
     };
 

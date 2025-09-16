@@ -7,6 +7,7 @@ mod common;
 
 use anyhow::Result;
 use anyrag::{
+    ingest::knowledge::export_for_finetuning,
     providers::db::sqlite::SqliteProvider,
     search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
@@ -46,7 +47,13 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
             guest_user_id.clone(),
             "http://mock.com/tesla",
             "Tesla Prize",
-            "The grand prize is a Tesla."
+            r#"
+sections:
+  - title: "Prizes"
+    faqs:
+      - question: "What is the grand prize?"
+        answer: "The grand prize is a Tesla."
+"#
         ],
     )
     .await?;
@@ -67,6 +74,13 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
     let doc2_vector_bytes: &[u8] = unsafe {
         std::slice::from_raw_parts(doc2_vector.as_ptr() as *const u8, doc2_vector.len() * 4)
     };
+    let doc2_content = r#"
+sections:
+  - title: "Irrelevant Data"
+    faqs:
+      - question: "What is this?"
+        answer: "Some unrelated information."
+"#;
     conn.execute(
         "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
         params![
@@ -74,7 +88,7 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
             guest_user_id.clone(),
             "http://mock.com/other",
             "Irrelevant Data",
-            "Some unrelated information."
+            doc2_content
         ],
     )
     .await?;
@@ -152,12 +166,13 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
     // --- Assert Pre-computation ---
     assert_eq!(
         search_results.len(),
-        1,
-        "Hybrid search should have returned exactly one result."
+        2,
+        "Hybrid search should have returned two chunks (one relevant, one not)."
     );
     assert_eq!(
-        search_results[0].title, "Tesla Prize",
-        "The wrong document was returned by hybrid search."
+        search_results[0].title,
+        "Prizes", // The title should now be the section title from the YAML.
+        "The wrong chunk was returned by hybrid search."
     );
 
     // --- Act (RAG Synthesis) ---
@@ -189,9 +204,47 @@ async fn test_hybrid_search_logic_is_correct() -> Result<()> {
 
     // Assert RAG Synthesis call (most important assertion)
     let (system_prompt_2, user_prompt_2) = &history[1];
-    assert!(system_prompt_2.contains("helpful AI assistant"));
+    assert!(system_prompt_2.contains("You are a strict, factual AI. Your sole purpose is to answer the user's question based *only* on the provided #Context."));
+    // The context should be the full, structured chunk content.
+    assert!(user_prompt_2.contains("## Prizes"));
+    assert!(user_prompt_2.contains("### Q: What is the grand prize?"));
     assert!(user_prompt_2.contains("The grand prize is a Tesla."));
-    assert!(!user_prompt_2.contains("This is another document."));
+    // Make sure the unrelated document content is not present.
+    assert!(!user_prompt_2.contains("Some unrelated information."));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_export_for_finetuning_from_yaml() -> Result<()> {
+    // --- Arrange ---
+    setup_tracing();
+    let sqlite_provider = setup_database_with_manual_data()
+        .await
+        .expect("Database setup failed");
+
+    // --- Act ---
+    let jsonl_output = export_for_finetuning(&sqlite_provider.db).await?;
+
+    // --- Assert ---
+    let lines: Vec<&str> = jsonl_output.trim().split('\n').collect();
+    assert_eq!(
+        lines.len(),
+        2,
+        "Expected two lines in the JSONL output (one for each FAQ)"
+    );
+
+    // Check the first line (Tesla prize)
+    let first_entry: serde_json::Value = serde_json::from_str(lines[0])?;
+    let first_messages = first_entry["messages"].as_array().unwrap();
+    assert_eq!(first_messages[1]["content"], "What is the grand prize?");
+    assert_eq!(first_messages[2]["content"], "The grand prize is a Tesla.");
+
+    // Check the second line (Unrelated info)
+    let second_entry: serde_json::Value = serde_json::from_str(lines[1])?;
+    let second_messages = second_entry["messages"].as_array().unwrap();
+    assert_eq!(second_messages[1]["content"], "What is this?");
+    assert_eq!(second_messages[2]["content"], "Some unrelated information.");
 
     Ok(())
 }

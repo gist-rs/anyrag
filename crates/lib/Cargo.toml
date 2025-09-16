@@ -39,6 +39,7 @@ wiremock = "0.6.5"
 html = { path = "../html" }
 html2md = "0.2.15"
 scraper = "0.24.0"
+serde_yaml = "0.9"
 
 
 [dev-dependencies]

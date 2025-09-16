@@ -1,4 +1,5 @@
 use regex::Regex;
+use scraper::{Html, Selector};
 use std::error::Error;
 use std::fmt;
 use std::fs;
@@ -43,8 +44,29 @@ pub fn clean_html(html: &str, remove_tags: Option<&[&str]>) -> String {
 /// A `String` containing the cleaned Markdown.
 pub fn html_to_clean_markdown(html: &str, remove_tags: Option<&[&str]>) -> String {
     let cleaned_html = clean_html(html, remove_tags);
+
+    // Check if a title exists in the original HTML.
+    let document = Html::parse_document(&cleaned_html);
+    let title_selector = Selector::parse("title").unwrap();
+    let title_exists = document.select(&title_selector).next().is_some();
+
     let markdown = html2md::parse_html(&cleaned_html);
-    clean_markdown_content(&markdown)
+    let cleaned_markdown = clean_markdown_content(&markdown);
+
+    // If a title existed, format the first line of the output as a Markdown H1 header.
+    if title_exists {
+        if let Some((first_line, rest)) = cleaned_markdown.split_once('\n') {
+            if !first_line.trim().is_empty() {
+                // Prepend '#' to the first line and recombine with the rest.
+                return format!("# {}\n{}", first_line.trim(), rest);
+            }
+        } else if !cleaned_markdown.trim().is_empty() {
+            // Handle case where there's only a single line of text (the title).
+            return format!("# {}", cleaned_markdown.trim());
+        }
+    }
+
+    cleaned_markdown
 }
 
 /// Cleans aggressively fetched markdown content by removing common navigational

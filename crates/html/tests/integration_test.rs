@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use html::{clean_html, url_to_md};
+    use html::{clean_html, html_to_clean_markdown, url_to_md};
 
     #[test]
     fn test_clean_html() {
@@ -57,5 +57,13 @@ mod tests {
 
         // cleanup
         // std::fs::remove_file(&file_name).unwrap();
+    }
+    #[test]
+    fn test_html_to_markdown_with_title() {
+        let html_content = "<html><head><title>My Page Title</title></head><body><p>Some content.</p></body></html>";
+        let expected_markdown = "# My Page Title\n\nSome content.";
+
+        let markdown = html_to_clean_markdown(html_content, None);
+        assert_eq!(markdown.trim(), expected_markdown);
     }
 }
