@@ -1,37 +1,79 @@
-# Current Action Sub-Tasks: RAG Pipeline Refactoring
+# Task: Refactor the Knowledge Ingestion Pipeline
 
-This file breaks down the master plan for refactoring the RAG ingestion pipeline into immediate, actionable sub-tasks. Each of these tasks should be completed in order to achieve the goals outlined in `PLAN.md`.
+## Goal
+The primary goal is to fix the RAG system's failure to retrieve correct context for user queries. The root cause has been identified as improper document chunking, where entire webpages are stored as a single large document, leading to context truncation when sent to the LLM.
 
-## Task List
+## Strategy
+The correct strategy is to leverage the existing LLM-powered restructuring step, which already converts raw content into structured YAML. We will use this structured YAML to create smaller, semantically coherent document chunks. Each chunk will be a self-contained, valid YAML document representing a single section of the original content.
 
--   [ ] **1. Enhance HTML to Markdown Conversion**
-    -   [ ] Modify the `html` crate to correctly extract the content of the `<title>` tag from an HTML document.
-    -   [ ] Ensure that the extracted title is prepended to the final Markdown output as a level 1 header (e.g., `# Page Title`).
-    -   [ ] Add a test case to the `html` crate to verify this functionality.
+---
 
--   [ ] **2. Develop the LLM YAML Restructuring Prompt**
-    -   [ ] Create a new, sophisticated system prompt in `anyrag/crates/lib/src/prompts/knowledge.rs`.
-    -   [ ] This prompt will instruct the LLM to take messy, unstructured Markdown as input.
-    -   [ ] The LLM's goal will be to identify semantic sections, clean up the text, and reformat the entire document into the specified structured YAML format.
+## Detailed Plan
 
--   [ ] **3. Refactor the Core Ingestion Logic (`run_ingestion_pipeline`)**
-    -   [ ] Remove the call to the old `distill_and_augment` function.
-    -   [ ] Create a new function, perhaps named `restructure_with_llm`, that takes the messy Markdown and uses the new prompt to generate the structured YAML.
-    -   [ ] Modify the pipeline to store this single YAML string as the `content` in the `documents` table. The original, messy Markdown will no longer be stored.
-    -   [ ] The concept of "augmenting" new FAQs will be removed, as the new structure preserves all content.
+The following changes will be made exclusively in `anyrag/crates/lib/src/ingest/knowledge.rs`.
 
--   [ ] **4. Update the RAG and Search Logic (`hybrid_search`)**
-    -   [ ] The search process will no longer query for individual FAQ documents.
-    -   [ ] It will now fetch the full YAML `content` from relevant parent documents.
-    -   [ ] Implement a YAML parsing step within the search function.
-    -   [ ] Create a "chunking" logic that treats each `section` of the YAML as a single, context-rich document for embedding and retrieval.
+### 1. Define Global Structs for YAML Parsing
+At the top of the file, define the necessary structs to represent the YAML structure. This makes them available to all functions in the module.
 
--   [ ] **5. Update the Fine-Tuning Export Logic (`export_for_finetuning`)**
-    -   [ ] Modify this function to query the `documents` table for the YAML content.
-    -   [ ] Add logic to parse the YAML string.
-    -   [ ] Iterate through the parsed structure to extract the `question` and `answer` pairs for the export dataset.
+- Add `#[derive(Debug, Deserialize, Serialize, Clone)]` to `Faq` and `Section`.
+- Add `#[derive(Debug, Deserialize, Serialize)]` to `YamlContent`.
 
--   [ ] **6. Update and Create New Tests**
-    -   [ ] The existing tests for the old `distill_and_augment` function will need to be removed or completely refactored.
-    -   [ ] Create a new integration test that verifies the end-to-end process: from a URL to a structured YAML document in the database.
-    -   [ ] Update the `knowledge_search_logic_test` to reflect the new RAG-on-YAML-chunks logic and ensure it retrieves the correct context.
+```rust
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct Faq {
+    question: String,
+    answer: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct Section {
+    title: String,
+    faqs: Vec<Faq>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct YamlContent {
+    sections: Vec<Section>,
+}
+```
+
+### 2. Verify `ingest_and_cache_url`
+Ensure this function is in its original, simple state. Its only responsibility is to fetch and cache the raw content from a URL as a **single document**.
+
+- It should **NOT** perform any chunking.
+- Its return type must be `Result<(String, IngestedDocument), KnowledgeError>`.
+
+### 3. Refactor `run_ingestion_pipeline`
+This is the core of the change. The function will be rewritten to orchestrate the new chunking workflow.
+
+- **Stage 1: Ingest Raw Content**
+  - Call `ingest_and_cache_url` to get the initial temporary document.
+
+- **Stage 2: Restructure to YAML**
+  - Call `restructure_with_llm` to convert the raw content into a large `structured_yaml` string.
+  - Add a check to handle cases where the LLM returns empty or invalid YAML (e.g., `""` or `"[]"`).
+
+- **Stage 3: Chunk from YAML and Store**
+  - **Delete the original raw document**. It is no longer needed.
+  - Parse the `structured_yaml` string into the `YamlContent` struct.
+  - Iterate through `yaml_content.sections`.
+  - In each iteration:
+    1. Create a new `YamlContent` object containing only the current `section`.
+    2. Serialize this new object back into a small, self-contained `yaml_chunk` string.
+    3. Generate a unique `chunk_id` for the new document.
+    4. `INSERT` the `yaml_chunk` into the `documents` table. The document's `title` should be the `section.title`.
+
+- **Stage 4: Extract Metadata**
+  - Inside the loop, immediately after inserting a chunk, call `extract_and_store_metadata` for that specific `chunk_id` and `yaml_chunk`.
+
+### 4. Cleanup `export_for_finetuning`
+- Remove the local, redundant `Faq`, `Section`, and `YamlContent` struct definitions from within this function, as they are now defined globally at the top of the file.
+
+---
+
+## Verification
+Once all code changes are complete, run the example test to confirm the fix:
+```bash
+RUST_LOG=info cargo run -p anyrag-server --example knowledge_prompt2
+```
+The test should now pass, as the RAG system will be able to retrieve the correct, specific YAML chunk containing the answer about "ออมต่อ".

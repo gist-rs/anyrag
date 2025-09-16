@@ -19,6 +19,23 @@ use tracing::{debug, info, warn};
 use turso::{params, Connection, Database};
 use uuid::Uuid;
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct Faq {
+    question: String,
+    answer: String,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct Section {
+    title: String,
+    faqs: Vec<Faq>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct YamlContent {
+    sections: Vec<Section>,
+}
+
 /// Defines the strategy for fetching web content.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum WebIngestStrategy<'a> {
@@ -100,7 +117,8 @@ pub async fn run_ingestion_pipeline(
     prompts: IngestionPrompts<'_>,
     web_ingest_strategy: WebIngestStrategy<'_>,
 ) -> Result<usize, KnowledgeError> {
-    let (document_id, ingested_document) =
+    // Stage 1: Ingest Raw Content
+    let (temp_doc_id, ingested_document) =
         match ingest_and_cache_url(db, url, owner_id, web_ingest_strategy).await {
             Ok(content) => content,
             Err(KnowledgeError::ContentUnchanged(url)) => {
@@ -110,9 +128,7 @@ pub async fn run_ingestion_pipeline(
             Err(e) => return Err(e),
         };
 
-    let conn = db.connect()?;
-
-    // --- Stage 2: LLM-Powered Restructuring ---
+    // Stage 2: Restructure to YAML
     let structured_yaml = restructure_with_llm(
         ai_provider,
         &ingested_document.content,
@@ -120,39 +136,88 @@ pub async fn run_ingestion_pipeline(
     )
     .await?;
 
-    if structured_yaml.trim().is_empty() {
+    if structured_yaml.trim().is_empty() || structured_yaml.trim() == "[]" {
         warn!(
             "LLM restructuring resulted in empty content for source: {}",
             url
         );
+        // Clean up the temporary document
+        let conn = db.connect()?;
+        conn.execute("DELETE FROM documents WHERE id = ?", params![temp_doc_id])
+            .await?;
         return Ok(0);
     }
 
-    // --- Stage 3: Update Document and Extract Metadata ---
-    // Update the document's content with the clean, structured YAML.
+    let conn = db.connect()?;
+
+    // Stage 3: Chunk from YAML and Store
+    // Delete the original raw document, it's no longer needed.
     conn.execute(
-        "UPDATE documents SET content = ? WHERE id = ?",
-        params![structured_yaml.clone(), document_id.clone()],
+        "DELETE FROM documents WHERE id = ?",
+        params![temp_doc_id.clone()],
     )
     .await?;
-    info!(
-        "Successfully updated document '{}' with structured YAML content.",
-        document_id
-    );
+    info!("Deleted temporary raw document with id: {}", temp_doc_id);
 
-    // Now, extract metadata from the clean YAML content.
-    let _metadata_items = extract_and_store_metadata(
-        &conn,
-        ai_provider,
-        &document_id,
-        owner_id,
-        &structured_yaml,
-        prompts.metadata_extraction_system_prompt,
-    )
-    .await?;
+    let yaml_content: YamlContent = match serde_yaml::from_str(&structured_yaml) {
+        Ok(content) => content,
+        Err(e) => {
+            warn!(
+                "Failed to parse structured YAML for source: {}. Error: {}",
+                url, e
+            );
+            return Ok(0); // Or return an error
+        }
+    };
 
-    // The pipeline now processes one document and updates it in place.
-    Ok(1)
+    let mut chunks_created = 0;
+    for (i, section) in yaml_content.sections.into_iter().enumerate() {
+        // 1. Create a new YamlContent object containing only the current section.
+        let chunk_content = YamlContent {
+            sections: vec![section.clone()],
+        };
+
+        // 2. Serialize this new object back into a small, self-contained yaml_chunk string.
+        let yaml_chunk = match serde_yaml::to_string(&chunk_content) {
+            Ok(s) => s,
+            Err(_) => continue, // Skip if serialization fails
+        };
+
+        // 3. Generate a unique chunk_id for the new document.
+        let chunk_id = Uuid::new_v4().to_string();
+        let source_url_with_chunk = format!("{}#section_{}", url, i);
+
+        // 4. INSERT the yaml_chunk into the documents table.
+        conn.execute(
+            "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+            params![
+                chunk_id.clone(),
+                owner_id,
+                source_url_with_chunk, // The original source URL
+                section.title.clone(),
+                yaml_chunk.clone()
+            ],
+        )
+        .await?;
+        info!(
+            "Stored YAML chunk '{}' for document id: {}",
+            section.title, chunk_id
+        );
+        chunks_created += 1;
+
+        // Stage 4: Extract Metadata for the new chunk
+        extract_and_store_metadata(
+            &conn,
+            ai_provider,
+            &chunk_id,
+            owner_id,
+            &yaml_chunk,
+            prompts.metadata_extraction_system_prompt,
+        )
+        .await?;
+    }
+
+    Ok(chunks_created)
 }
 
 // --- Stage 1: Ingestion & Caching ---
@@ -377,7 +442,7 @@ pub async fn extract_and_store_metadata(
 
     let metadata_json = serde_json::to_string_pretty(&metadata_items)
         .unwrap_or_else(|_| "Failed to serialize metadata".to_string());
-    info!("Extracted metadata for document {document_id}: {metadata_json}");
+    // info!("Extracted metadata for document {document_id}: {metadata_json}");
 
     if metadata_items.is_empty() {
         info!("No metadata extracted for document: {document_id}");
@@ -463,22 +528,6 @@ pub async fn export_for_finetuning(db: &Database) -> Result<String, KnowledgeErr
     let system_prompt =
         "You are a helpful assistant. Provide clear, accurate answers based on the retrieved context.";
     let mut jsonl_output = String::new();
-
-    #[derive(Deserialize, Debug)]
-    struct Faq {
-        question: String,
-        answer: String,
-    }
-
-    #[derive(Deserialize, Debug)]
-    struct Section {
-        faqs: Vec<Faq>,
-    }
-
-    #[derive(Deserialize, Debug)]
-    struct YamlContent {
-        sections: Vec<Section>,
-    }
 
     while let Some(row) = rows.next().await? {
         let yaml_content = if let Ok(turso::Value::Text(s)) = row.get_value(0) {
