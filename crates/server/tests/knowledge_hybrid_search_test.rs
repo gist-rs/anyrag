@@ -1,7 +1,8 @@
 //! # Knowledge Base Hybrid Search E2E Test
 //!
 //! This test verifies that the `POST /search/knowledge` endpoint correctly uses
-//! a hybrid search strategy (vector + keyword) to retrieve context for the RAG pipeline.
+//! a hybrid search strategy (metadata, vector, keyword) and the YAML chunking
+//! logic to retrieve context for the RAG pipeline.
 
 mod common;
 
@@ -32,22 +33,22 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
 
     let final_rag_answer = "The Quantum Widget uses quantum entanglement, and advanced data processing uses multi-layered abstraction.";
 
-    // --- 3. Seed the Database with data owned by our test user ---
+    // --- 3. Seed the Database with data in the expected YAML format ---
     let builder = TestDataBuilder::new(&app).await?;
     builder
         .add_document(
             "doc_keyword",
             &user.id,
             faq_keyword_question,
-            faq_keyword_answer,
+            &format!(
+                r#"
+sections:
+  - title: "{faq_keyword_question}"
+    faqs:
+      - question: "{faq_keyword_question}"
+        answer: "{faq_keyword_answer}""#
+            ),
             None,
-        )
-        .await?
-        .add_faq(
-            "doc_keyword",
-            &user.id,
-            faq_keyword_question,
-            faq_keyword_answer,
         )
         .await?
         .add_metadata(
@@ -66,15 +67,15 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
             "doc_vector",
             &user.id,
             faq_vector_question,
-            faq_vector_answer,
+            &format!(
+                r#"
+sections:
+  - title: "{faq_vector_question}"
+    faqs:
+      - question: "{faq_vector_question}"
+        answer: "{faq_vector_answer}""#
+            ),
             None,
-        )
-        .await?
-        .add_faq(
-            "doc_vector",
-            &user.id,
-            faq_vector_question,
-            faq_vector_answer,
         )
         .await?
         .add_metadata(
@@ -114,11 +115,15 @@ async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": vec![0.5, 0.5, 0.0, 0.0] }] }));
     });
 
+    // This mock must be very specific to be chosen over the generic one in the harness.
+    // It matches the RAG system prompt AND the content from the two chunks that hybrid
+    // search should retrieve and format.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("quantum entanglement")
-            .body_contains("multi-layered abstraction");
+            .body_contains("strict, factual AI") // From RAG_SYNTHESIS_SYSTEM_PROMPT
+            .body_contains("## How does the Quantum Widget work?") // From the first chunk
+            .body_contains("## What is the method for advanced data processing?"); // From the second chunk
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
