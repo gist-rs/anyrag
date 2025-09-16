@@ -86,6 +86,7 @@ impl TestApp {
                         && !body_str.contains("expert code search analyst") // For GitHub search
                         && !body_str.contains("expert technical analyst") // For PDF refinement
                         && !body_str.contains("expert document analyst and editor") // For PDF restructuring
+                        && !body_str.contains("expert search result re-ranker") // For LLM re-ranking
                         && !body_str.contains("extract Category, Keyphrases, and Entities") // For metadata extraction
                         && !body_str.contains("strict, factual AI") // For RAG synthesis
                         && !body_str.contains("intelligent data assistant") // For Text-to-SQL

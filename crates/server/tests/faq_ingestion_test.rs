@@ -40,7 +40,7 @@ sections:
 
     // --- 2. Mock External Services ---
 
-    // A. Mock the LLM Refinement call (raw text -> clean markdown). THIS WAS THE MISSING STEP.
+    // A. Mock the LLM Refinement call (raw text -> clean markdown).
     let refinement_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -66,7 +66,6 @@ sections:
     let metadata_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            // Matcher for KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT
             .body_contains("extract Category, Keyphrases, and Entities");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!([
@@ -100,7 +99,6 @@ sections:
         when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("strict, factual AI") // Updated to match the new default prompt
-            // Verify that the context is the correctly chunked section from the YAML
             .body_contains("## General Information");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
