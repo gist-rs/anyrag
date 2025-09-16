@@ -66,7 +66,7 @@ pub fn html_to_clean_markdown(html: &str, remove_tags: Option<&[&str]>) -> Strin
         }
     }
 
-    cleaned_markdown
+    cleaned_markdown //
 }
 
 /// Cleans aggressively fetched markdown content by removing common navigational
@@ -77,10 +77,13 @@ pub fn clean_markdown_content(markdown: &str) -> String {
 
     // This regex matches common navigational keywords that often appear on their own lines,
     // potentially surrounded by asterisks for markdown bolding. It's case-insensitive `(?i)`.
-    let nav_keywords_re = Regex::new(r#"(?i)^\s*\**\s*(menu|เมนู|คำถามพบบ่อย|ติดต่อเรา|เกี่ยวกับ กบข.|บริการสมาชิก|ลงทุน|ข่าวสารและกิจกรรม|รายงานผลการดำเนินงาน|การบริหารความเสี่ยง|สถิติสำคัญ|สัดส่วนการลงทุน|นโยบายการกำกับดูแลกิจการ|การลงทุนอย่างรับผิดชอบ|การดำเนินการต่อต้านการทุจริต|มาตรการภายในเพื่อส่งเสริมความโปร่งใสและป้องกันการทุจริต|การประเมิน ITA|ตำแหน่งที่เปิดรับ|กรอกใบสมัคร|ประกาศจัดซื้อ-จัดจ้าง|สรุปผลการจัดซื้อ-จัดจ้าง|วิเคราะห์ผลการจัดซื้อจัดจ้าง|ความก้าวหน้าการจัดซื้อจัดจ้าง|การขึ้นทะเบียนคู่ค้า|ประกาศจำหน่ายทรัพย์สิน|จัดซื้อ-จัดจ้างอาคารอับดุลราฮิม เพลส|MCS Web|แบบฟอร์ม|งาน กบข.|กิจกรรมต่าง ๆ|My GPF & My GPF Twins|﻿)\s*\**\s*$"#).unwrap();
+    let nav_keywords_re = Regex::new(
+        r"(?i)^\s*\**\s*(home|about|contact|faq|menu|news|services|portfolio|blog|products|solutions|careers|support|login|register|เมนู|หน้าแรก|เกี่ยวกับ|ติดต่อ|คำถามที่พบบ่อย|ข่าว|บริการ|เข้าสู่ระบบ|สมัครสมาชิก)\s*\**\s*$",
+    )
+    .unwrap();
 
-    // This regex matches the copyright footer.
-    let footer_re = Regex::new(r"(?i)^\s*© สงวนลิขสิทธิ์.*").unwrap();
+    // This regex matches common copyright footer patterns.
+    let footer_re = Regex::new(r"(?i)^\s*(©|\(c\)|copyright|สงวนลิขสิทธิ์).*").unwrap();
 
     // This regex is for collapsing more than two consecutive newlines into just two.
     let multi_newline_re = Regex::new(r"\n{3,}").unwrap();
@@ -190,4 +193,23 @@ pub async fn url_to_clean_markdown(
     }
     let html_raw = response.text().await?;
     Ok(html_to_clean_markdown(&html_raw, remove_tags))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_url_to_md() {
+        let url = "https://www.gpf.or.th/thai2019/10contact/main.php?page=7&menu=askfreq&lang=th&size=n&pattern=n";
+        let result = url_to_md(url, None).await;
+        assert!(result.is_ok(), "url_to_md failed: {:?}", result.err());
+        let file_name = result.unwrap();
+        assert!(
+            std::path::Path::new(&file_name).exists(),
+            "File '{file_name}' was not created"
+        );
+        // cleanup
+        // std::fs::remove_file(&file_name).unwrap();
+    }
 }
