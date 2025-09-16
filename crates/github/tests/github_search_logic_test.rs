@@ -6,7 +6,7 @@
 // Make the common module available.
 mod common;
 
-use common::{MockAiProvider, setup_mock_embedding_server, setup_tracing};
+use common::{setup_mock_embedding_server, setup_tracing, MockAiProvider};
 use github::{
     ingest::{
         storage::StorageManager,
@@ -16,7 +16,7 @@ use github::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use tempfile::{TempDir, tempdir};
+use tempfile::{tempdir, TempDir};
 
 /// Helper function to set up a temporary database with two distinct examples.
 /// One example is about "turso", and the other is unrelated.
