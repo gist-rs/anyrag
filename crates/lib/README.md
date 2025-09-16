@@ -1,69 +1,70 @@
 # `anyrag` Library
 
-This crate provides the core logic for a comprehensive natural language data interaction and Retrieval-Augmented Generation (RAG) platform. Its main functionalities include:
+This crate provides the core logic for a comprehensive natural language data interaction and Retrieval-Augmented Generation (RAG) platform. It has been refactored to focus on a new, structured-data approach that significantly improves retrieval accuracy and context awareness.
 
-1.  **Knowledge Base RAG Pipeline:** A complete system for building a self-improving knowledge base from diverse sources (web pages, PDFs, text, structured sheets) and answering questions using an advanced, multi-stage hybrid search model.
-2.  **Natural Language to Data:** Translating prompts into executable queries for data warehouses like Google BigQuery.
+## Core Concept: The YAML-Based Pipeline
 
-It uses a pluggable AI provider for NLP and integrates with both remote (BigQuery) and local (SQLite) storage backends. This library is the foundation of the `anyrag` workspace and is used by the `anyrag-server` and `anyrag-cli` crates.
+The central philosophy of this library is to move away from disconnected, fragmented data (like individual FAQs) and towards a single, structured "source of truth" for each ingested document. We use an LLM to intelligently restructure messy source content into a clean, hierarchical YAML format. This YAML document then becomes the foundation for all subsequent RAG and fine-tuning tasks.
 
 ## Features
 
 *   **Knowledge Base Pipeline:** A complete "virtuous cycle" for RAG:
     *   **Multi-Source Ingestion:** Ingests and processes content from web URLs, PDFs, Google Sheets, RSS feeds, and raw text.
-    *   **Distill & Augment:** Uses a two-pass LLM process to extract explicit FAQs and generate new ones from unstructured content.
-    *   **Store & Embed:** Saves structured Q&A pairs into a local SQLite database and generates vector embeddings for semantic search.
-*   **Advanced Retrieval-Augmented Generation (RAG):**
-    *   **Knowledge Base Search:** Synthesizes answers by retrieving facts from the knowledge base using a sophisticated, multi-stage pipeline with temporal reasoning for time-sensitive queries.
-*   **Pluggable Providers:** Supports different AI and storage providers (e.g., Gemini, local models, BigQuery, SQLite).
-*   **Robust and Asynchronous:** Built with Tokio for efficient, non-blocking I/O.
-*   **Identity & Ownership (`core-access` feature):** Provides a flexible user and ownership model to ensure clear data provenance.
+    *   **LLM-Powered Restructuring:** Uses an LLM to intelligently reformat messy source content (like HTML converted to Markdown) into a structured YAML format, preserving the original document's semantic hierarchy.
+    *   **Store & Embed:** Saves the final YAML as a single entry in a local SQLite database and generates a vector embedding for the entire document for semantic search.
 
-### The Advanced RAG Pipeline
+*   **Advanced Retrieval-Augmented Generation (RAG):**
+    *   **RAG-on-YAML:** Synthesizes answers by first retrieving relevant parent documents via hybrid search, then parsing their YAML content on-the-fly and using the structured `sections` as context-rich "chunks."
+    *   **Temporal Reasoning:** Understands time-sensitive queries like "what is the newest..." by filtering results based on date properties.
+
+*   **Fine-Tuning Export:** Exports a clean, high-quality dataset for fine-tuning by simply parsing the structured YAML stored in the database.
+*   **Pluggable Providers:** Supports different AI and storage providers (e.g., Gemini, local models, SQLite).
+*   **Identity & Ownership (`core-access` feature):** Provides a flexible user and ownership model to ensure clear data provenance and secure, ownership-aware search.
+
+## The New RAG-on-YAML Pipeline
 
 The system uses a multi-stage process to deliver a precise answer:
 
-1.  **Query Analysis (LLM Call #1):** The user's query is first analyzed to extract key entities (e.g., "iPhone") and keyphrases (e.g., "newest").
+1.  **Query Analysis (LLM Call #1):** The user's query is analyzed to extract key **entities** and **keyphrases**.
+2.  **Hybrid Candidate Retrieval:** A combination of metadata, keyword, and vector searches are run to find the most relevant *parent documents*. The vector search uses an **Embedding Model** to convert the user's query into a vector.
+3.  **Reciprocal Rank Fusion (RRF):** The results from all search methods are intelligently combined and re-ranked using the RRF algorithm.
+4.  **YAML Parsing & Contextual Chunking:** The system parses the structured YAML content of the top-ranked parent documents. It treats each `section` within the YAML as a single, context-rich "chunk."
+5.  **Answer Synthesis (LLM Call #2):** The final, highly-relevant chunks are passed to the synthesis LLM, which generates a coherent, accurate answer based *only* on the provided, structured information.
 
-2.  **Multi-Stage Candidate Retrieval:**
-    *   **Keyword & Vector Search:** Keyword and vector searches are performed across the knowledge base. The vector search uses an **Embedding Model (LLM Call #2)** to convert the user's query into a vector for semantic matching.
+## Basic Usage
 
-3.  **Reciprocal Rank Fusion (RRF):** The results from keyword and vector searches are intelligently combined and re-ranked using the RRF algorithm to produce a single, relevance-scored list.
+This crate is a library. Its components are orchestrated by binaries like `anyrag-server`. Here is a high-level example of how you might use the ingestion pipeline directly:
 
-4.  **Temporal Filtering (for Knowledge Base):** The system checks the query for temporal keywords (like "newest," "latest") and filters the re-ranked list to find the single most recent document based on its date properties.
+```rust
+use anyrag::{
+    ingest::{run_ingestion_pipeline, knowledge::{IngestionPrompts, WebIngestStrategy}},
+    providers::{ai::local::LocalAiProvider, db::sqlite::SqliteProvider},
+};
 
-5.  **Answer Synthesis (LLM Call #3):** The final, highly-filtered context is passed to a powerful LLM, which generates a coherent, accurate answer based *only* on the provided information.
+async fn ingest_a_url() {
+    let db_provider = SqliteProvider::new(":memory:").await.unwrap();
+    db_provider.initialize_schema().await.unwrap();
+    let ai_provider = LocalAiProvider::new("http://localhost:1234/v1/chat/completions".to_string(), None, None).unwrap();
 
-## Prerequisites
+    let prompts = IngestionPrompts {
+        restructuring_system_prompt: "You are an expert document analyst...",
+        metadata_extraction_system_prompt: "You are an expert metadata extractor...",
+    };
 
-Before using this library, ensure you have the following:
-
-1.  **Rust:** The Rust programming language and Cargo. You can install it from [rustup.rs](https://rustup.rs/).
-2.  **Google Cloud Account:** An active Google Cloud account with a BigQuery project set up.
-3.  **AI Provider API Key:** An API key for your chosen AI provider (e.g., Google Gemini or a local model).
-4.  **GCP Authentication:** For local development, you must be authenticated with the Google Cloud SDK. Run the following command and follow the instructions:
-    ```sh
-    gcloud auth application-default login
-    ```
+    let _ingested_count = run_ingestion_pipeline(
+        &db_provider.db,
+        &ai_provider,
+        "https://example.com",
+        None,
+        prompts,
+        WebIngestStrategy::RawHtml,
+    ).await.unwrap();
+}
+```
 
 ## Configuration
 
-The library is configured using environment variables. You can create a `.env` file in the root of the workspace or in this crate's directory (`crates/lib`).
-
-**Required Environment Variables:**
-
-*   `AI_API_KEY`: Your API key for a cloud-based AI provider (e.g., Google Gemini). Required if using the `gemini` provider.
-*   `LOCAL_AI_API_URL`: The full API endpoint URL for a local AI provider (e.g., Ollama). Required if `AI_PROVIDER` is `local`.
-*   `BIGQUERY_PROJECT_ID`: The ID of your Google Cloud project where BigQuery is enabled.
-*   `EMBEDDINGS_API_URL`: The API endpoint for the text embeddings model (used for RAG).
-*   `EMBEDDINGS_MODEL`: The name of the text embeddings model to use.
-
-**Optional Environment Variables:**
-
-*   `AI_PROVIDER`: The AI provider to use. Can be "gemini" or "local". Defaults to `gemini`.
-*   `AI_MODEL`: The specific model name to use, which is mainly for the `local` provider.
-*   `JINA_API_KEY`: An optional API key for the Jina Reader API to increase rate limits for web content fetching.
-*   `RUST_LOG`: Sets the logging level for tracing. For example, `RUST_LOG=info,anyrag=debug`.
+This library does not directly read configuration files or environment variables. It is designed to be configured by the consuming application (e.g., `anyrag-server`), which passes the necessary providers, prompts, and settings to the library's functions.
 
 ## Running Tests
 
@@ -72,13 +73,3 @@ You can run the tests for this specific crate from the workspace root:
 ```sh
 cargo test -p anyrag
 ```
-
-### Enabling Logs in Tests
-
-To see detailed logs during test execution, you can set the `RUST_LOG` environment variable. This is incredibly helpful for debugging.
-
-```sh
-RUST_LOG=info cargo test -p anyrag -- --nocapture
-```
-
-The `-- --nocapture` flag tells the test runner to display the output immediately instead of capturing it. You can adjust the log level (e.g., `info`, `debug`, `trace`) as needed.

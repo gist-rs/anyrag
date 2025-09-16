@@ -44,11 +44,10 @@ You can grant these roles using the `gcloud` CLI.
 
 ## Configuration
 
-The server uses a powerful, layered configuration system to maximize flexibility and adhere to the DRY (Don't Repeat Yourself) principle.
+The server uses a powerful, layered configuration system. The default prompts for all tasks are hardcoded in the `anyrag` library, but they can be easily overridden.
 
--   **`config.prompt.yml`**: Contains all the default task prompts. This file is part of the repository and provides a stable base.
 -   **`config.yml`**: **(Required, user-created)** Defines AI providers, embedding models, and features like temporal reasoning. You create this file from a template (`config.gemini.yml` or `config.local.yml`).
--   **`prompt.yml`**: **(Optional, user-created)** Allows you to override specific prompts from the default set without modifying the base `config.prompt.yml` file. This file is ignored by Git.
+-   **`prompt.yml`**: **(Optional, user-created)** Allows you to override specific prompts from the hardcoded defaults. This file is ignored by Git and is the recommended way to customize prompts.
 -   **`.env`**: **(Required, user-created)** Stores secrets (like API keys) and environment-specific variables (like `PORT`).
 
 ### 1. Create your configuration files
@@ -61,7 +60,7 @@ The server uses a powerful, layered configuration system to maximize flexibility
     # For local models, this sets all tasks to use the 'local_default' provider
     cp crates/server/config.local.yml crates/server/config.yml
     ```
-2.  **(Optional) Create `prompt.yml`:** If you want to customize any of the default prompts from `config.prompt.yml`, create a `prompt.yml` file and add *only* the `tasks` you wish to override.
+2.  **(Optional) Create `prompt.yml`:** If you want to customize any of the default prompts, create a `prompt.yml` file and add *only* the `tasks` you wish to override.
 3.  **(Optional) Configure Temporal Reasoning:** To enable the server to understand time-sensitive queries like "newest" or "latest", add the `temporal_reasoning` section to your `config.yml`.
 
     ```yaml

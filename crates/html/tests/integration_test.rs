@@ -1,3 +1,8 @@
+//! # HTML Crate Integration Tests
+//!
+//! This file contains integration tests for the `html` crate, verifying
+//! functionalities like HTML cleaning, Markdown conversion, and URL fetching.
+
 #[cfg(test)]
 mod tests {
     use html::{clean_html, html_to_clean_markdown, url_to_md};

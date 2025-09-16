@@ -29,19 +29,20 @@ This project is a comprehensive Rust-based platform for building a self-improvin
 
 ## The Advanced RAG Pipeline
 
-When you ask a question, the system uses a multi-stage process involving three LLM calls to deliver a precise answer:
+The system uses a sophisticated, multi-stage process to deliver precise answers from your knowledge base:
 
-1.  **Query Analysis (LLM Call #1):** The user's query is first analyzed to extract key entities (e.g., "iPhone") and keyphrases (e.g., "newest").
+1.  **Query Analysis (LLM Call #1):** The user's query is analyzed to extract key entities (e.g., "Tesla") and keyphrases (e.g., "campaign prize").
 
-2.  **Multi-Stage Candidate Retrieval:**
-    *   **Metadata Search:** A fast database query retrieves an initial set of candidate documents based on the extracted entities and keyphrases.
-    *   **Keyword & Vector Search:** In parallel, keyword and vector searches are performed. The vector search uses an **Embedding Model (LLM Call #2)** to convert the user's query into a vector.
+2.  **Hybrid Candidate Retrieval:**
+    *   **Metadata Search:** A fast database query retrieves an initial set of *parent documents* based on the extracted entities and keyphrases.
+    *   **Vector Search:** In parallel, the user's query is converted into a vector **(Embedding Model Call)** to find semantically similar parent documents.
+    *   **Keyword Search:** A traditional keyword search provides a baseline set of results.
 
-3.  **Reciprocal Rank Fusion (RRF):** The results from keyword and vector searches are intelligently combined and re-ranked using the RRF algorithm to produce a single, relevance-scored list.
+3.  **Reciprocal Rank Fusion (RRF):** The results from all retrieval methods are intelligently combined and re-ranked using the RRF algorithm to produce a single, relevance-scored list of the most relevant *parent documents*.
 
-4.  **Temporal Filtering:** The system checks the query for temporal keywords (like "newest," "latest"). If found, it filters the re-ranked list to find the single most recent document based on its date properties.
+4.  **Contextual Chunking:** The system retrieves the full YAML content of the top-ranked parent documents. Instead of using the whole document, it parses the YAML and treats each `section` as a single, context-rich "chunk." This ensures that the context provided to the final LLM is highly relevant and structured.
 
-5.  **Answer Synthesis (LLM Call #3):** The final, highly-filtered context is passed to a powerful LLM, which generates a coherent, accurate answer based *only* on the provided information.
+5.  **Answer Synthesis (LLM Call #2):** The final, semantically chunked context is passed to a powerful LLM, which generates a coherent, accurate answer based *only* on the provided information.
 
 ## API Response Structure
 

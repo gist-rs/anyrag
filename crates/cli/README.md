@@ -71,6 +71,28 @@ cargo run -p cli -- dump firebase \
   --timestamp-field updatedAt
 ```
 
+#### `dump github`
+
+Clones a public GitHub repository, extracts all Rust code examples (from `README.md`, `examples/`, `tests/`, and doc comments), and stores them in a versioned, repository-specific SQLite database (`db/github_ingest/<repo_name>.db`). This creates a searchable knowledge base of your code examples.
+
+**Arguments:**
+
+*   `--url <URL>`: **(Required)** The URL of the public GitHub repository to ingest.
+*   `--version <VERSION>`: (Optional) The specific Git tag or branch to check out (e.g., `v0.1.0`). If omitted, the version will be inferred from the repository's `Cargo.toml` file.
+*   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model. If provided, embeddings will be generated for each extracted code example.
+*   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use.
+
+**Example:**
+
+This command ingests version `v1.2.3` of the `tokio` repository and generates embeddings for all found examples.
+```sh
+cargo run -p cli -- dump github \
+  --url https://github.com/tokio-rs/tokio \
+  --version v1.2.3 \
+  --embedding-api-url "http://localhost:1234/api/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
 ### `process file`
 
 Ingests a local Markdown file by splitting it into chunks and storing them in a dedicated SQLite database. This is the same logic that `dump github` uses automatically on its generated context file, but it can be used on any Markdown file.
