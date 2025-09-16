@@ -1,9 +1,9 @@
-//! # FAQ Flag Ingestion Tests
+//! # Unified Ingestion Pipeline E2E Test
 //!
-//! This file contains integration tests for the `?faq=true` and `?faq=false`
-//! query parameters across various ingestion endpoints. It verifies that the
-//! server correctly chooses between "light" ingestion and the full, AI-driven
-//! FAQ generation pipeline based on this flag.
+//! This file contains a comprehensive integration test for the new, unified ingestion
+//! pipeline. It replaces the old tests for the deprecated `?faq=true` and `?faq=false`
+//! parameters. This single test verifies the entire end-to-end workflow: from PDF
+//! ingestion to structured YAML storage, embedding, and a final RAG query.
 
 mod common;
 
@@ -12,274 +12,169 @@ use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, pdf_helper::generate_test_pdf, TestApp};
 use httpmock::Method;
 use serde_json::{json, Value};
-use turso::{Builder, Value as TursoValue};
+use turso::{params, Builder, Value as TursoValue};
 
 #[tokio::test]
-async fn test_ingest_pdf_with_faq_true() -> Result<()> {
-    // Arrange
+async fn test_unified_pdf_ingestion_and_rag_workflow() -> Result<()> {
+    // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
-    let token = generate_jwt("pdf-faq-user@example.com")?;
-    let pdf_data = generate_test_pdf("The magic word is AnyRAG.")?;
+    let token = generate_jwt("unified-ingest-user@example.com")?;
 
-    // Mock the full AI pipeline: refinement -> distillation -> metadata
+    let pdf_content = "The magic word is AnyRAG. It is a powerful framework.";
+    let pdf_data = generate_test_pdf(pdf_content)?;
+
+    // The intermediate step where raw text is cleaned into Markdown.
+    let refined_markdown = "- The magic word is AnyRAG.\n- It is a powerful framework.";
+
+    // The final structured data that should be stored in the database.
+    let expected_yaml = r#"
+sections:
+  - title: "General Information"
+    faqs:
+      - question: "What is the magic word?"
+        answer: "The magic word is AnyRAG."
+      - question: "What is AnyRAG?"
+        answer: "It is a powerful framework."
+"#;
+    let final_rag_answer = "AnyRAG is a powerful framework.";
+
+    // --- 2. Mock External Services ---
+
+    // A. Mock the LLM Refinement call (raw text -> clean markdown). THIS WAS THE MISSING STEP.
     let refinement_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions").body_contains("reformat it into a clean, well-structured Markdown");
-        then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": "The magic word is AnyRAG."}}]}));
-    });
-    let distillation_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions").body_contains("extract two types of information: 1. Explicit FAQs");
-        then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({
-            "faqs": [{"question": "What is the magic word?", "answer": "AnyRAG", "is_explicit": false}], "content_chunks": []
-        }).to_string()}}]}));
-    });
-
-    let metadata_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("You are a document analyst"); // From METADATA_EXTRACTION_SYSTEM_PROMPT
+            // Matcher for PDF_REFINEMENT_SYSTEM_PROMPT
+            .body_contains("expert technical analyst");
         then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": json!([
-            {"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "magic word"}
-        ]).to_string()}}]}),
+            json!({"choices": [{"message": {"role": "assistant", "content": refined_markdown}}]}),
         );
     });
 
-    let augmentation_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions").body_contains("generate a high-quality, comprehensive question for EACH");
-        then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({"augmented_faqs": []}).to_string()}}]}));
+    // B. Mock the LLM Restructuring call (clean markdown -> structured YAML)
+    let restructuring_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            // Matcher for KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT
+            .body_contains("expert document analyst and editor");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
+        );
     });
 
+    // C. Mock the Metadata Extraction call
+    let metadata_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            // Matcher for KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT
+            .body_contains("extract Category, Keyphrases, and Entities");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!([
+                {"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "magic word"},
+                {"type": "ENTITY", "subtype": "PRODUCT", "value": "AnyRAG"}
+            ]).to_string()}}]}),
+        );
+    });
+
+    // D. Mock the Embedding API (for new doc and for search query)
+    let embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
+        then.status(200)
+            .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
+    });
+
+    // E. Mock the RAG Query Analysis
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("expert query analyst");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!({
+                "entities": ["AnyRAG"], "keyphrases": []
+            }).to_string()}}]}),
+        );
+    });
+
+    // F. Mock the final RAG Synthesis call
+    let rag_synthesis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("strict, factual AI") // Updated to match the new default prompt
+            // Verify that the context is the correctly chunked section from the YAML
+            .body_contains("## General Information");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
+        );
+    });
+
+    // --- 3. Act: Ingest the PDF ---
     let form = reqwest::multipart::Form::new().part(
         "file",
         reqwest::multipart::Part::bytes(pdf_data).file_name("test.pdf"),
     );
 
-    // Act
-    let response = app
+    let ingest_response = app
         .client
-        .post(format!("{}/ingest/pdf?faq=true", app.address))
-        .bearer_auth(token)
+        .post(format!("{}/ingest/pdf", app.address))
+        .bearer_auth(token.clone())
         .multipart(form)
         .send()
         .await?
         .error_for_status()?;
 
-    // Assert API Response
-    let body: ApiResponse<Value> = response.json().await?;
-    assert_eq!(body.result["ingested_faqs"], 1);
-    refinement_mock.assert();
-    distillation_mock.assert();
-    metadata_mock.assert();
-    augmentation_mock.assert_hits(0);
+    // Assert API Response for ingestion
+    let ingest_body: ApiResponse<Value> = ingest_response.json().await?;
+    assert_eq!(ingest_body.result["ingested_faqs"], 1);
 
-    // Assert Database State
+    // --- 4. Assert Database State ---
     let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
     let conn = db.connect()?;
     let mut stmt = conn
-        .prepare(
-            "SELECT question, answer FROM faq_items WHERE question = 'What is the magic word?'",
-        )
+        .prepare("SELECT content FROM documents WHERE source_url = ?")
         .await?;
-    let mut rows = stmt.query(()).await?;
-    let row = rows
-        .next()
-        .await?
-        .expect("Expected to find the ingested PDF FAQ");
-    let answer: String = row.get(1)?;
-    assert_eq!(answer, "AnyRAG");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_ingest_sheet_with_faq_true() -> Result<()> {
-    // Arrange
-    let app = TestApp::spawn().await?;
-    let token = generate_jwt("faq-sheet-user@example.com")?;
-    let csv_data = "Question,Answer\nWhat is AnyRAG?,A RAG framework.";
-    let sheet_download_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::GET).path_contains("/export");
-        then.status(200).body(csv_data);
-    });
-
-    // Act
-    let response = app
-        .client
-        .post(format!("{}/ingest/sheet?faq=true", app.address))
-        .bearer_auth(token)
-        .json(&json!({ "url": app.mock_server.url("/spreadsheets/d/mock_sheet_id/export") }))
-        .send()
-        .await?
-        .error_for_status()?;
-
-    // Assert API Response
-    let body: ApiResponse<Value> = response.json().await?;
-    assert_eq!(body.result["ingested_rows"], 1);
-    assert!(body.result["message"]
-        .as_str()
-        .unwrap()
-        .contains("Sheet FAQ ingestion successful"));
-    sheet_download_mock.assert();
-
-    // Assert Database State
-    let db = Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let conn = db.connect()?;
-    let mut stmt = conn
-        .prepare("SELECT question, answer FROM faq_items WHERE question = 'What is AnyRAG?'")
-        .await?;
-    let mut rows = stmt.query(()).await?;
-    let row = rows
-        .next()
-        .await?
-        .expect("Expected to find the ingested FAQ");
-    let answer: String = row.get(1)?;
-    assert_eq!(answer, "A RAG framework.");
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_ingest_sheet_with_faq_false() -> Result<()> {
-    // Arrange
-    let app = TestApp::spawn().await?;
-    let token = generate_jwt("generic-sheet-user@example.com")?;
-    let csv_data = "header1,header2\nvalue1,value2";
-    let sheet_download_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::GET).path_contains("/export");
-        then.status(200).body(csv_data);
-    });
-
-    // Act
-    let response = app
-        .client
-        .post(format!("{}/ingest/sheet?faq=false", app.address))
-        .bearer_auth(token)
-        .json(&json!({ "url": app.mock_server.url("/spreadsheets/d/mock_sheet_id/export") }))
-        .send()
-        .await?
-        .error_for_status()?;
-
-    // Assert API Response
-    let body: ApiResponse<Value> = response.json().await?;
-    let table_name = body.result["table_name"].as_str().unwrap();
-    assert_eq!(body.result["ingested_rows"], 1);
-    assert!(body.result["message"]
-        .as_str()
-        .unwrap()
-        .contains("Generic sheet ingested successfully"));
-    sheet_download_mock.assert();
-
-    // Assert Database State
-    let db = Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let conn = db.connect()?;
-
-    // Check that the generic table was created and populated
-    let mut stmt = conn
-        .prepare(&format!("SELECT header1, header2 FROM {table_name}"))
-        .await?;
-    let mut rows = stmt.query(()).await?;
-    let row = rows
-        .next()
-        .await?
-        .expect("Expected to find the ingested row");
-    let value1: String = row.get(0)?;
-    assert_eq!(value1, "value1");
-
-    // Check that no FAQs were created
-    let mut stmt_faq = conn.prepare("SELECT COUNT(*) FROM faq_items").await?;
-    let mut rows_faq = stmt_faq.query(()).await?;
-    let row_faq = rows_faq.next().await?.unwrap();
-    let count: i64 = match row_faq.get_value(0)? {
-        TursoValue::Integer(i) => i,
-        _ => panic!("Expected integer"),
+    let mut rows = stmt.query(params!["test.pdf"]).await?;
+    let row = rows.next().await?.expect("Document not found in DB");
+    let stored_content: String = match row.get_value(0)? {
+        TursoValue::Text(s) => s,
+        _ => panic!("Content was not a string"),
     };
-    assert_eq!(count, 0);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_ingest_pdf_with_faq_false() -> Result<()> {
-    // Arrange
-    let app = TestApp::spawn().await?;
-    let token = generate_jwt("pdf-light-user@example.com")?;
-    let pdf_data = generate_test_pdf("This is a light ingestion test.")?;
-
-    let refinement_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/chat/completions").body_contains("reformat it into a clean, well-structured Markdown");
-        then.status(200).json_body(json!({"choices": [{"message": {"role": "assistant", "content": "This is a light ingestion test."}}]}));
-    });
-
-    let distillation_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("extract two types of information");
-        then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": json!({
-            "faqs": [], "content_chunks": []
-        }).to_string()}}]}),
-        );
-    });
-
-    let augmentation_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("generate a high-quality, comprehensive question for EACH");
-        then.status(200)
-            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({"augmented_faqs": []}).to_string()}}]}));
-    });
-
-    let form = reqwest::multipart::Form::new().part(
-        "file",
-        reqwest::multipart::Part::bytes(pdf_data).file_name("light.pdf"),
+    assert_eq!(
+        stored_content.trim(),
+        expected_yaml.trim(),
+        "Stored content should be the structured YAML"
     );
 
-    // Act
-    let response = app
-        .client
-        .post(format!("{}/ingest/pdf?faq=false", app.address))
-        .bearer_auth(token)
-        .multipart(form)
+    // --- 5. Act: Embed the new document ---
+    app.client
+        .post(format!("{}/embed/new", app.address))
+        .json(&json!({ "limit": 10 }))
         .send()
         .await?
         .error_for_status()?;
 
-    // Assert API Response
-    let body: ApiResponse<Value> = response.json().await?;
-    assert_eq!(body.result["ingested_faqs"], 0);
+    // --- 6. Act: Perform a RAG search ---
+    let search_response = app
+        .client
+        .post(format!("{}/search/knowledge", app.address))
+        .bearer_auth(token)
+        .json(&json!({ "query": "What is AnyRAG?" }))
+        .send()
+        .await?
+        .error_for_status()?;
 
-    // Assert Mocks
+    // Assert final RAG response
+    let search_body: ApiResponse<Value> = search_response.json().await?;
+    assert_eq!(search_body.result["text"], final_rag_answer);
+
+    // --- 7. Assert All Mocks Were Called ---
     refinement_mock.assert();
-    distillation_mock.assert();
-    augmentation_mock.assert_hits(0);
-
-    // Assert Database State
-    let db = Builder::new_local(app.db_path.to_str().unwrap())
-        .build()
-        .await?;
-    let conn = db.connect()?;
-
-    // Document should be created
-    let mut stmt_doc = conn
-        .prepare("SELECT content FROM documents WHERE source_url = 'light.pdf'")
-        .await?;
-    let mut rows_doc = stmt_doc.query(()).await?;
-    assert!(
-        rows_doc.next().await?.is_some(),
-        "Document was not created for light ingestion"
-    );
-
-    // No FAQs should be created
-    let mut stmt_faq = conn.prepare("SELECT COUNT(*) FROM faq_items").await?;
-    let mut rows_faq = stmt_faq.query(()).await?;
-    let count: i64 = rows_faq.next().await?.unwrap().get(0)?;
-    assert_eq!(count, 0);
+    restructuring_mock.assert();
+    metadata_mock.assert();
+    embedding_mock.assert_hits(2); // Once for ingestion, once for search
+    query_analysis_mock.assert();
+    rag_synthesis_mock.assert();
 
     Ok(())
 }

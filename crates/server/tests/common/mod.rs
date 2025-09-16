@@ -70,17 +70,24 @@ impl TestApp {
 
         // --- Default Mocks ---
 
-        // Add a default mock for any chat completion requests that are not specifically handled.
+        // This is a generic, low-priority "catch-all" mock. Its purpose is to provide a
+        // default response for any AI API call that is NOT specifically handled by a mock
+        // in an individual test file.
         mock_server.mock(|when, then| {
             when.method(Method::POST)
                 .path("/v1/chat/completions")
                 .matches(|req| {
                     let body_str =
                         String::from_utf8_lossy(req.body.as_deref().unwrap_or_default());
-                    // This mock should ignore all specific, handled prompts.
-                    !body_str.contains("expert query analyst")
-                        && !body_str.contains("expert code search analyst") // For GitHub search
-                        && !body_str.contains("strict, factual AI")
+                    // This mock should IGNORE all specific, handled prompts. If a request
+                    // body contains any of these unique phrases, this mock will NOT match,
+                    // allowing a more specific mock in the test file to handle it.
+                    !body_str.contains("expert query analyst") // For standard hybrid search
+                        && !body_str.contains("expert code search analyst") // For GitHub example search
+                        && !body_str.contains("expert technical analyst") // For PDF refinement
+                        && !body_str.contains("expert document analyst and editor") // For PDF-to-YAML restructuring
+                        && !body_str.contains("extract Category, Keyphrases, and Entities") // For metadata extraction
+                        && !body_str.contains("strict, factual AI") // For RAG synthesis
                         && !body_str.contains("intelligent data assistant") // For Text-to-SQL
                         && !body_str.contains("strict data processor") // For SQL result formatting
                         && !body_str.contains("You are a helpful AI assistant") // For direct generation
@@ -257,22 +264,6 @@ impl<'a> TestDataBuilder<'a> {
         self.conn.execute(
             "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
             turso::params![doc_id, owner_id, final_source_url, title, content],
-        )
-        .await?;
-        Ok(self)
-    }
-
-    /// Adds an FAQ item to the database.
-    pub async fn add_faq(
-        &self,
-        doc_id: &str,
-        owner_id: &str,
-        question: &str,
-        answer: &str,
-    ) -> Result<&Self> {
-        self.conn.execute(
-            "INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)",
-            turso::params![doc_id, owner_id, question, answer],
         )
         .await?;
         Ok(self)
