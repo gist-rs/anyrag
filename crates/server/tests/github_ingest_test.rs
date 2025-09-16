@@ -10,12 +10,12 @@ use anyhow::Result;
 use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
 use github::ingest::storage::StorageManager;
-
+use httpmock::Method;
 use serde_json::{json, Value};
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
-use turso::{params, Builder};
+use turso::Builder;
 
 #[tokio::test]
 async fn test_github_ingestion_e2e_workflow() -> Result<()> {
@@ -108,9 +108,16 @@ version = "0.1.0-test"
     let user_identifier = "github-ingest-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
-    // --- 2. Act ---
+    // --- 2. Mock Services ---
+    // The ingestion process now automatically creates embeddings. We need to mock this.
+    let embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
+        then.status(200)
+            .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
+    });
+
+    // --- 3. Act ---
     // Send a request to the `/ingest/github` endpoint.
-    // The URL is the local path to our bare repository.
     let remote_url_str = remote_repo_path.to_str().unwrap();
     let response = app
         .client
@@ -124,7 +131,7 @@ version = "0.1.0-test"
         .await?
         .error_for_status()?;
 
-    // --- 3. Assert API Response ---
+    // --- 4. Assert API Response ---
     let body: ApiResponse<Value> = response.json().await?;
     assert_eq!(
         body.result["ingested_examples"], 1,
@@ -134,19 +141,15 @@ version = "0.1.0-test"
         .as_str()
         .unwrap()
         .contains("completed successfully"));
+    embedding_mock.assert();
 
-    // --- 4. Assert Database State ---
-    // The GitHub ingestion creates its own set of databases. We need to connect to the correct one.
+    // --- 5. Assert Database State ---
     let repo_name = StorageManager::url_to_repo_name(remote_url_str);
     let db_path = format!("db/github_ingest/{repo_name}.db");
-
-    // Make sure the directory exists before trying to connect.
     let db_dir = "db/github_ingest";
     fs::create_dir_all(db_dir)?;
-
     let db = Builder::new_local(&db_path).build().await?;
     let conn = db.connect()?;
-
     let mut stmt = conn
         .prepare("SELECT content, version, source_type FROM generated_examples")
         .await?;
@@ -177,14 +180,12 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
     let user_identifier = "get-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
-    // Clean up from previous test runs to ensure isolation.
     let db_dir = "db/github_ingest";
     if fs::metadata(db_dir).is_ok() {
         fs::remove_dir_all(db_dir)?;
     }
     fs::create_dir_all(db_dir)?;
 
-    // Create a mock git repository similar to the other test
     let remote_repo_dir = tempdir()?;
     let remote_repo_path = remote_repo_dir.path();
     Command::new("git")
@@ -197,8 +198,6 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
     let local_repo_path = local_repo_dir.path();
     Command::new("git")
         .arg("clone")
-        .arg("--no-local")
-        .arg("--depth=1")
         .arg(remote_repo_path.to_str().unwrap())
         .arg(".")
         .current_dir(local_repo_path)
@@ -209,50 +208,58 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
         "```rust\nfn hello() {}\n```",
     )?;
     Command::new("git")
-        .arg("-C")
-        .arg(local_repo_path)
-        .arg("config")
-        .arg("user.email")
-        .arg("test@example.com")
+        .args([
+            "-C",
+            local_repo_path.to_str().unwrap(),
+            "config",
+            "user.email",
+            "test@example.com",
+        ])
         .status()?;
     Command::new("git")
-        .arg("-C")
-        .arg(local_repo_path)
-        .arg("config")
-        .arg("user.name")
-        .arg("Test User")
+        .args([
+            "-C",
+            local_repo_path.to_str().unwrap(),
+            "config",
+            "user.name",
+            "Test User",
+        ])
         .status()?;
     Command::new("git")
-        .arg("-C")
-        .arg(local_repo_path)
-        .arg("add")
-        .arg(".")
+        .args(["-C", local_repo_path.to_str().unwrap(), "add", "."])
         .status()?;
     Command::new("git")
-        .arg("-C")
-        .arg(local_repo_path)
-        .arg("commit")
-        .arg("-m")
-        .arg("commit-1")
+        .args([
+            "-C",
+            local_repo_path.to_str().unwrap(),
+            "commit",
+            "-m",
+            "commit-1",
+        ])
         .status()?;
     Command::new("git")
-        .arg("-C")
-        .arg(local_repo_path)
-        .arg("tag")
-        .arg("v0.1.0")
+        .args(["-C", local_repo_path.to_str().unwrap(), "tag", "v0.1.0"])
         .status()?;
     Command::new("git")
-        .arg("-C")
-        .arg(local_repo_path)
-        .arg("push")
-        .arg("--tags")
-        .arg("origin")
-        .arg("master")
+        .args([
+            "-C",
+            local_repo_path.to_str().unwrap(),
+            "push",
+            "--tags",
+            "origin",
+            "master",
+        ])
         .status()?;
 
     let remote_url_str = remote_repo_path.to_str().unwrap();
 
-    // --- 2. Act: Ingest the repository ---
+    // --- 2. Mock and Ingest ---
+    let embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
+        then.status(200)
+            .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
+    });
+
     app.client
         .post(format!("{}/ingest/github", app.address))
         .bearer_auth(token)
@@ -263,6 +270,7 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
         .send()
         .await?
         .error_for_status()?;
+    embedding_mock.assert();
 
     // --- 3. Act: Get the examples ---
     let repo_name = StorageManager::url_to_repo_name(remote_url_str);
@@ -276,7 +284,6 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
     // --- 4. Assert ---
     let body: ApiResponse<Value> = response.json().await?;
     let content = body.result["content"].as_str().unwrap();
-
     assert!(content.contains("fn hello() {}"));
     assert!(content.contains("**Source:** `README.md` (`readme`)"));
 
@@ -290,14 +297,12 @@ async fn test_search_examples_e2e() -> Result<()> {
     let user_identifier = "search-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
-    // Clean up from previous runs to ensure isolation.
     let db_dir = "db/github_ingest";
     if fs::metadata(db_dir).is_ok() {
         fs::remove_dir_all(db_dir)?;
     }
     fs::create_dir_all(db_dir)?;
 
-    // Create a mock git repository.
     let remote_repo_dir = tempdir()?;
     let remote_repo_path = remote_repo_dir.path();
     Command::new("git")
@@ -307,13 +312,7 @@ async fn test_search_examples_e2e() -> Result<()> {
     let local_repo_dir = tempdir()?;
     let local_repo_path = local_repo_dir.path();
     Command::new("git")
-        .args([
-            "clone",
-            "--no-local",
-            "--depth=1",
-            remote_repo_path.to_str().unwrap(),
-            ".",
-        ])
+        .args(["clone", remote_repo_path.to_str().unwrap(), "."])
         .current_dir(local_repo_path)
         .status()?;
     fs::write(
@@ -367,7 +366,13 @@ async fn test_search_examples_e2e() -> Result<()> {
     let remote_url_str = remote_repo_path.to_str().unwrap();
     let repo_name = StorageManager::url_to_repo_name(remote_url_str);
 
-    // Ingest the repository.
+    // --- 2. Mock, Ingest, and Search ---
+    let embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
+        then.status(200)
+            .json_body(json!({ "data": [{ "embedding": [1.0, 0.0, 0.0] }] }));
+    });
+
     app.client
         .post(format!("{}/ingest/github", app.address))
         .bearer_auth(token.clone())
@@ -376,27 +381,6 @@ async fn test_search_examples_e2e() -> Result<()> {
         .await?
         .error_for_status()?;
 
-    // Manually add an embedding for the ingested example.
-    let db_path = format!("db/github_ingest/{repo_name}.db");
-    let db = Builder::new_local(&db_path).build().await?;
-    let conn = db.connect()?;
-    let example_id: i64 = conn
-        .query("SELECT id FROM generated_examples LIMIT 1", ())
-        .await?
-        .next()
-        .await?
-        .unwrap()
-        .get(0)?;
-    let vector = [1.0, 0.0, 0.0]; // "connect" vector
-    let vector_bytes: &[u8] =
-        unsafe { std::slice::from_raw_parts(vector.as_ptr() as *const u8, vector.len() * 4) };
-    conn.execute(
-        "INSERT INTO example_embeddings (example_id, model_name, embedding) VALUES (?, ?, ?)",
-        params![example_id, "mock-model", vector_bytes],
-    )
-    .await?;
-
-    // --- 2. Act ---
     let response = app
         .client
         .post(format!("{}/search/examples", app.address))
@@ -410,7 +394,7 @@ async fn test_search_examples_e2e() -> Result<()> {
         .error_for_status()?;
 
     // --- 3. Assert ---
-
+    embedding_mock.assert_hits(2); // 1 for ingest, 1 for search
     let body: ApiResponse<Value> = response.json().await?;
     let results = body.result["results"].as_array().unwrap();
     assert_eq!(results.len(), 1, "Expected one search result.");

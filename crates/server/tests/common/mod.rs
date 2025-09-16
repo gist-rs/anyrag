@@ -91,13 +91,16 @@ impl TestApp {
 
         let config_dir = tempdir()?;
         let config_path = config_dir.path().join("config.yml");
-        println!("[TestApp::spawn] CONFIGURING with DB path: {db_path:?}");
+
+        // This configuration is crucial. It sets up both `gemini_default` and `local_default`
+        // providers to point to the mock server's chat completions endpoint. This ensures
+        // that regardless of which provider a task is configured to use, it will hit our mock.
         let config_content = format!(
             r#"
 port: 0
-db_url: "{}"
+db_url: "{db_path}"
 embedding:
-  api_url: "{}"
+  api_url: "{embedding_url}"
   model_name: "mock-embedding-model"
 temporal_reasoning:
   keywords: ["newest", "latest", "most recent"]
@@ -105,14 +108,20 @@ temporal_reasoning:
 providers:
   gemini_default:
     provider: "local"
-    api_url: "{}"
+    api_url: "{chat_completions_url}"
     api_key: null
-    model_name: "mock-chat-model"
+    model_name: "mock-gemini-model"
+  local_default:
+    provider: "local"
+    api_url: "{chat_completions_url}"
+    api_key: null
+    model_name: "mock-local-model"
 "#,
-            db_path.to_str().unwrap(),
-            mock_server.url("/v1/embeddings"),
-            mock_server.url("/v1/chat/completions")
+            db_path = db_path.to_str().unwrap(),
+            embedding_url = mock_server.url("/v1/embeddings"),
+            chat_completions_url = mock_server.url("/v1/chat/completions")
         );
+
         let mut file = File::create(&config_path)?;
         file.write_all(config_content.as_bytes())?;
 
