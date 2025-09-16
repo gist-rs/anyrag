@@ -185,7 +185,7 @@ pub async fn run_ingestion_pipeline(
 
         // 3. Generate a unique chunk_id for the new document.
         let chunk_id = Uuid::new_v4().to_string();
-        let source_url_with_chunk = format!("{}#section_{}", url, i);
+        let source_url_with_chunk = format!("{url}#section_{i}");
 
         // 4. INSERT the yaml_chunk into the documents table.
         conn.execute(
@@ -440,7 +440,7 @@ pub async fn extract_and_store_metadata(
     metadata_items.append(&mut keyphrases);
     metadata_items.append(&mut entities);
 
-    let metadata_json = serde_json::to_string_pretty(&metadata_items)
+    let _metadata_json = serde_json::to_string_pretty(&metadata_items)
         .unwrap_or_else(|_| "Failed to serialize metadata".to_string());
     // info!("Extracted metadata for document {document_id}: {metadata_json}");
 
