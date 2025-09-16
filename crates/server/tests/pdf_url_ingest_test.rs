@@ -179,10 +179,11 @@ sections:
         .build()
         .await?;
     let conn = db.connect()?;
-    // The source_url should now be the URL's filename, not the full URL.
     let mut stmt = conn
         .prepare("SELECT content FROM documents WHERE source_url = ?")
         .await?;
+
+    // The handler logic takes the last part of the URL path as the source identifier.
     let pdf_filename = "test.pdf";
 
     let mut rows = stmt.query(params![pdf_filename]).await?;
