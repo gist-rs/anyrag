@@ -11,24 +11,31 @@ use anyrag::{
     ingest::knowledge::{
         export_for_finetuning, run_ingestion_pipeline, IngestionPrompts, WebIngestStrategy,
     },
-    providers::ai::local::LocalAiProvider,
+    providers::{ai::local::LocalAiProvider, db::sqlite::SqliteProvider},
 };
-use common::TestApp;
-use httpmock::Method;
+use httpmock::{Method, MockServer};
 use serde_json::{json, Value};
+use tempfile::NamedTempFile;
 use tracing::info;
-use turso::{Builder, Value as TursoValue};
+use turso::Value as TursoValue;
 
 #[tokio::test]
 async fn test_new_knowledge_ingestion_and_export_pipeline() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
-    let db_path = app.db_path.clone();
-    let page_url = app.mock_server.url("/test-page");
+    let mock_server = MockServer::start();
+    let db_file = NamedTempFile::new()?;
+    let db_path = db_file.path();
+
+    // Initialize the provider and ensure the schema exists.
+    let sqlite_provider = SqliteProvider::new(db_path.to_str().unwrap()).await?;
+    sqlite_provider.initialize_schema().await?;
+    let db = &sqlite_provider.db;
+
+    let page_url = mock_server.url("/test-page");
 
     // A. Mock the source web page content.
     let html_content = "<html><head><title>Test Page</title></head><body><h1>Main Title</h1><p>Q: What is this?</p><p>A: It is a test.</p></body></html>";
-    let source_mock = app.mock_server.mock(|when, then| {
+    let source_mock = mock_server.mock(|when, then| {
         when.method(Method::GET).path("/test-page");
         then.status(200).body(html_content);
     });
@@ -44,7 +51,7 @@ sections:
         answer: "It is a test."
 "#;
     // This mock is for the restructuring call
-    let llm_restructure_mock = app.mock_server.mock(|when, then| {
+    let llm_restructure_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
             // The key part of the converted markdown to expect.
@@ -55,8 +62,8 @@ sections:
 
     // C. Mock the Metadata Extraction call (it will be called after restructuring)
     let metadata_response =
-        json!({"metadata": [{"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "testing"}]});
-    let llm_metadata_mock = app.mock_server.mock(|when, then| {
+        json!([{"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "testing"}]);
+    let llm_metadata_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
             // Match based on the YAML content being sent for metadata extraction
@@ -66,14 +73,7 @@ sections:
     });
 
     // D. Setup the AI provider to point to our mock server.
-    let ai_provider =
-        LocalAiProvider::new(app.mock_server.url("/v1/chat/completions"), None, None)?;
-    let db = Builder::new_local(db_path.to_str().unwrap())
-        .build()
-        .await?;
-    db.connect()?
-        .execute("PRAGMA journal_mode=WAL;", ())
-        .await?;
+    let ai_provider = LocalAiProvider::new(mock_server.url("/v1/chat/completions"), None, None)?;
 
     // --- 2. Act ---
     // Run the entire ingestion pipeline.
@@ -83,7 +83,7 @@ sections:
     };
 
     let ingested_count = run_ingestion_pipeline(
-        &db,
+        db,
         &ai_provider,
         &page_url,
         None, // No owner for this test
@@ -128,7 +128,7 @@ sections:
     info!("-> Database state verified successfully. Stored content is correct.");
 
     // --- 4. Act & Assert: Export for Fine-Tuning ---
-    let export_body = export_for_finetuning(&db).await?;
+    let export_body = export_for_finetuning(db).await?;
     let lines: Vec<&str> = export_body.trim().lines().collect();
     assert_eq!(lines.len(), 1, "Expected one line in the JSONL output.");
 
