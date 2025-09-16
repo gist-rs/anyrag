@@ -141,7 +141,8 @@ dependencies = [
  "futures",
  "gcloud-sdk",
  "gcp-bigquery-client",
- "htmd",
+ "html",
+ "html2md",
  "indradb-lib",
  "md5 0.8.0",
  "pdf",
@@ -2169,6 +2170,7 @@ version = "0.1.0"
 dependencies = [
  "html2md",
  "md5 0.7.0",
+ "regex",
  "reqwest",
  "tokio",
 ]

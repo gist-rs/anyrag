@@ -8,10 +8,10 @@
 //! 5.  **Fine-Tuning Export**: Exports the knowledge base into a format for model fine-tuning.
 
 use crate::{errors::PromptError, providers::ai::AiProvider};
+use html::{self, clean_markdown_content};
+use html2md;
 use md5;
-use regex::Regex;
 
-use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -48,8 +48,7 @@ pub enum KnowledgeError {
     TypeConversion,
     #[error("An internal error occurred: {0}")]
     Internal(#[from] anyhow::Error),
-    #[error("HTML to Markdown conversion failed: {0}")]
-    HtmlConversion(String),
+
     #[error("Content appears to be contaminated with forbidden HTML tags after cleaning: {0}")]
     ContaminatedContent(String),
 }
@@ -229,79 +228,11 @@ pub async fn fetch_web_content(
             }
             let html_raw = response.text().await?;
 
-            // --- Aggressive, List-Based HTML Cleaning & Validation ---
-            let forbidden_tags = ["script", "style", "meta", "link"];
-            let mut html = html_raw;
+            // Use the new html crate to clean the content.
+            let html = html::clean_html(&html_raw, None);
 
-            for tag in forbidden_tags {
-                // This regex handles both block tags (<script>...</script>) and self-closing/simple tags (<meta>, <link>).
-                // It's applied iteratively for simplicity and robustness.
-                let re =
-                    Regex::new(&format!(r"(?is)<{tag}[^>]*>.*?</{tag}>|<{tag}[^>]*>")).unwrap();
-                html = re.replace_all(&html, "").to_string();
-            }
-
-            // After all cleaning, check that no forbidden tags remain.
-            for tag in forbidden_tags {
-                if html.contains(&format!("<{tag}")) {
-                    return Err(KnowledgeError::ContaminatedContent(format!(
-                        "Detected forbidden '<{tag}>' tag in content after cleaning process."
-                    )));
-                }
-            }
-
-            // --- Robust HTML Parsing with `scraper` ---
-            // This logic specifically finds text nodes starting with "Q :" and "A :"
-            // and reconstructs them into a clean Markdown format, ignoring all other
-            // text nodes like navigation links, headers, etc.
-            let document = Html::parse_document(&html);
-            let body_selector = Selector::parse("body").unwrap();
-
-            let mut content_builder = String::new();
-            if let Some(body) = document.select(&body_selector).next() {
-                let mut current_qa = String::new();
-                for text_node in body.text() {
-                    let text = text_node.trim();
-                    if text.is_empty() {
-                        continue;
-                    }
-
-                    // The "- " prefix is inconsistent, so we trim it before checking.
-                    let clean_text = text.strip_prefix('-').unwrap_or(text).trim();
-
-                    if clean_text.starts_with("Q :") {
-                        if !current_qa.is_empty() {
-                            content_builder.push_str(current_qa.trim());
-                            content_builder.push_str("\n\n");
-                        }
-                        // Start a new Q&A block, using the cleaned text
-                        current_qa = format!("## {clean_text}\n");
-                    } else if clean_text.starts_with("A :") {
-                        // Append the answer to the current Q&A
-                        current_qa.push_str(clean_text);
-                    } else if !current_qa.is_empty() && !current_qa.ends_with(clean_text) {
-                        // This text belongs to the previous line (likely part of an answer)
-                        current_qa.push(' ');
-                        current_qa.push_str(clean_text);
-                    }
-                }
-                // Flush the last Q&A block
-                if !current_qa.is_empty() {
-                    content_builder.push_str(current_qa.trim());
-                    content_builder.push_str("\n\n");
-                }
-            }
-
-            if content_builder.is_empty() {
-                warn!(
-                    "Scraper could not find any Q&A content, falling back to full text conversion."
-                );
-                return htmd::HtmlToMarkdown::new()
-                    .convert(&html)
-                    .map_err(|e| KnowledgeError::HtmlConversion(e.to_string()));
-            }
-
-            Ok(content_builder)
+            // Convert the cleaned HTML to Markdown.
+            Ok(clean_markdown_content(&html2md::parse_html(&html)))
         }
         WebIngestStrategy::Jina { api_key } => {
             let fetch_url = format!("https://r.jina.ai/{url}");
@@ -326,7 +257,8 @@ pub async fn fetch_web_content(
                 let body = response.text().await.unwrap_or_default();
                 return Err(KnowledgeError::JinaReaderFailed { status, body });
             }
-            response.text().await.map_err(KnowledgeError::Fetch)
+            let markdown = response.text().await.map_err(KnowledgeError::Fetch)?;
+            Ok(html::clean_markdown_content(&markdown))
         }
     }
 }

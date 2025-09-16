@@ -18,7 +18,7 @@ async fn test_fetch_web_content_raw_html() {
     let server = MockServer::start().await;
     let html_content =
         "<html><head><title>Test</title></head><body><h1>Hello</h1><p>This is a test.</p></body></html>";
-    let expected_markdown = "Test\n\n# Hello\n\nThis is a test.";
+    let expected_markdown = "Test\n\nHello\n==========\n\nThis is a test.";
 
     Mock::given(method("GET"))
         .and(path("/test_html"))
@@ -44,7 +44,7 @@ async fn test_fetch_web_content_raw_html() {
         result.err()
     );
     let markdown = result.unwrap();
-    assert_eq!(markdown.trim(), expected_markdown);
+    assert_eq!(markdown.trim(), expected_markdown.trim());
 }
 
 #[tokio::test]
