@@ -96,7 +96,14 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
     let user_identifier = "github-search-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
-    // A. Create two distinct mock repositories.
+    // A. Mock the embedding API for the ingestion process. It will be called for each repo.
+    let mut ingest_embedding_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST).path("/v1/embeddings");
+        then.status(200)
+            .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3, 0.4] }] }));
+    });
+
+    // B. Create two distinct mock repositories.
     let repo_a_files = [(
         "src/db.rs",
         "/// ```rust\n/// let conn = connect_to_database();\n/// ```\nfn db_logic() {}",
@@ -110,7 +117,7 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
     let repo_b_url = repo_b_dir.path().to_str().unwrap();
     let repo_b_name = StorageManager::url_to_repo_name(repo_b_url);
 
-    // B. Ingest both repositories.
+    // C. Ingest both repositories.
     for (url, version) in [(repo_a_url, "v1.0.0"), (repo_b_url, "v1.2.0")] {
         app.client
             .post(format!("{}/ingest/github", app.address))
@@ -120,30 +127,17 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
             .await?
             .error_for_status()?;
     }
+    // Assert that ingestion called the embedding service twice.
+    ingest_embedding_mock.assert_hits(2);
+    // The mock is no longer needed for the ingestion part.
+    ingest_embedding_mock.delete();
 
-    // C. Manually add embeddings for the ingested examples.
+    // D. Manually update embeddings for the ingested examples to have known vectors.
     let db_a_path = format!("db/github_ingest/{repo_a_name}.db");
     let db_b_path = format!("db/github_ingest/{repo_b_name}.db");
     let db_a = Builder::new_local(&db_a_path).build().await?;
     let db_b = Builder::new_local(&db_b_path).build().await?;
-
-    let conn_a = db_a.connect()?;
-    let conn_b = db_b.connect()?;
-
-    let example_a_id: i64 = conn_a
-        .query("SELECT id FROM generated_examples LIMIT 1", ())
-        .await?
-        .next()
-        .await?
-        .unwrap()
-        .get(0)?;
-    let example_b_id: i64 = conn_b
-        .query("SELECT id FROM generated_examples LIMIT 1", ())
-        .await?
-        .next()
-        .await?
-        .unwrap()
-        .get(0)?;
+    let (conn_a, conn_b) = (db_a.connect()?, db_b.connect()?);
 
     let vector_a = [1.0, 0.0, 0.0]; // "database" vector
     let vector_b = [0.0, 1.0, 0.0]; // "http" vector
@@ -154,23 +148,39 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
 
     conn_a
         .execute(
-            "INSERT INTO example_embeddings (example_id, model_name, embedding) VALUES (?, ?, ?)",
-            params![example_a_id, "mock-model", vector_a_bytes],
+            "UPDATE example_embeddings SET embedding = ?",
+            params![vector_a_bytes],
         )
         .await?;
     conn_b
         .execute(
-            "INSERT INTO example_embeddings (example_id, model_name, embedding) VALUES (?, ?, ?)",
-            params![example_b_id, "mock-model", vector_b_bytes],
+            "UPDATE example_embeddings SET embedding = ?",
+            params![vector_b_bytes],
         )
         .await?;
 
-    // D. Mock the embedding API for the search query.
-    let query_vector = vec![0.99, 0.01, 0.0]; // Vector very similar to "database"
-    let embedding_mock = app.mock_server.mock(|when, then| {
+    // E. Mock the embedding API for the search query.
+    let query_vector = vec![0.99, 0.01, 0.0];
+    let search_embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": query_vector }] }));
+    });
+
+    // F. Mock query analysis for hybrid search.
+    // The handler uses the "query_analysis" task from config.yml, but the underlying
+    // github::search_examples function uses its own specific system prompt. We must match that one.
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            // This substring is unique to the GITHUB_EXAMPLE_SEARCH_ANALYSIS_SYSTEM_PROMPT
+            .body_contains("expert code search analyst");
+        then.status(200).json_body(json!({
+            "choices": [{"message": {"role": "assistant", "content": json!({
+                "entities": ["database"],
+                "keyphrases": ["connect"]
+            }).to_string()}}]
+        }));
     });
 
     // --- 2. Act ---
@@ -190,7 +200,8 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
         .error_for_status()?;
 
     // --- 3. Assert ---
-    embedding_mock.assert();
+    search_embedding_mock.assert();
+    query_analysis_mock.assert();
     let body: ApiResponse<Value> = response.json().await?;
     let results = body.result["results"]
         .as_array()

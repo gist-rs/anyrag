@@ -70,19 +70,20 @@ impl TestApp {
 
         // --- Default Mocks ---
 
-        // Add a default mock for any chat completion requests that are NOT for query analysis.
+        // Add a default mock for any chat completion requests that are not specifically handled.
         mock_server.mock(|when, then| {
             when.method(Method::POST)
                 .path("/v1/chat/completions")
                 .matches(|req| {
                     let body_str =
                         String::from_utf8_lossy(req.body.as_deref().unwrap_or_default());
+                    // This mock should ignore all specific, handled prompts.
                     !body_str.contains("expert query analyst")
+                        && !body_str.contains("expert code search analyst") // For GitHub search
                         && !body_str.contains("strict, factual AI")
                         && !body_str.contains("intelligent data assistant") // For Text-to-SQL
                         && !body_str.contains("strict data processor") // For SQL result formatting
-                        // THIS IS THE FIX: Exclude the prompt used for final generation in the agent test.
-                        && !body_str.contains("helpful AI assistant")
+                        && !body_str.contains("You are a helpful AI assistant") // For direct generation
                 });
             then.status(200)
                 .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "Default mock response."}}]}));
