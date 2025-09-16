@@ -1,94 +1,133 @@
-//! # PDF URL Ingestion and RAG E2E Test
+//! # PDF URL Ingestion and RAG E2E Test (YAML Pipeline)
 //!
-//! This test verifies the entire `POST /ingest/pdf` workflow using a URL:
-//! 1. A mock server is set up to serve a PDF, including a redirect.
-//! 2. The server receives the URL, downloads the PDF, extracts the messy text, and sends it to a mock LLM for refinement.
-//! 3. The server takes the refined Markdown and sends it to mock LLMs for knowledge distillation and metadata extraction.
-//! 4. The server stores the refined markdown, Q&A pairs, and metadata.
-//! 5. The new document is embedded via a mock embedding API.
-//! 6. A final RAG query (`/search/knowledge`) is made, which uses a mock LLM to synthesize an answer from the retrieved document.
-//! 7. The final answer is verified to prove the entire pipeline worked.
+//! This test verifies the entire `POST /ingest/pdf` workflow using a URL,
+//! based on the new, structured YAML pipeline. It ensures that:
+//! 1. A mock server serves a PDF, which is downloaded by the app.
+//! 2. The PDF's raw text is extracted, refined, and then restructured into YAML via mock LLM calls.
+//! 3. The final YAML content is stored as a single document in the database.
+//! 4. The new document is embedded via a mock embedding API.
+//! 5. A final RAG query (`/search/knowledge`) correctly chunks the YAML,
+//!    retrieves the relevant context, and synthesizes the correct answer.
 
 mod common;
 
 use anyhow::Result;
-use anyrag_server::types::ApiResponse;
+use anyrag_server::{config, state::build_app_state, types::ApiResponse};
 use common::{generate_jwt, pdf_helper::generate_test_pdf, TestApp};
-use httpmock::Method;
+use httpmock::{Method, MockServer};
 use serde_json::{json, Value};
+use std::fs::File;
+use std::io::Write;
+use tempfile::{tempdir, NamedTempFile};
+use turso::{params, Builder, Value as TursoValue};
 
 #[tokio::test]
-async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
+async fn test_pdf_url_ingestion_and_rag_workflow_yaml() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let mock_server = MockServer::start();
+    let db_file = NamedTempFile::new()?;
+    let db_path = db_file.path();
 
-    // Define the magic sentence and the expected transformations
-    let messy_sentence = "The URL PDF test number is 42.42.";
-    let refined_markdown = "- The URL PDF test number is 42.42.";
-    let distilled_question = "What is the URL PDF test number?";
-    let distilled_answer = "The number is 42.42.";
-    let final_rag_answer = "Based on the document, the test number from the URL PDF is 42.42.";
+    let config_dir = tempdir()?;
+    let config_path = config_dir.path().join("config.yml");
 
-    // --- 2. Generate Test PDF ---
+    let config_content = format!(
+        r#"
+port: 0
+db_url: "{}"
+embedding:
+  api_url: "{}"
+  model_name: "mock-embedding-model"
+providers:
+  local_default:
+    provider: "local"
+    api_url: "{}"
+    api_key: null
+    model_name: "mock-chat-model"
+tasks:
+  knowledge_distillation:
+    provider: "local_default"
+  knowledge_metadata_extraction:
+    provider: "local_default"
+  query_analysis:
+    provider: "local_default"
+  rag_synthesis:
+    provider: "local_default"
+"#,
+        db_path.to_str().unwrap(),
+        mock_server.url("/v1/embeddings"),
+        mock_server.url("/v1/chat/completions")
+    );
+
+    let mut file = File::create(&config_path)?;
+    file.write_all(config_content.as_bytes())?;
+
+    let config = config::get_config(Some(config_path.to_str().unwrap()))?;
+    let app_state = build_app_state(config).await?;
+    let app = TestApp::spawn_with_state(app_state, mock_server).await?;
+
+    let messy_sentence = "The magic number from the URL is 3.14159.";
+    let refined_markdown = "- The magic number from the URL is 3.14159.";
+    let expected_yaml = r#"
+sections:
+  - title: "General Information"
+    faqs:
+      - question: "What is the magic number?"
+        answer: "The magic number from the URL is 3.14159."
+"#;
+    let final_rag_answer = "The magic number from the URL is 3.14159.";
+
     let pdf_data = generate_test_pdf(messy_sentence)?;
 
-    // --- 3. Mock External Services ---
-    // A. Mock the PDF Hosting and Redirect
-    let redirect_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::GET).path("/redirect-to-pdf");
-        then.status(302).header("Location", "/actual-document.pdf");
-    });
+    // --- 2. Mock External Services ---
+    // A. Mock the server that will provide the PDF file to the application.
     let pdf_serve_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::GET).path("/actual-document.pdf");
+        when.method(Method::GET).path("/test.pdf");
         then.status(200)
             .header("Content-Type", "application/pdf")
             .body(&pdf_data);
     });
 
-    // B. Mock LLM Refinement call
+    // B. Mock LLM Refinement (raw text -> clean markdown). This was missing.
     let refinement_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("expert technical analyst");
+            .body_contains("You are an expert technical analyst"); // Matches PDF_REFINEMENT_SYSTEM_PROMPT
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": refined_markdown}}]}),
         );
     });
 
-    // C. Mock Knowledge Distillation call
-    let distillation_mock = app.mock_server.mock(|when, then| {
+    // C. Mock LLM Restructuring (clean markdown -> structured YAML)
+    let restructuring_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("data extraction agent");
-        then.status(200)
-            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": json!({
-                "faqs": [{ "question": distilled_question, "answer": distilled_answer, "is_explicit": false }],
-                "content_chunks": []
-            }).to_string()}}]}));
-    });
-
-    // D. Mock Metadata Extraction call
-    let metadata_extraction_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("You are a document analyst"); // Unique to the metadata prompt
+            .body_contains("expert document analyst and editor"); // Matches KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT
         then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": json!([{
-                "type": "KEYPHRASE",
-                "subtype": "CONCEPT",
-                "value": "test number"
-            }]).to_string()}}]}),
+            json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
         );
     });
 
-    // E. Mock Embedding API call
+    // D. Mock Metadata Extraction (structured YAML -> metadata JSON)
+    let metadata_extraction_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/v1/chat/completions")
+            .body_contains("extract Category, Keyphrases, and Entities");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": json!([
+                {"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "magic number"}
+            ]).to_string()}}]}),
+        );
+    });
+
+    // E. Mock Embedding API
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
-            .json_body(json!({ "data": [{ "embedding": [0.4, 0.5, 0.6] }] }));
+            .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
 
-    // F. Mock the Query Analysis call for the RAG search.
+    // F. Mock RAG Query Analysis
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
@@ -96,7 +135,7 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
                 "entities": [],
-                "keyphrases": ["test number"]
+                "keyphrases": ["magic number"]
             }).to_string()}}]}),
         );
     });
@@ -105,24 +144,27 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("strict, factual AI");
+            .body_contains("strict, factual AI")
+            .body_contains("## General Information");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
     });
 
-    // --- 4. Execute Ingestion from URL ---
-    let user_identifier = "pdf-url-user@example.com";
+    // --- 3. Execute Ingestion ---
+    let user_identifier = "pdf-url-ingest-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
-    let form = reqwest::multipart::Form::new().part(
-        "url",
-        reqwest::multipart::Part::text(app.mock_server.url("/redirect-to-pdf")),
-    );
+    let form = reqwest::multipart::Form::new()
+        .part(
+            "url",
+            reqwest::multipart::Part::text(app.mock_server.url("/test.pdf")),
+        )
+        .part("extractor", reqwest::multipart::Part::text("local"));
 
     let ingest_res = app
         .client
-        .post(format!("{}/ingest/pdf?faq=true", app.address))
+        .post(format!("{}/ingest/pdf", app.address))
         .bearer_auth(token.clone())
         .multipart(form)
         .send()
@@ -132,6 +174,32 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     let ingest_body: ApiResponse<Value> = ingest_res.json().await?;
     assert_eq!(ingest_body.result["ingested_faqs"], 1);
 
+    // --- 4. Verify Database State ---
+    let db = Builder::new_local(app.db_path.to_str().unwrap())
+        .build()
+        .await?;
+    let conn = db.connect()?;
+    // The source_url should now be the URL's filename, not the full URL.
+    let mut stmt = conn
+        .prepare("SELECT content FROM documents WHERE source_url = ?")
+        .await?;
+    let pdf_filename = "test.pdf";
+
+    let mut rows = stmt.query(params![pdf_filename]).await?;
+    let row = rows
+        .next()
+        .await?
+        .expect("Expected to find the ingested PDF document");
+    let content: String = match row.get_value(0)? {
+        TursoValue::Text(s) => s,
+        _ => panic!("Content was not a string"),
+    };
+    assert_eq!(
+        content.trim(),
+        expected_yaml.trim(),
+        "The stored content should be the structured YAML."
+    );
+
     // --- 5. Execute Embedding ---
     app.client
         .post(format!("{}/embed/new", app.address))
@@ -140,13 +208,12 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
         .await?
         .error_for_status()?;
 
-    // --- 6. Execute RAG Search and Verify ---
-
+    // --- 6. Execute RAG Search ---
     let search_res = app
         .client
         .post(format!("{}/search/knowledge", app.address))
         .bearer_auth(token)
-        .json(&json!({ "query": "what is the test number?" }))
+        .json(&json!({ "query": "what is the magic number?" }))
         .send()
         .await?
         .error_for_status()?;
@@ -155,13 +222,12 @@ async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
     assert_eq!(search_body.result["text"], final_rag_answer);
 
     // --- 7. Assert Mock Calls ---
-    redirect_mock.assert();
     pdf_serve_mock.assert();
     refinement_mock.assert();
-    distillation_mock.assert();
+    restructuring_mock.assert();
     metadata_extraction_mock.assert();
     query_analysis_mock.assert();
-    embedding_mock.assert_hits(2); // Once for new FAQ, once for search query
+    embedding_mock.assert_hits(2); // Once for new doc, once for search query
     rag_synthesis_mock.assert();
 
     Ok(())
