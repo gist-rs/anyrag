@@ -12,16 +12,18 @@ use anyrag_server::{
     state::build_app_state,
 };
 use common::TestApp;
-use httpmock::Method;
+use httpmock::{Method, MockServer};
 use serde_json::json;
 use std::fs::File;
 use std::io::Write;
-use tempfile::tempdir;
+use tempfile::{tempdir, NamedTempFile};
 
 #[tokio::test]
 async fn test_yaml_overrides_default_prompts() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let mock_server = MockServer::start();
+    let db_file = NamedTempFile::new()?;
+    let db_path = db_file.path();
 
     // --- 2. Create a custom config.yml with an override ---
     let temp_dir = tempdir()?;
@@ -51,9 +53,9 @@ tasks:
     system_prompt: "{}"
     user_prompt: "{}"
 "#,
-        app.db_path.to_str().unwrap(),
-        app.mock_server.url("/v1/embeddings"),
-        app.mock_server.url("/v1/chat/completions"),
+        db_path.to_str().unwrap(),
+        mock_server.url("/v1/embeddings"),
+        mock_server.url("/v1/chat/completions"),
         override_system_prompt,
         override_user_prompt
     );
@@ -66,7 +68,7 @@ tasks:
     let app_state_with_override = build_app_state(config).await?;
 
     // --- 4. Mock the AI response ---
-    let rag_synthesis_mock = app.mock_server.mock(|when, then| {
+    let rag_synthesis_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("You are a pirate AI.")
