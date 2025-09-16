@@ -115,7 +115,7 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
 
     let mut rrf_scores: HashMap<String, f64> = HashMap::new();
     let k = 60.0; // Standard RRF constant
-    let metadata_boost = 1.5; // Give a boost to the first result set (metadata)
+    let metadata_boost = 2.5; // Give a boost to the first result set (metadata)
 
     let mut all_unique_results: HashMap<String, SearchResult> = HashMap::new();
 

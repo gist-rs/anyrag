@@ -135,7 +135,7 @@ async fn main() -> Result<()> {
     while let Some((doc_id, result)) = stream.next().await {
         match result {
             Ok(_) => {
-                info!("Successfully extracted metadata for doc_id: {}", doc_id);
+                // info!("Successfully extracted metadata for doc_id: {}", doc_id);
                 successful_count += 1;
             }
             Err(e) => {

@@ -9,6 +9,7 @@
 
 use crate::{errors::PromptError, providers::ai::AiProvider};
 use md5;
+use regex::Regex;
 
 use scraper::{Html, Selector};
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,8 @@ pub enum KnowledgeError {
     Internal(#[from] anyhow::Error),
     #[error("HTML to Markdown conversion failed: {0}")]
     HtmlConversion(String),
+    #[error("Content appears to be contaminated with forbidden HTML tags after cleaning: {0}")]
+    ContaminatedContent(String),
 }
 
 // --- Data Structures ---
@@ -138,28 +141,39 @@ pub async fn run_ingestion_pipeline(
 
     let conn = db.connect()?;
 
-    // Run FAQ generation and metadata extraction concurrently.
-    let (faq_result, metadata_result) = tokio::join!(
-        distill_and_augment(
-            ai_provider,
-            &ingested_document,
-            prompts.extraction_system_prompt,
-            prompts.extraction_user_prompt_template,
-            prompts.augmentation_system_prompt,
-        ),
-        extract_and_store_metadata(
-            &conn,
-            ai_provider,
-            &document_id,
-            owner_id,
-            &ingested_document.content,
-            prompts.metadata_extraction_system_prompt,
-        )
-    );
+    // --- Sequential Execution for better metadata ---
 
-    // Handle results
-    let faq_items = faq_result?;
-    let metadata_items = metadata_result?;
+    // 1. First, distill the raw content into structured FAQs.
+    let faq_items = distill_and_augment(
+        ai_provider,
+        &ingested_document,
+        prompts.extraction_system_prompt,
+        prompts.extraction_user_prompt_template,
+        prompts.augmentation_system_prompt,
+    )
+    .await?;
+
+    // 2. Then, extract metadata from the *clean* FAQ data, not the noisy source.
+    let content_for_metadata = if faq_items.is_empty() {
+        // If no FAQs, fall back to the original content for metadata extraction.
+        ingested_document.content.clone()
+    } else {
+        faq_items
+            .iter()
+            .map(|faq| format!("Q: {}\nA: {}", faq.question, faq.answer))
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n")
+    };
+
+    let metadata_items = extract_and_store_metadata(
+        &conn,
+        ai_provider,
+        &document_id,
+        owner_id,
+        &content_for_metadata,
+        prompts.metadata_extraction_system_prompt,
+    )
+    .await?;
 
     let count = store_faqs_as_documents(
         db,
@@ -213,7 +227,28 @@ pub async fn fetch_web_content(
                 // We can reuse the Jina error type for a generic fetch failure
                 return Err(KnowledgeError::JinaReaderFailed { status, body });
             }
-            let html = response.text().await?;
+            let html_raw = response.text().await?;
+
+            // --- Aggressive, List-Based HTML Cleaning & Validation ---
+            let forbidden_tags = ["script", "style", "meta", "link"];
+            let mut html = html_raw;
+
+            for tag in forbidden_tags {
+                // This regex handles both block tags (<script>...</script>) and self-closing/simple tags (<meta>, <link>).
+                // It's applied iteratively for simplicity and robustness.
+                let re =
+                    Regex::new(&format!(r"(?is)<{tag}[^>]*>.*?</{tag}>|<{tag}[^>]*>")).unwrap();
+                html = re.replace_all(&html, "").to_string();
+            }
+
+            // After all cleaning, check that no forbidden tags remain.
+            for tag in forbidden_tags {
+                if html.contains(&format!("<{tag}")) {
+                    return Err(KnowledgeError::ContaminatedContent(format!(
+                        "Detected forbidden '<{tag}>' tag in content after cleaning process."
+                    )));
+                }
+            }
 
             // --- Robust HTML Parsing with `scraper` ---
             // This logic specifically finds text nodes starting with "Q :" and "A :"

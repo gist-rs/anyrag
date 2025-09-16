@@ -182,136 +182,110 @@ where
     .await
     .map_err(SearchError::QueryAnalysis)?;
 
-    // --- Parallel Retrieval ---
+    // --- Sequential Retrieval ---
     // Augment AI-extracted keyphrases with raw keywords from the original query for robustness.
     let mut keyphrases_meta = analyzed_query.keyphrases.clone();
     keyphrases_meta.extend(options.query_text.split_whitespace().map(String::from));
     keyphrases_meta.sort();
     keyphrases_meta.dedup();
 
-    let provider_meta = Arc::clone(&provider);
-    let entities_meta = analyzed_query.entities.clone();
-    let owner_id_meta = options.owner_id.clone();
-    let limit_meta = options.limit;
-    let metadata_handle = tokio::spawn(async move {
-        provider_meta
-            .metadata_search(
-                &entities_meta,
-                &keyphrases_meta,
-                owner_id_meta.as_deref(),
-                limit_meta * 2,
-            )
-            .await
-    });
-
-    let provider_kw = Arc::clone(&provider);
-    // Use the original query for the keyword search to make it more robust against
-    // variable LLM analysis. The analysis is still used for metadata search.
-    let keyword_query = options.query_text.clone();
-    let owner_id_kw = options.owner_id.clone();
-    let limit_kw = options.limit;
-    let keyword_handle = tokio::spawn(async move {
-        if options.use_keyword_search && !keyword_query.is_empty() {
-            provider_kw
-                .keyword_search(&keyword_query, limit_kw * 2, owner_id_kw.as_deref(), None)
-                .await
-        } else {
-            Ok(Vec::new())
-        }
-    });
-
-    let provider_vec = Arc::clone(&provider);
-    let owner_id_vec = options.owner_id.clone();
-    let embedding_api_url = options.embedding_api_url.to_string();
-    let embedding_model = options.embedding_model.to_string();
-    let embedding_api_key = options.embedding_api_key.map(|s| s.to_string());
-    let query_text_vec = options.query_text.clone();
-    let limit_vec = options.limit;
-    let vector_handle = tokio::spawn(async move {
-        if options.use_vector_search {
-            let query_vector = generate_embeddings_batch(
-                &embedding_api_url,
-                &embedding_model,
-                &[&query_text_vec],
-                embedding_api_key.as_deref(),
-            )
-            .await
-            .map_err(SearchError::Embedding)?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                SearchError::Embedding(PromptError::AiApi(
-                    "Embedding API returned no vector".to_string(),
-                ))
-            })?;
-
-            provider_vec
-                .vector_search(query_vector, limit_vec * 2, owner_id_vec.as_deref(), None)
-                .await
-        } else {
-            Ok(Vec::new())
-        }
-    });
-
-    let (metadata_results, keyword_results, vector_results) = (
-        metadata_handle.await,
-        keyword_handle.await,
-        vector_handle.await,
-    );
-
-    // Soft-fail: If a task panics or returns an error, log it and proceed with an empty result set.
-    let metadata_candidates = match metadata_results {
-        Ok(Ok(res)) => {
+    let metadata_candidates = match provider
+        .metadata_search(
+            &analyzed_query.entities,
+            &keyphrases_meta,
+            options.owner_id.as_deref(),
+            options.limit * 2,
+        )
+        .await
+    {
+        Ok(res) => {
             info!(
                 "[hybrid_search] Metadata search returned {} candidates.",
                 res.len()
             );
             res
         }
-        Ok(Err(e)) => {
+        Err(e) => {
             warn!("Metadata search task failed: {}", e);
             Vec::new()
         }
-        Err(e) => {
-            warn!("Metadata search task panicked: {}", e);
-            Vec::new()
-        }
     };
 
-    let keyword_candidates = match keyword_results {
-        Ok(Ok(res)) => {
-            info!(
-                "[hybrid_search] Keyword search returned {} candidates.",
-                res.len()
-            );
-            res
+    // Use the original query for the keyword search for robustness.
+    let keyword_candidates = if options.use_keyword_search && !options.query_text.is_empty() {
+        match provider
+            .keyword_search(
+                &options.query_text,
+                options.limit * 2,
+                options.owner_id.as_deref(),
+                None,
+            )
+            .await
+        {
+            Ok(res) => {
+                info!(
+                    "[hybrid_search] Keyword search returned {} candidates.",
+                    res.len()
+                );
+                res
+            }
+            Err(e) => {
+                warn!("Keyword search task failed: {}", e);
+                Vec::new()
+            }
         }
-        Ok(Err(e)) => {
-            warn!("Keyword search task failed: {}", e);
-            Vec::new()
-        }
-        Err(e) => {
-            warn!("Keyword search task panicked: {}", e);
-            Vec::new()
-        }
+    } else {
+        Vec::new()
     };
 
-    let vector_candidates = match vector_results {
-        Ok(Ok(res)) => {
-            info!(
-                "[hybrid_search] Vector search returned {} candidates.",
-                res.len()
-            );
-            res
+    let vector_candidates = if options.use_vector_search {
+        let query_vector_result = generate_embeddings_batch(
+            options.embedding_api_url,
+            options.embedding_model,
+            &[&options.query_text],
+            options.embedding_api_key,
+        )
+        .await
+        .map_err(SearchError::Embedding)
+        .and_then(|mut vecs| {
+            vecs.pop().ok_or_else(|| {
+                SearchError::Embedding(PromptError::AiApi(
+                    "Embedding API returned no vector".to_string(),
+                ))
+            })
+        });
+
+        match query_vector_result {
+            Ok(query_vector) => {
+                match provider
+                    .vector_search(
+                        query_vector,
+                        options.limit * 2,
+                        options.owner_id.as_deref(),
+                        None,
+                    )
+                    .await
+                {
+                    Ok(res) => {
+                        info!(
+                            "[hybrid_search] Vector search returned {} candidates.",
+                            res.len()
+                        );
+                        res
+                    }
+                    Err(e) => {
+                        warn!("Vector search task failed: {}", e);
+                        Vec::new()
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("Vector embedding generation failed: {}", e);
+                Vec::new()
+            }
         }
-        Ok(Err(e)) => {
-            warn!("Vector search task failed: {}", e);
-            Vec::new()
-        }
-        Err(e) => {
-            warn!("Vector search task panicked: {}", e);
-            Vec::new()
-        }
+    } else {
+        Vec::new()
     };
 
     let mut final_results = reciprocal_rank_fusion(vec![

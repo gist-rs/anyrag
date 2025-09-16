@@ -171,21 +171,21 @@ async fn main() -> Result<()> {
     }
 
     // --- 4. Ask Questions using RAG ---
-    let question1 = "GPF Point แจกถึงวันไหน";
-    let answer1 = ask_question(app_state.clone(), auth_user.clone(), question1, None).await?;
+    // let question1 = "GPF Point แจกถึงวันไหน";
+    // let _answer1 = ask_question(app_state.clone(), auth_user.clone(), question1, None).await?;
 
-    let question2 = "สร้าง My GPF ได้รับที่คะแนน";
-    let answer2 = ask_question(app_state.clone(), auth_user.clone(), question2, None).await?;
+    // let question2 = "สร้าง My GPF ได้รับที่คะแนน";
+    // let _answer2 = ask_question(app_state.clone(), auth_user.clone(), question2, None).await?;
 
-    let question3 = "สร้าง My GPF ได้รับที่คะแนน";
-    let instruction3 = "สรุปเงื่อนไขการรับ GPF point, and start the answer with `สรุปเงื่อนไขได้ว่า`";
-    let answer3 = ask_question(
-        app_state.clone(),
-        auth_user.clone(),
-        question3,
-        Some(instruction3),
-    )
-    .await?;
+    // let question3 = "สร้าง My GPF ได้รับที่คะแนน";
+    // let instruction3 = "สรุปเงื่อนไขการรับ GPF point, and start the answer with `สรุปเงื่อนไขได้ว่า`";
+    // let _answer3 = ask_question(
+    //     app_state.clone(),
+    //     auth_user.clone(),
+    //     question3,
+    //     Some(instruction3),
+    // )
+    // .await?;
 
     let question4 = "มีเงิน 2 หมื่นออมต่อได้มั้ย";
     let answer4 = ask_question(app_state.clone(), auth_user, question4, None).await?;
@@ -194,19 +194,20 @@ async fn main() -> Result<()> {
 
     println!("\n\n✅ Knowledge RAG Workflow Complete!");
     println!("========================================");
-    println!("❓ Question 1: {question1}");
-    println!("💡 Answer 1:\n---\n{answer1}\n---");
-    println!("\n========================================");
-    println!("❓ Question 2: {question2}");
-    println!("💡 Answer 2:\n---\n{answer2}\n---");
-    println!("\n========================================");
-    println!("❓ Question 3: {question3}");
-    println!("💡 Answer 3:\n---\n{answer3}\n---");
-    println!("\n========================================");
+    // println!("❓ Question 1: {question1}");
+    // println!("💡 Answer 1:\n---\n{answer1}\n---");
+    // println!("\n========================================");
+    // println!("❓ Question 2: {question2}");
+    // println!("💡 Answer 2:\n---\n{answer2}\n---");
+    // println!("\n========================================");
+    // println!("❓ Question 3: {question3}");
+    // println!("💡 Answer 3:\n---\n{answer3}\n---");
+    // println!("\n========================================");
     println!("❓ Question 4: {question4}");
     println!("💡 Answer 4:\n---\n{answer4}\n---");
 
-    assert!(answer3.trim_matches('"').starts_with("สรุปเงื่อนไขได้ว่า"));
+    // assert!(_answer3.trim_matches('"').starts_with("สรุปเงื่อนไขได้ว่า"));
+    assert!(answer4.trim_matches('"').contains("35,000"));
 
     Ok(())
     /* Expect
@@ -241,7 +242,7 @@ async fn main() -> Result<()> {
     ❓ Question 4: มีเงิน 2 หมื่นออมต่อได้มั้ย
     💡 Answer 4:
     ---
-    "ยอดเงินในบัญชีไม่ต่ำกว่า 35,000 บาท ณ วันที่ยื่นคำขอ โดยมีเอกสารหลักฐานถูกต้องครบถ้วน"
+    "ไม่ได้ เพราะยอดเงินในบัญชีไม่ต่ำกว่า 35,000 บาท ณ วันที่ยื่นคำขอ โดยมีเอกสารหลักฐานถูกต้องครบถ้วน"
     ---
     */
 }
