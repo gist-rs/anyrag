@@ -1,7 +1,7 @@
 #[cfg(feature = "rss")]
 use anyrag::ingest::RssIngestError;
 use anyrag::{
-    ingest::{EmbeddingError, IngestSheetFaqError, KnowledgeError, TextIngestError},
+    ingest::{EmbeddingError, IngestSheetFaqError, KnowledgeError, SheetError, TextIngestError},
     search::SearchError,
     PromptError,
 };
@@ -30,6 +30,8 @@ pub enum AppError {
     RssIngest(RssIngestError),
     /// Errors from the sheet faq ingestion process.
     SheetFaqIngest(IngestSheetFaqError),
+    /// Errors from the sheet ingestion process.
+    Sheet(SheetError),
     /// Errors from the GitHub ingestion process.
     GitHubIngest(GitHubIngestError),
 
@@ -73,6 +75,13 @@ impl From<RssIngestError> for AppError {
 impl From<IngestSheetFaqError> for AppError {
     fn from(err: IngestSheetFaqError) -> Self {
         AppError::SheetFaqIngest(err)
+    }
+}
+
+/// Conversion from `SheetError` to `AppError`.
+impl From<SheetError> for AppError {
+    fn from(err: SheetError) -> Self {
+        AppError::Sheet(err)
     }
 }
 
@@ -148,6 +157,13 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     format!("Failed to ingest Sheet FAQ: {err}"),
+                )
+            }
+            AppError::Sheet(err) => {
+                error!("SheetError: {:?}", err);
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("Failed to process sheet: {err}"),
                 )
             }
             AppError::Knowledge(err) => {

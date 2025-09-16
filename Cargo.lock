@@ -181,7 +181,7 @@ dependencies = [
  "github",
  "httpmock",
  "jsonwebtoken",
- "md5 0.8.0",
+ "md5 0.7.0",
  "pdf-writer",
  "regex",
  "reqwest",

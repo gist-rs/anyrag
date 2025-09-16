@@ -25,6 +25,7 @@ futures = "0.3"
 dotenvy = "0.15.7"
 uuid = { version = "1.18.1", features = ["v4", "serde", "v5"] }
 clap = { version = "4.5.47", features = ["derive", "env"] }
+md5 = "0.7.0"
 
 # For server
 axum = "0.8.4"

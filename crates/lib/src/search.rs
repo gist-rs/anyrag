@@ -134,7 +134,8 @@ async fn analyze_query(
     }
 }
 
-/// Sorts search results based on a date property if found.
+/// Filters and re-ranks a list of search results based on a date property.
+/// If any documents with a valid date are found, it returns only the single most recent one.
 async fn temporally_rank_results<P>(
     provider: Arc<P>,
     results: Vec<SearchResult>,
@@ -144,41 +145,56 @@ async fn temporally_rank_results<P>(
 where
     P: TemporalSearch + Send + Sync + 'static,
 {
-    let doc_ids: Vec<&str> = results.iter().map(|r| r.link.as_str()).collect();
-
-    if doc_ids.is_empty() {
+    let doc_links: Vec<&str> = results.iter().map(|r| r.link.as_str()).collect();
+    if doc_links.is_empty() {
         return results;
     }
 
+    // Fetch date properties for all candidate documents.
     let properties = match provider
-        .get_string_properties_for_documents(&doc_ids, config.property_name, owner_id)
+        .get_string_properties_for_documents(&doc_links, config.property_name, owner_id)
         .await
     {
         Ok(props) => props,
         Err(e) => {
             warn!(
-                "Failed to fetch temporal properties, returning original order: {}",
+                "Failed to fetch temporal properties, temporal ranking will be skipped: {}",
                 e
             );
-            return results;
+            return results; // Return original results if DB query fails
         }
     };
 
-    let mut dated_results: Vec<(SearchResult, NaiveDate)> = results
-        .into_iter()
-        .filter_map(|r| {
-            properties.get(&r.link).and_then(|date_str| {
-                NaiveDate::parse_from_str(date_str, "%Y-%m-%d")
-                    .ok()
-                    .map(|date| (r, date))
-            })
-        })
-        .collect();
+    let mut dated_candidates = Vec::new();
+    let mut undated_candidates = Vec::new();
 
-    // Sort by date descending (newest first)
-    dated_results.sort_by(|a, b| b.1.cmp(&a.1));
+    // Partition the original results into two groups.
+    for result in results {
+        if let Some(date_str) = properties.get(&result.link) {
+            if let Ok(date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+                dated_candidates.push((result, date));
+                continue;
+            }
+        }
+        undated_candidates.push(result);
+    }
 
-    dated_results.into_iter().map(|(r, _)| r).collect()
+    if dated_candidates.is_empty() {
+        // If no documents had a valid date, return the original (now filtered) undated results.
+        return undated_candidates;
+    }
+
+    // Sort the dated candidates to find the newest one.
+    dated_candidates.sort_by(|a, b| b.1.cmp(&a.1));
+
+    // For a temporal query like "newest", we return only the single most recent document for precision.
+    info!(
+        "Found {} dated documents. Returning the newest one: '{}' with date {}",
+        dated_candidates.len(),
+        dated_candidates[0].0.title,
+        dated_candidates[0].1
+    );
+    vec![dated_candidates.remove(0).0]
 }
 
 /// Performs a multi-stage hybrid search.
@@ -399,7 +415,6 @@ where
     }
 
     // --- Step 5: Final Ranking and Truncation ---
-    // The chunks are already roughly ordered by their parent's RRF score.
     let mut final_results = contextual_chunks;
 
     // --- Temporal Ranking Step ---
@@ -414,16 +429,13 @@ where
                 "Temporal keyword detected. Re-ranking results by '{}'.",
                 config.property_name
             );
-            let mut ranked_results = temporally_rank_results(
+            final_results = temporally_rank_results(
                 Arc::clone(&provider),
                 final_results,
                 config,
                 options.owner_id.as_deref(),
             )
             .await;
-            // As per the plan, truncate to the single most recent result for precision.
-            ranked_results.truncate(1);
-            final_results = ranked_results;
         }
     }
 

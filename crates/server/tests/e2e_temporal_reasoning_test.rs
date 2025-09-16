@@ -1,7 +1,9 @@
 //! # Temporal Reasoning E2E Test
 //!
-//! This test file verifies that the RAG pipeline can correctly answer questions
-//! that require temporal reasoning, such as finding the "newest" or "latest" item.
+//! This test verifies the temporal reasoning feature of the `POST /search/knowledge`
+//! endpoint. It ensures that when a query contains a temporal keyword (e.g., "newest"),
+//! the RAG pipeline correctly identifies and prioritizes the most recent document
+//! based on a specified metadata property (e.g., `release_date`).
 
 mod common;
 
@@ -13,126 +15,131 @@ use httpmock::Method;
 use serde_json::{json, Value};
 
 #[tokio::test]
-async fn test_temporal_query_for_newest_item() -> Result<()> {
+async fn test_knowledge_search_with_temporal_reasoning() -> Result<()> {
     // --- 1. Arrange & Setup ---
     let app = TestApp::spawn().await?;
     let user_identifier = "temporal-user@example.com";
     let db = &app.app_state.sqlite_provider.db;
     let user = get_or_create_user(db, user_identifier, None).await?;
 
-    // Seed the database with time-stamped facts and a distractor document.
+    let final_rag_answer = "The newest product is the Anyrag Pro.";
+
+    // --- 2. Seed the Database with Time-Sensitive Data ---
+    // We create two documents about products, one older and one newer, distinguished
+    // by the `release_date` metadata property.
     let builder = TestDataBuilder::new(&app).await?;
 
-    // iPhone 16 (older)
+    // A. The older document.
     builder
         .add_document(
-            "doc_iphone_16",
+            "doc_old",
             &user.id,
-            "iPhone 16",
-            "The iPhone 16, released in 2024, features the A18 chip.",
-            None,
+            "Anyrag Basic",
+            r#"sections:
+- title: "Anyrag Basic Overview"
+  faqs:
+    - question: "What is Anyrag Basic?"
+      answer: "Anyrag Basic is a standard product."
+"#,
+            Some("http://mock.com/doc_old"),
         )
         .await?
-        .add_metadata("doc_iphone_16", &user.id, "ENTITY", "PRODUCT", "iPhone")
+        .add_metadata("doc_old", &user.id, "KEYPHRASE", "CONCEPT", "product")
         .await?
         .add_metadata(
-            "doc_iphone_16",
+            "doc_old",
             &user.id,
-            "PROPERTY",
+            "KEYPHRASE",
             "release_date",
-            "2024-09-09",
+            "2024-01-01",
         )
         .await?
-        .add_embedding("doc_iphone_16", vec![0.8, 0.1, 0.1])
+        .add_embedding("doc_old", vec![1.0, 0.0, 0.0])
         .await?;
 
-    // iPhone 17 (newer)
+    // B. The newer document.
     builder
         .add_document(
-            "doc_iphone_17",
+            "doc_new",
             &user.id,
-            "iPhone 17",
-            "The iPhone 17, released in 2025, features the A19 chip.",
-            None,
+            "Anyrag Pro",
+            r#"sections:
+- title: "Anyrag Pro Features"
+  faqs:
+    - question: "What is Anyrag Pro?"
+      answer: "The newest product is the Anyrag Pro."
+"#,
+            Some("http://mock.com/doc_new"),
         )
         .await?
-        .add_metadata("doc_iphone_17", &user.id, "ENTITY", "PRODUCT", "iPhone")
+        .add_metadata("doc_new", &user.id, "KEYPHRASE", "CONCEPT", "product")
         .await?
         .add_metadata(
-            "doc_iphone_17",
+            "doc_new",
             &user.id,
-            "PROPERTY",
+            "KEYPHRASE",
             "release_date",
-            "2025-09-09",
+            "2024-02-01",
         )
         .await?
-        .add_embedding("doc_iphone_17", vec![0.9, 0.1, 0.1])
+        // This vector is intentionally less similar to the query vector than the old doc's
+        // to prove that temporal ranking overrides vector similarity.
+        .add_embedding("doc_new", vec![0.5, 0.5, 0.0])
         .await?;
 
-    // Alice's phone (distractor, related to iPhone 16)
-    builder
-        .add_document(
-            "doc_alice_phone",
-            &user.id,
-            "Alice's Phone",
-            "Alice has an iPhone 16.",
-            None,
-        )
-        .await?
-        .add_metadata("doc_alice_phone", &user.id, "ENTITY", "PERSON", "Alice")
-        .await?;
-
-    let user_query = "Bob wants the newest iPhone, what should he get?";
-    let final_rag_answer =
-        "Based on the release date, Bob should get the iPhone 17, which features the A19 chip.";
-
-    // --- 2. Mock External Services ---
+    // --- 3. Mock External Services ---
+    // A. Mock query analysis to extract the temporal keyword and the discoverable keyphrase.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
+            .path("/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{"message": {"role": "assistant", "content": json!({
-                "entities": ["iPhone"],
-                "keyphrases": ["newest"] // The keyword that should trigger the temporal logic
+                "entities": [],
+                "keyphrases": ["newest", "product"] // The AI finds both keywords.
             }).to_string()}}]
         }));
     });
 
+    // B. Mock embedding for the search query. The vector is closer to the OLD document.
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST).path("/v1/embeddings");
         then.status(200)
-            .json_body(json!({ "data": [{ "embedding": [1.0, 0.0, 0.0] }] }));
+            .json_body(json!({ "data": [{ "embedding": vec![0.9, 0.1, 0.0] }] }));
     });
 
+    // C. Mock the final RAG synthesis call.
+    // This is the most critical part of the test. We assert that the context provided
+    // to the final LLM call contains ONLY the content from the NEWEST document.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .body_contains("strict, factual AI")
-            // CRUCIAL: It must have the context for the iPhone 17.
-            .body_contains("The iPhone 17, released in 2025")
-            // CRUCIAL: It MUST NOT have the context for the older iPhone 16.
+            .path("/v1/chat/completions")
+            .body_contains("strict, factual AI") // Match the RAG system prompt
+            .body_contains("## Anyrag Pro Features") // Must contain content from the NEW doc
             .matches(|req| {
+                // Must NOT contain content from the OLD doc
                 !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default())
-                    .contains("iPhone 16")
+                    .contains("Anyrag Basic Overview")
             });
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
     });
 
-    // --- 3. Execute the search ---
+    // --- 4. Act: Perform a RAG search with a temporal keyword ---
     let token = generate_jwt(user_identifier)?;
-    let response = app
+    let search_response = app
         .client
         .post(format!("{}/search/knowledge", app.address))
         .bearer_auth(token)
-        .json(&json!({ "query": user_query }))
+        .json(&json!({ "query": "What is the newest product?" }))
         .send()
         .await?
         .error_for_status()?;
 
-    // --- 4. Assert ---
-    let response_body: ApiResponse<Value> = response.json().await?;
-    assert_eq!(response_body.result["text"], final_rag_answer);
+    // --- 5. Assert the final response and that all mocks were called ---
+    let search_body: ApiResponse<Value> = search_response.json().await?;
+    assert_eq!(search_body.result["text"], final_rag_answer);
 
     query_analysis_mock.assert();
     embedding_mock.assert();

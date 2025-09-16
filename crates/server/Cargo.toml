@@ -38,6 +38,7 @@ anyhow = { workspace = true }
 reqwest = { workspace = true, features = ["json", "multipart"] }
 chrono.workspace = true
 regex = { workspace = true }
+md5 = { workspace = true }
 
 # Config
 config = { version = "0.15.15", features = ["yaml"] }
@@ -59,7 +60,6 @@ tempfile = "3.21.0"
 turso = { workspace = true }
 regex = { workspace = true }
 serial_test = "3.2.0"
-md5 = "0.8.0"
 pdf-writer = "0.13.0"
 uuid = { workspace = true }
 

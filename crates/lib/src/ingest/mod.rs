@@ -32,6 +32,8 @@ pub use pdf::{run_pdf_ingestion_pipeline, PdfSyncExtractor};
 #[cfg(feature = "rss")]
 pub use rss::{ingest_from_url, IngestError as RssIngestError};
 #[cfg(feature = "sheets")]
+pub use shared::SheetError;
+#[cfg(feature = "sheets")]
 pub use sheet_faq::{ingest_faq_from_google_sheet, IngestSheetFaqError};
 #[cfg(feature = "sheets")]
 pub use sheets::{

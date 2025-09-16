@@ -21,7 +21,7 @@ use anyhow::{bail, Result};
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
-    handlers::ingest::sheet::{ingest_sheet_handler, IngestParams, IngestSheetRequest},
+    handlers::ingest::sheet::{ingest_sheet_handler, IngestSheetRequest},
     handlers::{self, EmbedNewRequest, SearchRequest},
     state,
     types::DebugParams,
@@ -93,17 +93,11 @@ async fn main() -> Result<()> {
     let ingest_payload = IngestSheetRequest {
         url: sheet_url.to_string(),
         gid: Some(856666263.to_string()),
-        skip_header: true,
-    };
-    let ingest_params = IngestParams {
-        faq: true,
-        embed: true,
     };
 
     match ingest_sheet_handler(
         axum::extract::State(app_state.clone()),
         auth_user.clone(),
-        Query(ingest_params),
         Query(DebugParams::default()),
         Json(ingest_payload),
     )
@@ -112,9 +106,9 @@ async fn main() -> Result<()> {
         Ok(Json(response)) => {
             info!(
                 "Ingestion successful. Stored {} new FAQs.",
-                response.result.ingested_rows
+                response.result.ingested_faqs
             );
-            if response.result.ingested_rows == 0 {
+            if response.result.ingested_faqs == 0 {
                 bail!("No FAQs were ingested. The sheet might be empty or already processed.");
             }
         }
@@ -157,7 +151,7 @@ async fn main() -> Result<()> {
     )
     .await
     {
-        Ok(Json(response)) => response.result.text,
+        Ok(Json(response)) => response.result.text.to_string(),
         Err(e) => bail!("Error occurred while asking question: {:?}", e),
     };
 
