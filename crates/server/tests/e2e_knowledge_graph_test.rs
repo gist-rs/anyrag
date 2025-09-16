@@ -91,24 +91,21 @@ async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     let user = get_or_create_user(&db, user_identifier, None).await?;
 
     let document_id = "doc_superwidget";
+    let widget_content = r#"
+sections:
+  - title: "SuperWidget Manual"
+    faqs:
+      - question: "What is the SuperWidget?"
+        answer: "The SuperWidget is a complex device."
+"#;
     conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
         params![
             document_id,
             user.id.clone(),
             "manual_seed/superwidget",
             "SuperWidget Manual",
-            "The SuperWidget is a complex device."
-        ],
-    )
-    .await?;
-    conn.execute(
-        "INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)",
-        params![
-            document_id,
-            user.id.clone(),
-            "What is the SuperWidget?",
-            "The SuperWidget is a complex device."
+            widget_content.trim(),
         ],
     )
     .await?;
@@ -239,20 +236,25 @@ async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
 
     // --- 3. Seed Databases with correct ownership ---
     let document_id = "doc_wizarding_world";
+    let wizard_content = format!(
+        r#"
+sections:
+  - title: "Wizarding World Facts"
+    faqs:
+      - question: "{question}"
+        answer: "{generic_answer_seed}"
+"#
+    );
+
     conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?) ON CONFLICT(source_url) DO NOTHING",
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
         params![
             document_id,
             user.id.clone(),
             "wizarding_world.txt",
             "Wizarding World Facts",
-            generic_answer_seed
+            wizard_content.trim(),
         ],
-    )
-    .await?;
-    conn.execute(
-        "INSERT INTO faq_items (document_id, owner_id, question, answer) VALUES (?, ?, ?, ?)",
-        params![document_id, user.id.clone(), question, generic_answer_seed],
     )
     .await?;
 

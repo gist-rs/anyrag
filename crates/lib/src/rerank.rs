@@ -115,17 +115,22 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
 
     let mut rrf_scores: HashMap<String, f64> = HashMap::new();
     let k = 60.0; // Standard RRF constant
-    let metadata_boost = 2.5; // Give a boost to the first result set (metadata)
 
     let mut all_unique_results: HashMap<String, SearchResult> = HashMap::new();
 
     for (set_index, results) in result_sets.iter().enumerate() {
         for (rank, result) in results.iter().enumerate() {
-            let mut score = 1.0 / (k + (rank + 1) as f64);
-            if set_index == 0 {
-                // Apply boost to the first set (metadata results)
-                score *= metadata_boost;
-            }
+            // Give a significantly higher weight to the first result set (metadata),
+            // treating it as a high-precision signal.
+            let score = if set_index == 0 {
+                100.0 / ((rank + 1) as f64) // High base score, sensitive to rank
+            } else {
+                1.0 / (k + (rank + 1) as f64) // Standard RRF score for other sets
+            };
+            debug!(
+                "RRF score for '{}' (set: {}, rank: {}): {}",
+                result.title, set_index, rank, score
+            );
             *rrf_scores.entry(result.link.clone()).or_insert(0.0) += score;
 
             // Collect unique results by link
@@ -154,5 +159,6 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
         result.score = *rrf_scores.get(&result.link).unwrap_or(&0.0);
     }
 
+    debug!("Final RRF scores: {:?}", rrf_scores);
     combined_results
 }

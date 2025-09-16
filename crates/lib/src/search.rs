@@ -201,11 +201,31 @@ where
     .map_err(SearchError::QueryAnalysis)?;
 
     // --- Sequential Retrieval ---
-    // Augment AI-extracted keyphrases with raw keywords from the original query for robustness.
+    // Augment AI-extracted keyphrases with raw keywords from the original query, filtering for stopwords.
     let mut keyphrases_meta = analyzed_query.keyphrases.clone();
-    keyphrases_meta.extend(options.query_text.split_whitespace().map(String::from));
+    let stop_words: std::collections::HashSet<&str> = [
+        "a", "an", "the", "in", "on", "at", "for", "to", "of", "is", "are", "was", "were", "i",
+        "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your",
+        "his", "its", "our", "their", "and", "but", "or", "so", "if", "about", "with", "by",
+        "tell", "what",
+    ]
+    .iter()
+    .cloned()
+    .collect();
+
+    keyphrases_meta.extend(
+        options
+            .query_text
+            .to_lowercase()
+            .split_whitespace()
+            .map(String::from)
+            .filter(|word| !stop_words.contains(word.as_str())),
+    );
     keyphrases_meta.sort();
     keyphrases_meta.dedup();
+
+    // Create a new query string from the filtered keywords for the keyword search.
+    let filtered_keyword_query = keyphrases_meta.join(" ");
 
     let metadata_candidates = match provider
         .metadata_search(
@@ -221,6 +241,10 @@ where
                 "[hybrid_search] Metadata search returned {} candidates.",
                 res.len()
             );
+            debug!(
+                "Metadata candidates: {:?}",
+                res.iter().map(|r| r.title.clone()).collect::<Vec<_>>()
+            );
             res
         }
         Err(e) => {
@@ -229,11 +253,11 @@ where
         }
     };
 
-    // Use the original query for the keyword search for robustness.
-    let keyword_candidates = if options.use_keyword_search && !options.query_text.is_empty() {
+    // Use the filtered query for the keyword search for robustness.
+    let keyword_candidates = if options.use_keyword_search && !filtered_keyword_query.is_empty() {
         match provider
             .keyword_search(
-                &options.query_text,
+                &filtered_keyword_query,
                 options.limit * 2,
                 options.owner_id.as_deref(),
                 None,
@@ -244,6 +268,10 @@ where
                 info!(
                     "[hybrid_search] Keyword search returned {} candidates.",
                     res.len()
+                );
+                debug!(
+                    "Keyword candidates: {:?}",
+                    res.iter().map(|r| r.title.clone()).collect::<Vec<_>>()
                 );
                 res
             }
@@ -289,6 +317,10 @@ where
                             "[hybrid_search] Vector search returned {} candidates.",
                             res.len()
                         );
+                        debug!(
+                            "Vector candidates: {:?}",
+                            res.iter().map(|r| r.title.clone()).collect::<Vec<_>>()
+                        );
                         res
                     }
                     Err(e) => {
@@ -312,39 +344,57 @@ where
         keyword_candidates,
     ]);
 
+    debug!(
+        "RRF ranked documents: {:?}",
+        ranked_parent_documents
+            .iter()
+            .map(|r| r.title.clone())
+            .collect::<Vec<_>>()
+    );
+
     // --- Step 4: Parse YAML and Expand into Contextual Chunks ---
     let mut contextual_chunks = Vec::new();
     for parent_doc in ranked_parent_documents {
-        match serde_yaml::from_str::<YamlContent>(&parent_doc.description) {
-            Ok(yaml_content) => {
-                for section in yaml_content.sections {
-                    let chunk_content = format!(
-                        "## {}\n\n{}",
-                        section.title,
-                        section
-                            .faqs
-                            .iter()
-                            .map(|faq| format!("### Q: {}\n\n{}", faq.question, faq.answer))
-                            .collect::<Vec<_>>()
-                            .join("\n\n")
-                    );
+        // Heuristic: only attempt YAML parsing if it looks like our structured format.
+        if parent_doc.description.trim().starts_with("sections:") {
+            match serde_yaml::from_str::<YamlContent>(&parent_doc.description) {
+                Ok(yaml_content) => {
+                    for section in yaml_content.sections {
+                        let chunk_content = format!(
+                            "## {}\n\n{}",
+                            section.title,
+                            section
+                                .faqs
+                                .iter()
+                                .map(|faq| format!("### Q: {}\n\n{}", faq.question, faq.answer))
+                                .collect::<Vec<_>>()
+                                .join("\n\n")
+                        );
 
-                    contextual_chunks.push(SearchResult {
-                        title: section.title.clone(),
-                        link: format!("{}#{}", parent_doc.link, section.title.replace(' ', "_")),
-                        description: chunk_content,
-                        score: parent_doc.score, // Inherit score from parent
-                    });
+                        contextual_chunks.push(SearchResult {
+                            title: section.title.clone(),
+                            link: format!(
+                                "{}#{}",
+                                parent_doc.link,
+                                section.title.replace(' ', "_")
+                            ),
+                            description: chunk_content,
+                            score: parent_doc.score, // Inherit score from parent
+                        });
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to parse content of document '{}' as YAML, skipping. Error: {}",
+                        parent_doc.link, e
+                    );
+                    // Fallback for content that looks like YAML but fails to parse.
+                    contextual_chunks.push(parent_doc);
                 }
             }
-            Err(e) => {
-                warn!(
-                    "Failed to parse content of document '{}' as YAML, skipping. Error: {}",
-                    parent_doc.link, e
-                );
-                // If parsing fails, we can still use the parent document as a fallback chunk.
-                contextual_chunks.push(parent_doc);
-            }
+        } else {
+            // If it doesn't look like YAML, just use the parent document directly.
+            contextual_chunks.push(parent_doc);
         }
     }
 

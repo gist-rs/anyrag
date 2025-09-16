@@ -79,6 +79,8 @@ impl TestApp {
                         String::from_utf8_lossy(req.body.as_deref().unwrap_or_default());
                     !body_str.contains("expert query analyst")
                         && !body_str.contains("strict, factual AI")
+                        && !body_str.contains("intelligent data assistant") // For Text-to-SQL
+                        && !body_str.contains("strict data processor") // For SQL result formatting
                 });
             then.status(200)
                 .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "Default mock response."}}]}));
