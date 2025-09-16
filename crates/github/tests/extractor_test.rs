@@ -72,11 +72,9 @@ assert_eq!(x + y, 15);"#;
     );
 
     // Verify all examples from this test are from the README.
-    assert!(
-        examples
-            .iter()
-            .all(|e| e.example_handle.contains("README.md"))
-    );
+    assert!(examples
+        .iter()
+        .all(|e| e.example_handle.contains("README.md")));
 }
 
 #[test]
