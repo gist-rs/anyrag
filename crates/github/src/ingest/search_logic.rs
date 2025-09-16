@@ -5,7 +5,7 @@
 //! for the RAG query engine.
 
 use super::{storage::StorageManager, types::GitHubIngestError};
-use crate::{
+use anyrag::{
     ingest::knowledge::clean_llm_response,
     prompts::knowledge::{
         GITHUB_EXAMPLE_SEARCH_ANALYSIS_SYSTEM_PROMPT, GITHUB_EXAMPLE_SEARCH_ANALYSIS_USER_PROMPT,

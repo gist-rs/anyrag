@@ -2,7 +2,7 @@
 //!
 //! This file contains tests for the `Extractor` module in the `github_ingest` crate.
 
-use anyrag::github_ingest::extractor::Extractor;
+use github::ingest::{extractor::Extractor, types::ExampleSourceType};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -72,9 +72,11 @@ assert_eq!(x + y, 15);"#;
     );
 
     // Verify all examples from this test are from the README.
-    assert!(examples
-        .iter()
-        .all(|e| e.example_handle.contains("README.md")));
+    assert!(
+        examples
+            .iter()
+            .all(|e| e.example_handle.contains("README.md"))
+    );
 }
 
 #[test]
@@ -211,7 +213,7 @@ assert_eq!(a, 1);"#;
     assert_eq!(sorted_examples[0].content, expected_code_1);
     assert_eq!(
         sorted_examples[0].source_type,
-        anyrag::github_ingest::types::ExampleSourceType::DocComment
+        ExampleSourceType::DocComment
     );
 
     let expected_code_2 = r#"let b = 2;
@@ -219,7 +221,7 @@ assert_eq!(b, 2);"#;
     assert_eq!(sorted_examples[1].content, expected_code_2);
     assert_eq!(
         sorted_examples[1].source_type,
-        anyrag::github_ingest::types::ExampleSourceType::DocComment
+        ExampleSourceType::DocComment
     );
 }
 
@@ -326,7 +328,7 @@ fn test_conflict_resolution_priority() {
     let final_example = &examples[0];
     assert_eq!(
         final_example.source_type,
-        anyrag::github_ingest::types::ExampleSourceType::Test,
+        ExampleSourceType::Test,
         "The final example should be from the highest priority source (Test)."
     );
     assert!(final_example.source_file.contains("tests/test.rs"));

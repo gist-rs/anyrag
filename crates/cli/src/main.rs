@@ -4,7 +4,6 @@
 
 mod auth;
 mod firebase;
-mod github;
 mod process;
 
 use anyhow::{bail, Result};
@@ -55,7 +54,7 @@ enum DumpCommands {
     Firebase(firebase::FirebaseArgs),
     /// Dump examples from a public GitHub repository
     #[command(disable_version_flag = true)]
-    Github(github::GithubArgs),
+    Github(github::cli::GithubArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -144,7 +143,7 @@ async fn handle_dump(args: &DumpArgs) -> Result<()> {
             firebase::handle_dump_firebase(firebase_args).await?;
         }
         DumpCommands::Github(github_args) => {
-            github::handle_dump_github(github_args).await?;
+            github::cli::handle_dump_github(github_args).await?;
         }
     }
     Ok(())

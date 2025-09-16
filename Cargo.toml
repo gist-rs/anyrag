@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cli", "crates/core-access", "crates/lib", "crates/server"]
+members = ["crates/cli", "crates/core-access", "crates/github", "crates/lib", "crates/server"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -24,6 +24,7 @@ csv = "1.3"
 futures = "0.3"
 dotenvy = "0.15.7"
 uuid = { version = "1.18.1", features = ["v4", "serde", "v5"] }
+clap = { version = "4.5.47", features = ["derive", "env"] }
 
 # For server
 axum = "0.8.4"

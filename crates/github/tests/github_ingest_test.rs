@@ -3,9 +3,7 @@
 //! This test verifies the core logic of the ingestion pipeline, focusing on the
 //! interaction between the Extractor and the StorageManager without a real Git remote.
 
-use anyrag::github_ingest::{
-    extractor::Extractor, storage::StorageManager, types::ExampleSourceType,
-};
+use github::ingest::{extractor::Extractor, storage::StorageManager, types::ExampleSourceType};
 use std::fs;
 use std::path::Path;
 use tempfile::tempdir;

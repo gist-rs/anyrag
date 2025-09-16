@@ -1,7 +1,6 @@
 #[cfg(feature = "rss")]
 use anyrag::ingest::RssIngestError;
 use anyrag::{
-    github_ingest::types::GitHubIngestError,
     ingest::{EmbeddingError, IngestSheetFaqError, KnowledgeError, TextIngestError},
     search::SearchError,
     PromptError,
@@ -11,6 +10,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use github::types::GitHubIngestError;
 use serde_json::json;
 use tracing::error;
 use turso::Error as TursoError;

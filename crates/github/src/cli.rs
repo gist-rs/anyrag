@@ -1,8 +1,6 @@
+use crate::ingest::{run_github_ingestion, storage::StorageManager, types::IngestionTask};
 use anyhow::Result;
-use anyrag::{
-    github_ingest::{run_github_ingestion, storage::StorageManager, types::IngestionTask},
-    ingest::markdown::EmbeddingConfig,
-};
+use anyrag::ingest::markdown::EmbeddingConfig;
 use clap::Parser;
 use std::fs;
 use tracing::info;
@@ -64,7 +62,9 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         .await?;
 
     if examples.is_empty() {
-        println!("Could not find any examples in the database for version '{version_to_fetch}' to generate context file.");
+        println!(
+            "Could not find any examples in the database for version '{version_to_fetch}' to generate context file."
+        );
         return Ok(());
     }
 

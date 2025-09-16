@@ -1,0 +1,47 @@
+[package]
+name = "github"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Moved from anyrag-lib
+git2 = "0.19.0"
+htmd = "0.2.0"
+tempfile = "3.10.1"
+semver = "1.0.26"
+kuchikiki = "0.8.1"
+html5ever = "0.26.0"
+toml = "0.8.14"
+scraper = "0.24.0"
+md5 = "0.8"
+futures = "0.3.30"
+regex = { workspace = true }
+
+# Internal & Workspace
+anyrag = { path = "../lib" }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+turso = { workspace = true }
+clap = { workspace = true, features = ["derive", "env"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+wiremock = "0.6.5"
+dotenvy = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[[test]]
+name = "extractor_test"
+path = "tests/extractor_test.rs"
+
+[[test]]
+name = "github_ingest_test"
+path = "tests/github_ingest_test.rs"
+
+[[test]]
+name = "github_search_logic_test"
+path = "tests/github_search_logic_test.rs"

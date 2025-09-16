@@ -3,8 +3,7 @@
 This crate provides the core logic for a comprehensive natural language data interaction and Retrieval-Augmented Generation (RAG) platform. Its main functionalities include:
 
 1.  **Knowledge Base RAG Pipeline:** A complete system for building a self-improving knowledge base from diverse sources (web pages, PDFs, text, structured sheets) and answering questions using an advanced, multi-stage hybrid search model.
-2.  **GitHub Code Example RAG Pipeline:** A specialized system to crawl public Git repositories, intelligently extract versioned code examples, and use them as a foundation for a powerful code-centric RAG.
-3.  **Natural Language to Data:** Translating prompts into executable queries for data warehouses like Google BigQuery.
+2.  **Natural Language to Data:** Translating prompts into executable queries for data warehouses like Google BigQuery.
 
 It uses a pluggable AI provider for NLP and integrates with both remote (BigQuery) and local (SQLite) storage backends. This library is the foundation of the `anyrag` workspace and is used by the `anyrag-server` and `anyrag-cli` crates.
 
@@ -14,26 +13,20 @@ It uses a pluggable AI provider for NLP and integrates with both remote (BigQuer
     *   **Multi-Source Ingestion:** Ingests and processes content from web URLs, PDFs, Google Sheets, RSS feeds, and raw text.
     *   **Distill & Augment:** Uses a two-pass LLM process to extract explicit FAQs and generate new ones from unstructured content.
     *   **Store & Embed:** Saves structured Q&A pairs into a local SQLite database and generates vector embeddings for semantic search.
-*   **GitHub Ingestion Pipeline:**
-    *   **Repository Crawler:** Clones public repositories, handling versioning via tags, branches, or commits.
-    *   **Intelligent Extractor:** Finds code examples from tests, doc comments, dedicated example files, and READMEs, prioritizing sources to ensure accuracy.
-    *   **Idempotent Storage:** Stores versioned examples in a dedicated database for each repository, ensuring that re-ingesting a version correctly updates its content.
 *   **Advanced Retrieval-Augmented Generation (RAG):**
     *   **Knowledge Base Search:** Synthesizes answers by retrieving facts from the knowledge base using a sophisticated, multi-stage pipeline with temporal reasoning for time-sensitive queries.
-    *   **Code Example Search:** Retrieves relevant code snippets from multiple repositories using an advanced hybrid search that combines metadata pre-filtering, keyword search, and vector search for maximum relevance and performance.
 *   **Pluggable Providers:** Supports different AI and storage providers (e.g., Gemini, local models, BigQuery, SQLite).
 *   **Robust and Asynchronous:** Built with Tokio for efficient, non-blocking I/O.
 *   **Identity & Ownership (`core-access` feature):** Provides a flexible user and ownership model to ensure clear data provenance.
 
-### The Advanced RAG Pipelines
+### The Advanced RAG Pipeline
 
-Whether you're searching the knowledge base or GitHub code examples, the system uses a multi-stage process to deliver a precise answer:
+The system uses a multi-stage process to deliver a precise answer:
 
-1.  **Query Analysis (LLM Call #1):** The user's query is first analyzed to extract key entities (e.g., "iPhone", "turso client") and keyphrases (e.g., "newest", "connect to database").
+1.  **Query Analysis (LLM Call #1):** The user's query is first analyzed to extract key entities (e.g., "iPhone") and keyphrases (e.g., "newest").
 
 2.  **Multi-Stage Candidate Retrieval:**
-    *   **Metadata Pre-filtering (for Code Search):** A fast initial search finds examples that contain the extracted entities, creating a small, relevant candidate pool.
-    *   **Keyword & Vector Search:** In parallel, keyword and vector searches are performed across the knowledge base or the filtered code examples. The vector search uses an **Embedding Model (LLM Call #2)** to convert the user's query into a vector for semantic matching.
+    *   **Keyword & Vector Search:** Keyword and vector searches are performed across the knowledge base. The vector search uses an **Embedding Model (LLM Call #2)** to convert the user's query into a vector for semantic matching.
 
 3.  **Reciprocal Rank Fusion (RRF):** The results from keyword and vector searches are intelligently combined and re-ranked using the RRF algorithm to produce a single, relevance-scored list.
 

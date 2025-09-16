@@ -12,6 +12,7 @@ path = "src/main.rs"
 # Internal Crate
 anyrag = { path = "../lib", features = ["core-access", "rss"] }
 core-access = { path = "../core-access" }
+github = { path = "../github" }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }

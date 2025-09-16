@@ -4,7 +4,7 @@
 //! repository metadata and extracted code examples, as outlined in `PLAN.md`.
 
 use super::types::{GeneratedExample, GitHubIngestError, TrackedRepository};
-use crate::providers::db::sqlite::SqliteProvider;
+use anyrag::providers::db::sqlite::SqliteProvider;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::info;
@@ -192,7 +192,7 @@ impl StorageManager {
             let example_id: i64 = row.get(0)?;
             let content: String = row.get(1)?;
 
-            let vector = crate::providers::ai::generate_embeddings_batch(
+            let vector = anyrag::providers::ai::generate_embeddings_batch(
                 api_url,
                 model_name,
                 &[&content],

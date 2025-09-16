@@ -17,7 +17,7 @@ use self::{
     storage::StorageManager,
     types::{GitHubIngestError, IngestionTask},
 };
-use crate::{providers::ai::AiProvider, SearchResult};
+use anyrag::{providers::ai::AiProvider, SearchResult};
 use std::sync::Arc;
 use tracing::{info, instrument};
 

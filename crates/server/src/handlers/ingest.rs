@@ -8,7 +8,6 @@ use crate::auth::middleware::AuthenticatedUser;
 #[cfg(feature = "rss")]
 use anyrag::ingest::ingest_from_url;
 use anyrag::{
-    github_ingest::{run_github_ingestion, search_examples, types::IngestionTask},
     ingest::{
         dump_firestore_collection, ingest_faq_from_google_sheet, ingest_from_google_sheet_url,
         knowledge::{extract_and_store_metadata, IngestionPrompts, WebIngestStrategy},
@@ -23,6 +22,9 @@ use axum::{
     Json,
 };
 use axum_extra::extract::Multipart;
+use github::ingest::{
+    run_github_ingestion, search_examples, storage::StorageManager, types::IngestionTask,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{info, warn};
@@ -471,7 +473,7 @@ pub async fn ingest_web_handler(
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     Json(payload): Json<IngestWebRequest>,
-) -> Result<Json<super::ApiResponse<IngestWebResponse>>, AppError> {
+) -> Result<Json<ApiResponse<IngestWebResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     info!(
         "Received web ingest request for URL: {} by user {:?}",
@@ -757,8 +759,7 @@ pub async fn ingest_github_handler(
         embedding_api_key: app_state.config.embedding.api_key.clone(),
     };
 
-    let storage_manager =
-        anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new("db/github_ingest").await?;
 
     let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task)
         .await
@@ -784,8 +785,7 @@ pub async fn get_versioned_examples_handler(
         path.repo_name, path.version
     );
 
-    let storage_manager =
-        anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new("db/github_ingest").await?;
 
     let examples = storage_manager
         .get_examples(&path.repo_name, &path.version)
@@ -832,8 +832,7 @@ pub async fn get_latest_examples_handler(
         path.repo_name
     );
 
-    let storage_manager =
-        anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new("db/github_ingest").await?;
 
     let latest_version = storage_manager
         .get_latest_version(&path.repo_name)
@@ -916,8 +915,7 @@ pub async fn search_examples_handler(
     let embedding_model = &app_state.config.embedding.model_name;
     let embedding_api_key = app_state.config.embedding.api_key.as_deref();
 
-    let storage_manager =
-        anyrag::github_ingest::storage::StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new("db/github_ingest").await?;
 
     let search_results = search_examples(
         &storage_manager,

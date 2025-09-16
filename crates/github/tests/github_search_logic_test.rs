@@ -6,15 +6,17 @@
 // Make the common module available.
 mod common;
 
-use anyrag::github_ingest::{
+use common::{MockAiProvider, setup_mock_embedding_server, setup_tracing};
+use github::{
+    ingest::{
+        storage::StorageManager,
+        types::{ExampleSourceType, GeneratedExample},
+    },
     search_examples,
-    storage::StorageManager,
-    types::{ExampleSourceType, GeneratedExample},
 };
-use common::{setup_mock_embedding_server, setup_tracing, MockAiProvider};
 use serde_json::json;
 use std::sync::Arc;
-use tempfile::{tempdir, TempDir};
+use tempfile::{TempDir, tempdir};
 
 /// Helper function to set up a temporary database with two distinct examples.
 /// One example is about "turso", and the other is unrelated.

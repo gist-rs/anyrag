@@ -9,6 +9,7 @@ mod common;
 use anyhow::Result;
 use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
+use github::ingest::storage::StorageManager;
 use httpmock::Method;
 use serde_json::{json, Value};
 use std::fs;
@@ -102,12 +103,12 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
     )];
     let repo_a_dir = create_mock_git_repo("repo-a", &repo_a_files, "v1.0.0")?;
     let repo_a_url = repo_a_dir.path().to_str().unwrap();
-    let repo_a_name = anyrag::github_ingest::storage::StorageManager::url_to_repo_name(repo_a_url);
+    let repo_a_name = StorageManager::url_to_repo_name(repo_a_url);
 
     let repo_b_files = [("examples/client.rs", "fn make_http_request() {}")];
     let repo_b_dir = create_mock_git_repo("repo-b", &repo_b_files, "v1.2.0")?;
     let repo_b_url = repo_b_dir.path().to_str().unwrap();
-    let repo_b_name = anyrag::github_ingest::storage::StorageManager::url_to_repo_name(repo_b_url);
+    let repo_b_name = StorageManager::url_to_repo_name(repo_b_url);
 
     // B. Ingest both repositories.
     for (url, version) in [(repo_a_url, "v1.0.0"), (repo_b_url, "v1.2.0")] {

@@ -73,14 +73,14 @@ async fn setup_database_with_manual_data() -> Result<SqliteProvider> {
             doc2_id,
             guest_user_id.clone(),
             "http://mock.com/other",
-            "Other Info",
-            "This is another document."
+            "Irrelevant Data",
+            "Some unrelated information."
         ],
     )
     .await?;
     conn.execute(
         "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_value) VALUES (?, ?, ?, ?)",
-        params![doc2_id, guest_user_id.clone(), "ENTITY", "Other"],
+        params![doc2_id, guest_user_id.clone(), "ENTITY", "Irrelevant"],
     )
     .await?;
     conn.execute(

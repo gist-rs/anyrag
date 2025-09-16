@@ -71,40 +71,6 @@ cargo run -p cli -- dump firebase \
   --timestamp-field updatedAt
 ```
 
-#### `dump github`
-
-Clones a public GitHub repository, intelligently extracts code examples from documentation, tests, and example files, stores them in a local database, and generates a consolidated Markdown file for use as LLM context.
-
-**Arguments:**
-
-*   `<URL>`: **(Required)** The full URL of the public GitHub repository (e.g., `https://github.com/tursodatabase/turso`).
-*   `--version <VERSION>`: (Optional) A specific git tag, branch, or commit hash to check out. If omitted, the CLI will automatically use the latest semantic version tag it finds.
-*   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model. If provided, embeddings will be generated for all extracted examples, enabling vector search capabilities. Can also be set via the `EMBEDDINGS_API_URL` environment variable.
-*   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use (e.g., `text-embedding-ada-002`). Can also be set via the `EMBEDDINGS_MODEL` environment variable.
-*   `--no-process`: (Optional) Disables the final automatic step of chunking the generated Markdown context file.
-
-**Examples:**
-
-**1. Basic Ingestion:**
-
-This command will ingest the Turso repository, find all relevant examples, generate a context file, and automatically process that file into a chunked database.
-```sh
-cargo run -p cli -- dump github https://github.com/tursodatabase/turso
-```
-
-**2. Ingestion with Embeddings:**
-
-This command does everything the basic command does, but it also generates vector embeddings for each extracted code example and for each chunk of the final context file. This is required for enabling semantic vector search.
-```sh
-cargo run -p cli -- dump github https://github.com/tursodatabase/turso \
-  --embedding-api-url "http://localhost:1234/api/embeddings" \
-  --embedding-model "text-embedding-qwen3-embedding-8b"
-```
-
-**Expected Output:**
-
-After a successful run, you will see messages indicating the number of examples ingested. A new context file will be created (e.g., `tursodatabase-turso-v0.90.1-context.md`), and you will see a final confirmation that the chunks from this file have also been stored in a local database (e.g., `db/github_chunks/tursodatabase-turso.db`).
-
 ### `process file`
 
 Ingests a local Markdown file by splitting it into chunks and storing them in a dedicated SQLite database. This is the same logic that `dump github` uses automatically on its generated context file, but it can be used on any Markdown file.
