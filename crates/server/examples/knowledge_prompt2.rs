@@ -21,7 +21,8 @@ use anyhow::{bail, Result};
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
-    handlers::{self, EmbedNewRequest, IngestWebRequest, SearchRequest},
+    handlers::ingest::web::{ingest_web_handler, IngestWebRequest},
+    handlers::{self, EmbedNewRequest, SearchRequest},
     state::{self, AppState},
     types::DebugParams,
 };
@@ -128,7 +129,7 @@ async fn main() -> Result<()> {
         url: ingest_url.to_string(),
     };
 
-    match handlers::ingest_web_handler(
+    match ingest_web_handler(
         axum::extract::State(app_state.clone()),
         auth_user.clone(),
         Query(DebugParams::default()),

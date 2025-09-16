@@ -5,6 +5,7 @@
 //! variables. This approach allows for a structured, flexible, and maintainable
 //! configuration setup.
 
+use anyrag::prompts::knowledge::KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT;
 use anyrag::prompts::tasks::*;
 use config::{
     Config as ConfigBuilder, Environment, File, FileFormat, Value as ConfigValue,
@@ -175,7 +176,7 @@ fn build_default_tasks() -> HashMap<String, ConfigValue> {
             "knowledge_distillation",
             (
                 "gemini_default",
-                KNOWLEDGE_DISTILLATION_SYSTEM_PROMPT,
+                KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, // Use the new YAML restructuring prompt.
                 KNOWLEDGE_DISTILLATION_USER_PROMPT,
             ),
         ),

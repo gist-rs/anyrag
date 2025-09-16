@@ -21,7 +21,8 @@ use anyhow::{bail, Result};
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
-    handlers::{self, EmbedNewRequest, IngestParams, IngestSheetRequest, SearchRequest},
+    handlers::ingest::sheet::{ingest_sheet_handler, IngestParams, IngestSheetRequest},
+    handlers::{self, EmbedNewRequest, SearchRequest},
     state,
     types::DebugParams,
 };
@@ -99,7 +100,7 @@ async fn main() -> Result<()> {
         embed: true,
     };
 
-    match handlers::ingest_sheet_handler(
+    match ingest_sheet_handler(
         axum::extract::State(app_state.clone()),
         auth_user.clone(),
         Query(ingest_params),
