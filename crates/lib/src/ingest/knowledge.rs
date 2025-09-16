@@ -8,8 +8,8 @@
 //! 5.  **Fine-Tuning Export**: Exports the knowledge base into a format for model fine-tuning.
 
 use crate::{errors::PromptError, providers::ai::AiProvider};
-use html::{self, clean_markdown_content};
-use html2md;
+use html;
+
 use md5;
 
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,8 @@ pub enum KnowledgeError {
     TypeConversion,
     #[error("An internal error occurred: {0}")]
     Internal(#[from] anyhow::Error),
-
+    #[error("HTML processing error: {0}")]
+    Html(String),
     #[error("Content appears to be contaminated with forbidden HTML tags after cleaning: {0}")]
     ContaminatedContent(String),
 }
@@ -206,33 +207,12 @@ pub async fn fetch_web_content(
     url: &str,
     strategy: WebIngestStrategy<'_>,
 ) -> Result<String, KnowledgeError> {
-    if url.ends_with(".md") {
-        info!("Fetching raw markdown directly from: {url}");
-        return reqwest::get(url)
-            .await?
-            .text()
-            .await
-            .map_err(KnowledgeError::Fetch);
-    }
-
     match strategy {
         WebIngestStrategy::RawHtml => {
-            info!("Fetching raw HTML from: {url}");
-            let client = reqwest::Client::new();
-            let response = client.get(url).send().await?;
-            if !response.status().is_success() {
-                let status = response.status().as_u16();
-                let body = response.text().await.unwrap_or_default();
-                // We can reuse the Jina error type for a generic fetch failure
-                return Err(KnowledgeError::JinaReaderFailed { status, body });
-            }
-            let html_raw = response.text().await?;
-
-            // Use the new html crate to clean the content.
-            let html = html::clean_html(&html_raw, None);
-
-            // Convert the cleaned HTML to Markdown.
-            Ok(clean_markdown_content(&html2md::parse_html(&html)))
+            info!("Fetching and cleaning HTML from: {url}");
+            html::url_to_clean_markdown(url, None)
+                .await
+                .map_err(|e| KnowledgeError::Html(e.to_string()))
         }
         WebIngestStrategy::Jina { api_key } => {
             let fetch_url = format!("https://r.jina.ai/{url}");

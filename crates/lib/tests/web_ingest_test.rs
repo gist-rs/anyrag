@@ -108,10 +108,10 @@ async fn test_fetch_web_content_raw_html_error_status() {
     // --- 3. Assert ---
     assert!(result.is_err());
     match result.err().unwrap() {
-        KnowledgeError::JinaReaderFailed { status, body } => {
-            assert_eq!(status, 404);
-            assert_eq!(body, "Not Found");
+        KnowledgeError::Html(e) => {
+            assert!(e.contains("status 404"));
+            assert!(e.contains("Not Found"));
         }
-        other => panic!("Expected JinaReaderFailed error, but got {other:?}"),
+        other => panic!("Expected Html error, but got {other:?}"),
     }
 }

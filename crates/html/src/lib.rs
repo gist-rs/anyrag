@@ -1,4 +1,6 @@
 use regex::Regex;
+use std::error::Error;
+use std::fmt;
 use std::fs;
 
 /// Cleans specified HTML tags from a string.
@@ -23,6 +25,26 @@ pub fn clean_html(html: &str, remove_tags: Option<&[&str]>) -> String {
         cleaned_html = re.replace_all(&cleaned_html, "").to_string();
     }
     cleaned_html
+}
+
+/// Converts raw HTML to cleaned Markdown in a single step.
+///
+/// This function first cleans the HTML by removing specified tags, then converts the
+/// result to Markdown, and finally cleans the resulting Markdown to remove
+/// common artifacts.
+///
+/// # Arguments
+///
+/// * `html` - The raw HTML content to convert.
+/// * `remove_tags` - An optional slice of HTML tags to remove before conversion.
+///
+/// # Returns
+///
+/// A `String` containing the cleaned Markdown.
+pub fn html_to_clean_markdown(html: &str, remove_tags: Option<&[&str]>) -> String {
+    let cleaned_html = clean_html(html, remove_tags);
+    let markdown = html2md::parse_html(&cleaned_html);
+    clean_markdown_content(&markdown)
 }
 
 /// Cleans aggressively fetched markdown content by removing common navigational
@@ -82,4 +104,68 @@ pub async fn url_to_md(
     let file_name = format!("{digest:x}.md");
     fs::write(&file_name, cleaned_md)?;
     Ok(file_name)
+}
+
+/// Fetches a URL and converts its HTML content to cleaned Markdown.
+///
+/// This function handles the HTTP request, checks for success, and then uses the
+/// `html_to_clean_markdown` function to process the response body.
+///
+/// # Arguments
+///
+/// * `url` - The URL to fetch.
+/// * `remove_tags` - An optional slice of HTML tags to remove during cleaning.
+///
+/// # Returns
+///
+/// A `Result` containing the cleaned Markdown `String`, or a `FetchError`.
+
+#[derive(Debug)]
+pub enum FetchError {
+    Status { status: u16, body: String },
+    Request(reqwest::Error),
+}
+
+impl fmt::Display for FetchError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FetchError::Status { status, body } => {
+                write!(f, "Request failed with status {status}: {body}")
+            }
+            FetchError::Request(e) => write!(f, "Request failed: {e}"),
+        }
+    }
+}
+
+impl Error for FetchError {}
+
+impl From<reqwest::Error> for FetchError {
+    fn from(err: reqwest::Error) -> FetchError {
+        FetchError::Request(err)
+    }
+}
+
+pub async fn url_to_clean_markdown(
+    url: &str,
+    remove_tags: Option<&[&str]>,
+) -> Result<String, FetchError> {
+    if url.ends_with(".md") {
+        let response = reqwest::get(url).await?;
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+            return Err(FetchError::Status { status, body });
+        }
+        let markdown = response.text().await?;
+        return Ok(clean_markdown_content(&markdown));
+    }
+
+    let response = reqwest::get(url).await?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        return Err(FetchError::Status { status, body });
+    }
+    let html_raw = response.text().await?;
+    Ok(html_to_clean_markdown(&html_raw, remove_tags))
 }

@@ -56,6 +56,6 @@ mod tests {
         assert!(!content.is_empty());
 
         // cleanup
-        std::fs::remove_file(&file_name).unwrap();
+        // std::fs::remove_file(&file_name).unwrap();
     }
 }
