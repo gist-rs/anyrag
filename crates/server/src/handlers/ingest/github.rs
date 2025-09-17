@@ -1,9 +1,9 @@
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
+use anyrag::ingest::Ingestor;
 use anyrag::SearchResult;
-use anyrag_github::ingest::{
-    run_github_ingestion, search_examples, storage::StorageManager, types::IngestionTask,
-};
+use anyrag_github::ingest::{search_examples, storage::StorageManager};
+use anyrag_github::GithubIngestor;
 use axum::{
     extract::{Path, Query, State},
     Json,
@@ -53,6 +53,8 @@ pub struct SearchExamplesResponse {
 }
 
 /// Handler for ingesting code examples from a public GitHub repository.
+/// This handler acts as a thin web layer, orchestrating the call to the
+/// `anyrag-github` crate through the generic `Ingestor` trait.
 pub async fn ingest_github_handler(
     State(app_state): State<AppState>,
     _user: AuthenticatedUser,
@@ -61,23 +63,38 @@ pub async fn ingest_github_handler(
 ) -> Result<Json<ApiResponse<IngestGitHubResponse>>, AppError> {
     info!("Received GitHub ingest request for URL: {}", payload.url);
 
-    let task = IngestionTask {
-        url: payload.url.clone(),
-        version: payload.version.clone(),
-        embedding_api_url: Some(app_state.config.embedding.api_url.clone()),
-        embedding_model: Some(app_state.config.embedding.model_name.clone()),
-        embedding_api_key: app_state.config.embedding.api_key.clone(),
-    };
+    // 1. Instantiate the ingestor with configuration from the app state.
+    // This decouples the server from the implementation details of the plugin.
+    let ingestor = GithubIngestor::new(
+        Some(app_state.config.embedding.api_url.clone()),
+        Some(app_state.config.embedding.model_name.clone()),
+        app_state.config.embedding.api_key.clone(),
+    );
 
-    let storage_manager = StorageManager::new("db/github_ingest").await?;
+    // 2. Serialize the source information into a JSON string for the generic ingest method.
+    let source_json = json!({
+        "url": payload.url.clone(),
+        "version": payload.version.clone()
+    })
+    .to_string();
 
-    let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task)
+    // 3. Call the generic ingest method from the trait.
+    let ingest_result = ingestor
+        .ingest(&source_json, None) // owner_id is not used for github ingestion
         .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("GitHub ingestion failed: {}", e)))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("GitHub ingestion failed: {e}")))?;
 
+    // 4. Parse the version from the result source for the response.
+    let ingested_version = ingest_result
+        .source
+        .rsplit_once('#')
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // 5. Construct the final HTTP response.
     let response = IngestGitHubResponse {
         message: "GitHub ingestion pipeline completed successfully.".to_string(),
-        ingested_examples: ingested_count,
+        ingested_examples: ingest_result.documents_added,
         version: ingested_version,
     };
     let debug_info = json!({ "url": payload.url, "version": payload.version });
