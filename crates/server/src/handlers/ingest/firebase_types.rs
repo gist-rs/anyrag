@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 pub struct IngestFirebaseRequest {
     pub project_id: String,
     pub collection: String,

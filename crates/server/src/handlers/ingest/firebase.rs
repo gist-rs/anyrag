@@ -1,41 +1,33 @@
 use crate::auth::middleware::AuthenticatedUser;
+use crate::handlers::ingest::firebase_types::{IngestFirebaseRequest, IngestFirebaseResponse};
 use crate::handlers::{
     graph_handlers, wrap_response, ApiResponse, AppError, AppState, DebugParams,
 };
-use anyrag::ingest::{dump_firestore_collection, DumpFirestoreOptions};
+use anyhow::anyhow;
+use anyrag::ingest::Ingestor;
 use anyrag::providers::factory::create_dynamic_provider;
+use anyrag_firebase::{sanitize_table_name, FirebaseIngestor, FirebaseSource};
 use anyrag_web::extract_and_store_metadata;
 use axum::{
     extract::{Query, State},
     Json,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{info, warn};
 use turso::Value as TursoValue;
 use uuid::Uuid;
 
-#[derive(Deserialize)]
-pub struct IngestFirebaseRequest {
-    pub project_id: String,
-    pub collection: String,
-    #[serde(default)]
-    pub incremental: bool,
-    pub timestamp_field: Option<String>,
-    pub limit: Option<i32>,
-    pub fields: Option<Vec<String>>,
-    #[serde(default)]
-    pub use_graph: bool,
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct IngestFirebaseResponse {
-    pub message: String,
-    pub ingested_documents: usize,
-    pub documents_processed_for_metadata: usize,
-    pub facts_added_to_graph: Option<usize>,
+impl From<&IngestFirebaseRequest> for FirebaseSource {
+    fn from(req: &IngestFirebaseRequest) -> Self {
+        Self {
+            project_id: req.project_id.clone(),
+            collection: req.collection.clone(),
+            incremental: req.incremental,
+            timestamp_field: req.timestamp_field.clone(),
+            limit: req.limit,
+            fields: req.fields.clone(),
+        }
+    }
 }
 
 /// Handler for ingesting a Firestore collection into a local project database.
@@ -55,18 +47,29 @@ pub async fn ingest_firebase_handler(
     let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?;
 
-    let dump_options = DumpFirestoreOptions {
-        project_id: &payload.project_id,
-        collection: &payload.collection,
-        incremental: payload.incremental,
-        timestamp_field: payload.timestamp_field.as_deref(),
-        limit: payload.limit,
-        fields: payload.fields.as_deref(),
-    };
+    let firebase_source = FirebaseSource::from(&*payload);
+    let source_str = serde_json::to_string(&firebase_source).map_err(|e| {
+        AppError::Internal(anyhow!(
+            "Failed to serialize Firebase source for project '{}': {}",
+            payload.project_id,
+            e
+        ))
+    })?;
 
-    let ingested_count = dump_firestore_collection(&sqlite_provider, dump_options)
+    let ingestor = FirebaseIngestor::new(&sqlite_provider);
+    let ingestion_result = ingestor
+        .ingest(&source_str, owner_id.as_deref())
         .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Firebase dump failed: {}", e)))?;
+        .map_err(|e| {
+            AppError::Internal(anyhow!(
+                "Firebase ingestion failed for project '{}' and collection '{}': {}",
+                payload.project_id,
+                payload.collection,
+                e
+            ))
+        })?;
+
+    let ingested_count = ingestion_result.documents_added;
 
     if ingested_count == 0 {
         let response = IngestFirebaseResponse {
@@ -78,7 +81,7 @@ pub async fn ingest_firebase_handler(
         return Ok(wrap_response(response, debug_params, None));
     }
 
-    let table_name = anyrag::ingest::firebase::sanitize_table_name(&payload.collection);
+    let table_name = sanitize_table_name(&payload.collection);
     let conn = sqlite_provider.db.connect()?;
 
     let source_url_prefix = format!("db://{}/{}%", payload.project_id, &table_name);
@@ -104,9 +107,8 @@ pub async fn ingest_firebase_handler(
             .ai_providers
             .get(provider_name)
             .ok_or_else(|| {
-                AppError::Internal(anyhow::anyhow!(
-                    "Provider '{}' for task 'knowledge_metadata_extraction' not found in providers map.",
-                    provider_name
+                AppError::Internal(anyhow!(
+                    "Provider '{provider_name}' for task 'knowledge_metadata_extraction' not found in providers map."
                 ))
             })?
             .clone();
@@ -114,7 +116,7 @@ pub async fn ingest_firebase_handler(
         (provider, provider_config.model_name.clone())
     };
 
-    let all_data_sql = format!("SELECT * FROM {table_name}");
+    let all_data_sql = format!("SELECT * FROM \"{table_name}\"");
     let mut stmt = conn.prepare(&all_data_sql).await?;
     let column_names: Vec<String> = stmt
         .columns()
@@ -146,8 +148,7 @@ pub async fn ingest_firebase_handler(
             Some(pk) if !pk.is_empty() => pk,
             _ => {
                 warn!(
-                    "Skipping row in table '{}' due to missing or invalid primary key (_id).",
-                    table_name
+                    "Skipping row in table '{table_name}' due to missing or invalid primary key (_id)."
                 );
                 continue;
             }
@@ -186,21 +187,15 @@ pub async fn ingest_firebase_handler(
         )
         .await
         {
-            info!("Could not extract metadata for doc {}: {}", document_id, e);
+            info!("Could not extract metadata for doc {document_id}: {e}");
         }
         documents_processed_for_metadata += 1;
     }
-    info!(
-        "Processed {} documents for metadata extraction.",
-        documents_processed_for_metadata
-    );
+    info!("Processed {documents_processed_for_metadata} documents for metadata extraction.");
 
     let mut facts_added_to_graph = None;
     if payload.use_graph {
-        info!(
-            "`use_graph` is true. Triggering knowledge graph build for table '{}'.",
-            table_name
-        );
+        info!("`use_graph` is true. Triggering knowledge graph build for table '{table_name}'.");
         let graph_build_payload = graph_handlers::GraphBuildRequest {
             db: payload.project_id.clone(),
             table_name: table_name.clone(),

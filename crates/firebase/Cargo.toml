@@ -17,6 +17,6 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 
 # Dependencies specific to Firebase/Firestore not in the workspace root
-firestore = "0.35.1"
+firestore = "0.47.0"
 tokio-stream = "0.1"
-gcloud-sdk = "0.15.0"
+gcloud-sdk = { version = "0.28", features = ["google-firestore-v1"] }

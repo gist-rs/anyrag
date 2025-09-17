@@ -1,5 +1,6 @@
-use anyhow::{bail, Result};
-use anyrag::{constants, providers::db::sqlite::SqliteProvider};
+use anyhow::{anyhow, bail, Result};
+use anyrag::{constants, ingest::Ingestor, providers::db::sqlite::SqliteProvider};
+use anyrag_firebase::{FirebaseIngestor, FirebaseSource};
 use clap::Parser;
 use std::fs;
 use tracing::info;
@@ -15,7 +16,7 @@ pub fn resolve_project_id(project_id_arg: Option<&str>) -> Result<String> {
 
     if let Ok(file_content) = fs::read_to_string("gcp_creds.json") {
         let json: serde_json::Value = serde_json::from_str(&file_content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse gcp_creds.json: {e}"))?;
+            .map_err(|e| anyhow!("Failed to parse gcp_creds.json: {e}"))?;
         if let Some(project_id) = json["project_id"].as_str() {
             println!("Inferred project ID '{project_id}' from gcp_creds.json.");
             return Ok(project_id.to_string());
@@ -47,6 +48,20 @@ pub struct FirebaseArgs {
     fields: Option<Vec<String>>,
 }
 
+impl FirebaseArgs {
+    /// Creates a `FirebaseSource` from the command-line arguments.
+    fn to_firebase_source(&self, project_id: String) -> FirebaseSource {
+        FirebaseSource {
+            project_id,
+            collection: self.collection.clone(),
+            incremental: self.incremental,
+            timestamp_field: self.timestamp_field.clone(),
+            limit: self.limit,
+            fields: self.fields.clone(),
+        }
+    }
+}
+
 pub async fn handle_dump_firebase(args: &FirebaseArgs) -> Result<()> {
     let project_id = resolve_project_id(args.project_id.as_deref())?;
     let db_path = format!("{}/{project_id}.db", constants::DB_DIR);
@@ -56,18 +71,20 @@ pub async fn handle_dump_firebase(args: &FirebaseArgs) -> Result<()> {
     sqlite_provider.initialize_schema().await?;
     info!("Local database at '{db_path}' is ready.");
 
-    let options = DumpFirestoreOptions {
-        project_id: &project_id,
-        collection: &args.collection,
-        incremental: args.incremental,
-        timestamp_field: args.timestamp_field.as_deref(),
-        limit: args.limit,
-        fields: args.fields.as_deref(),
-    };
+    let firebase_source = args.to_firebase_source(project_id);
+    let source_str = serde_json::to_string(&firebase_source)
+        .map_err(|e| anyhow!("Failed to serialize Firebase source: {e}"))?;
 
-    dump_firestore_collection(&sqlite_provider, options)
+    let ingestor = FirebaseIngestor::new(&sqlite_provider);
+    let result = ingestor
+        .ingest(&source_str, None)
         .await
-        .map_err(|e| anyhow::anyhow!("Firebase dump failed: {e}"))?;
+        .map_err(|e| anyhow!("Firebase ingestion failed: {e}"))?;
+
+    info!(
+        "Successfully ingested {} new documents from collection '{}'.",
+        result.documents_added, result.source
+    );
 
     Ok(())
 }

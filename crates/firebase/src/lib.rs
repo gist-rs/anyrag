@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use firestore::{FirestoreDb, FirestoreDocument, FirestoreQueryDirection, FirestoreTimestamp};
 use gcloud_sdk::google::firestore::v1 as firestore_v1;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
 use thiserror::Error;
 use tokio_stream::StreamExt;
@@ -47,7 +47,7 @@ impl From<FirebaseIngestError> for AnyragIngestError {
 
 // --- Data Structures ---
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FirebaseSource {
     pub project_id: String,
     pub collection: String,
@@ -203,7 +203,7 @@ fn get_timestamp_from_doc(doc: &FirestoreDocument, ts_field: &str) -> Option<Fir
         .get(ts_field)
         .and_then(|val| val.value_type.as_ref())
         .and_then(|vt| match vt {
-            ValueType::TimestampValue(ts) => Utc
+            firestore_v1::value::ValueType::TimestampValue(ts) => Utc
                 .timestamp_opt(ts.seconds, ts.nanos as u32)
                 .single()
                 .map(FirestoreTimestamp),
@@ -300,7 +300,12 @@ async fn insert_documents(
     );
     let mut stmt = conn.prepare(&insert_sql).await?;
     for doc in documents {
-        let doc_id = doc.name.split('/').last().unwrap_or_default().to_string();
+        let doc_id = doc
+            .name
+            .split('/')
+            .next_back()
+            .unwrap_or_default()
+            .to_string();
         let mut params: Vec<TursoValue> = vec![doc_id.into()];
         for snake_case_name in &snake_case_columns {
             let camel_case_name = column_map.get(snake_case_name).unwrap();
@@ -316,14 +321,15 @@ async fn insert_documents(
 fn convert_firestore_value_to_turso(
     firestore_value: Option<firestore_v1::Value>,
 ) -> Result<TursoValue, FirebaseIngestError> {
-    use firestore_v1::value::ValueType;
     Ok(match firestore_value.and_then(|v| v.value_type) {
         Some(vt) => match vt {
-            ValueType::StringValue(s) => TursoValue::Text(s),
-            ValueType::IntegerValue(i) => TursoValue::Integer(i),
-            ValueType::DoubleValue(d) => TursoValue::Real(d),
-            ValueType::BooleanValue(b) => TursoValue::Integer(if b { 1 } else { 0 }),
-            ValueType::TimestampValue(ts) => {
+            firestore_v1::value::ValueType::StringValue(s) => TursoValue::Text(s),
+            firestore_v1::value::ValueType::IntegerValue(i) => TursoValue::Integer(i),
+            firestore_v1::value::ValueType::DoubleValue(d) => TursoValue::Real(d),
+            firestore_v1::value::ValueType::BooleanValue(b) => {
+                TursoValue::Integer(if b { 1 } else { 0 })
+            }
+            firestore_v1::value::ValueType::TimestampValue(ts) => {
                 let dt = Utc
                     .timestamp_opt(ts.seconds, ts.nanos as u32)
                     .single()
@@ -332,13 +338,14 @@ fn convert_firestore_value_to_turso(
                     })?;
                 TursoValue::Text(dt.to_rfc3339())
             }
-            ValueType::MapValue(_) | ValueType::ArrayValue(_) => {
+            firestore_v1::value::ValueType::MapValue(_)
+            | firestore_v1::value::ValueType::ArrayValue(_) => {
                 let serde_val = gcp_value_to_serde_value(firestore_v1::Value {
                     value_type: Some(vt),
                 })?;
                 TursoValue::Text(serde_json::to_string(&serde_val)?)
             }
-            ValueType::NullValue(_) => TursoValue::Null,
+            firestore_v1::value::ValueType::NullValue(_) => TursoValue::Null,
             _ => TursoValue::Null,
         },
         None => TursoValue::Null,
@@ -348,16 +355,15 @@ fn convert_firestore_value_to_turso(
 fn gcp_value_to_serde_value(
     gcp_val: firestore_v1::Value,
 ) -> Result<serde_json::Value, FirebaseIngestError> {
-    use firestore_v1::value::ValueType;
     Ok(match gcp_val.value_type {
         Some(vt) => match vt {
-            ValueType::StringValue(s) => serde_json::Value::String(s),
-            ValueType::IntegerValue(i) => serde_json::Value::Number(i.into()),
-            ValueType::DoubleValue(d) => serde_json::Number::from_f64(d)
+            firestore_v1::value::ValueType::StringValue(s) => serde_json::Value::String(s),
+            firestore_v1::value::ValueType::IntegerValue(i) => serde_json::Value::Number(i.into()),
+            firestore_v1::value::ValueType::DoubleValue(d) => serde_json::Number::from_f64(d)
                 .map(serde_json::Value::Number)
                 .unwrap_or(serde_json::Value::Null),
-            ValueType::BooleanValue(b) => serde_json::Value::Bool(b),
-            ValueType::TimestampValue(ts) => {
+            firestore_v1::value::ValueType::BooleanValue(b) => serde_json::Value::Bool(b),
+            firestore_v1::value::ValueType::TimestampValue(ts) => {
                 let dt = Utc
                     .timestamp_opt(ts.seconds, ts.nanos as u32)
                     .single()
@@ -366,7 +372,7 @@ fn gcp_value_to_serde_value(
                     })?;
                 serde_json::Value::String(dt.to_rfc3339())
             }
-            ValueType::MapValue(mv) => {
+            firestore_v1::value::ValueType::MapValue(mv) => {
                 let map = mv
                     .fields
                     .into_iter()
@@ -374,7 +380,7 @@ fn gcp_value_to_serde_value(
                     .collect::<Result<serde_json::Map<_, _>, _>>()?;
                 serde_json::Value::Object(map)
             }
-            ValueType::ArrayValue(av) => {
+            firestore_v1::value::ValueType::ArrayValue(av) => {
                 let arr = av
                     .values
                     .into_iter()
@@ -382,7 +388,7 @@ fn gcp_value_to_serde_value(
                     .collect::<Result<Vec<_>, _>>()?;
                 serde_json::Value::Array(arr)
             }
-            ValueType::NullValue(_) => serde_json::Value::Null,
+            firestore_v1::value::ValueType::NullValue(_) => serde_json::Value::Null,
             _ => serde_json::Value::Null,
         },
         None => serde_json::Value::Null,

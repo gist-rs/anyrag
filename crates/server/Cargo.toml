@@ -18,6 +18,7 @@ anyrag-pdf = { path = "../pdf" }
 anyrag-rss = { path = "../rss" }
 anyrag-sheets = { path = "../sheets" }
 anyrag-text = { path = "../text" }
+anyrag-firebase = { path = "../firebase" }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }
