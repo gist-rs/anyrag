@@ -122,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ai_provider: Arc<dyn AiProvider> = Arc::from(ai_provider);
 
     // --- Build Storage Provider ---
-    let sqlite_provider = SqliteProvider::new(db_path).await?;
+    let sqlite_provider = SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?;
     info!("SQLite provider initialized and schema is ready.");
 
