@@ -15,6 +15,9 @@ core-access = { path = "../core-access" }
 anyrag-github = { path = "../github" }
 anyrag-web = { path = "../web" }
 anyrag-pdf = { path = "../pdf" }
+anyrag-rss = { path = "../rss" }
+anyrag-sheets = { path = "../sheets" }
+anyrag-text = { path = "../text" }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }

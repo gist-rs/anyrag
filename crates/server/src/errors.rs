@@ -1,11 +1,14 @@
-#[cfg(feature = "rss")]
-use anyrag::ingest::RssIngestError;
 use anyrag::{
-    ingest::{EmbeddingError, IngestSheetFaqError, KnowledgeError, SheetError, TextIngestError},
+    ingest::{EmbeddingError, KnowledgeError},
     search::SearchError,
     PromptError,
 };
 use anyrag_github::types::GitHubIngestError;
+#[cfg(feature = "rss")]
+use anyrag_rss::RssIngestError;
+use anyrag_sheets::SheetError;
+use anyrag_text::TextIngestError;
+#[cfg(feature = "rss")]
 use anyrag_web::WebIngestError;
 use axum::{
     http::StatusCode,
@@ -29,15 +32,13 @@ pub enum AppError {
     /// Errors from the RSS ingestion process.
     #[cfg(feature = "rss")]
     RssIngest(RssIngestError),
-    /// Errors from the sheet faq ingestion process.
-    SheetFaqIngest(IngestSheetFaqError),
+
     /// Errors from the sheet ingestion process.
     Sheet(SheetError),
     /// Errors from the GitHub ingestion process.
     GitHubIngest(GitHubIngestError),
     /// Errors from the web ingestion process.
     WebIngest(WebIngestError),
-
     /// Errors from the embedding process.
     Embedding(EmbeddingError),
     /// Errors from the knowledge base pipeline.
@@ -71,13 +72,6 @@ impl From<TextIngestError> for AppError {
 impl From<RssIngestError> for AppError {
     fn from(err: RssIngestError) -> Self {
         AppError::RssIngest(err)
-    }
-}
-
-/// Conversion from `IngestSheetFaqError` to `AppError`.
-impl From<IngestSheetFaqError> for AppError {
-    fn from(err: IngestSheetFaqError) -> Self {
-        AppError::SheetFaqIngest(err)
     }
 }
 
@@ -162,13 +156,7 @@ impl IntoResponse for AppError {
                     format!("Failed to ingest RSS feed: {err}"),
                 )
             }
-            AppError::SheetFaqIngest(err) => {
-                error!("IngestSheetFaqError: {:?}", err);
-                (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    format!("Failed to ingest Sheet FAQ: {err}"),
-                )
-            }
+
             AppError::Sheet(err) => {
                 error!("SheetError: {:?}", err);
                 (

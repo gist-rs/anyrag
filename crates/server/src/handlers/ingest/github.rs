@@ -1,7 +1,6 @@
 use super::github_types::*;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
-use anyrag::SearchResult;
 use anyrag::{constants, ingest::Ingestor};
 use anyrag_github::ingest::{search_examples, storage::StorageManager};
 use anyrag_github::GithubIngestor;
