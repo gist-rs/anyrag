@@ -7,7 +7,7 @@
 use anyhow::anyhow;
 use anyrag::ingest::{IngestError, IngestionResult, Ingestor};
 use anyrag::providers::ai::AiProvider;
-use anyrag_web::{IngestionPrompts, extract_and_store_metadata, restructure_with_llm};
+use anyrag_web::{extract_and_store_metadata, restructure_with_llm, IngestionPrompts};
 use async_trait::async_trait;
 use regex::Regex;
 use serde::Deserialize;
