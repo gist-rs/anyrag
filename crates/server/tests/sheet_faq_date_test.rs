@@ -17,7 +17,7 @@ use turso::{params, Builder, Value as TursoValue};
 #[tokio::test]
 async fn test_sheet_ingestion_yaml_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_sheet_ingestion_yaml_workflow").await?;
     let token = generate_jwt("sheet-ingest-user@example.com")?;
 
     // The raw data the mock server will provide, simulating a downloaded Google Sheet.
@@ -48,7 +48,7 @@ sections:
     // B. Mock the LLM Restructuring call (CSV content -> structured YAML).
     let restructuring_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_sheet_ingestion_yaml_workflow/v1/chat/completions")
             .body_contains("expert document analyst and editor"); // KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
@@ -58,7 +58,7 @@ sections:
     // C. Mock the Metadata Extraction call.
     let metadata_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_sheet_ingestion_yaml_workflow/v1/chat/completions")
             .body_contains("extract Category, Keyphrases, and Entities");
         then.status(200)
             .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "[]"}}]}));
@@ -66,7 +66,8 @@ sections:
 
     // D. Mock the Embedding API.
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_sheet_ingestion_yaml_workflow/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.3, 0.2, 0.1] }] }));
     });
@@ -74,7 +75,7 @@ sections:
     // E. Mock the RAG Query Analysis.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_sheet_ingestion_yaml_workflow/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
@@ -86,7 +87,7 @@ sections:
     // F. Mock the final RAG Synthesis call.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_sheet_ingestion_yaml_workflow/v1/chat/completions")
             .body_contains("strict, factual AI")
             .body_contains("## Sheet Data");
         then.status(200).json_body(

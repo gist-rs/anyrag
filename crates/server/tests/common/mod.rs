@@ -65,37 +65,8 @@ pub struct TestApp {
 
 impl TestApp {
     /// Spawns the application server and returns a `TestApp` instance.
-    pub async fn spawn() -> Result<Self> {
+    pub async fn spawn(test_case_name: &str) -> Result<Self> {
         let mock_server = MockServer::start();
-
-        // --- Default Mocks ---
-
-        // This is a generic, low-priority "catch-all" mock. Its purpose is to provide a
-        // default response for any AI API call that is NOT specifically handled by a mock
-        // in an individual test file.
-        mock_server.mock(|when, then| {
-            when.method(Method::POST)
-                .path("/v1/chat/completions")
-                .matches(|req| {
-                    let body_str =
-                        String::from_utf8_lossy(req.body.as_deref().unwrap_or_default());
-                    // This mock should IGNORE all specific, handled prompts. If a request
-                    // body contains any of these unique phrases, this mock will NOT match,
-                    // allowing a more specific mock in the test file to handle it.
-                    !body_str.contains("expert query analyst") // For standard hybrid search
-                        && !body_str.contains("expert code search analyst") // For GitHub search
-                        && !body_str.contains("expert technical analyst") // For PDF refinement
-                        && !body_str.contains("expert document analyst and editor") // For PDF restructuring
-                        && !body_str.contains("expert search result re-ranker") // For LLM re-ranking
-                        && !body_str.contains("extract Category, Keyphrases, and Entities") // For metadata extraction
-                        && !body_str.contains("strict, factual AI") // For RAG synthesis
-                        && !body_str.contains("intelligent data assistant") // For Text-to-SQL
-                        && !body_str.contains("strict data processor") // For SQL result formatting
-                        && !body_str.contains("You are a helpful AI assistant") // For direct generation
-                });
-            then.status(200)
-                .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "Default mock response."}}]}));
-        });
 
         let db_file = NamedTempFile::new()?;
         let db_path = db_file.path().to_path_buf();
@@ -129,8 +100,9 @@ providers:
     model_name: "mock-local-model"
 "#,
             db_path = db_path.to_str().unwrap(),
-            embedding_url = mock_server.url("/v1/embeddings"),
-            chat_completions_url = mock_server.url("/v1/chat/completions")
+            embedding_url = mock_server.url(format!("/{test_case_name}/v1/embeddings")),
+            chat_completions_url =
+                mock_server.url(format!("/{test_case_name}/v1/chat/completions"))
         );
 
         let mut file = File::create(&config_path)?;
@@ -186,6 +158,11 @@ providers:
             _server_handle: server_handle,
             shutdown_tx: Some(shutdown_tx),
         })
+    }
+
+    /// Helper function to construct a full URL for an endpoint on the test server.
+    pub fn url(&self, path: &str) -> String {
+        format!("{}{}", self.address, path)
     }
 }
 

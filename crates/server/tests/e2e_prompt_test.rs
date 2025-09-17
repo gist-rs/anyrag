@@ -12,7 +12,7 @@ use turso::Builder;
 
 #[tokio::test]
 async fn test_e2e_prompt_execution() -> Result<()> {
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_e2e_prompt_execution").await?;
 
     // --- Arrange: Database Setup ---
     // The TestApp creates an empty database. We need to create the table
@@ -41,7 +41,7 @@ async fn test_e2e_prompt_execution() -> Result<()> {
     // A simple SELECT of a constant value works perfectly.
     let query_gen_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_e2e_prompt_execution/v1/chat/completions")
             .body_contains("intelligent data assistant"); // Differentiate from the format call
         then.status(200).json_body(
             // Return a real query that interacts with the seeded data.
@@ -54,7 +54,7 @@ async fn test_e2e_prompt_execution() -> Result<()> {
     // (`[{"total":27894}]`) into a human-readable string.
     let format_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_e2e_prompt_execution/v1/chat/completions")
             .body_contains("strict data processor") // Differentiate from query gen
             .body_contains("27894"); // Check for the key part of the DB result
         then.status(200).json_body(

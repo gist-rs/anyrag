@@ -8,6 +8,7 @@ mod common;
 
 use anyhow::Result;
 use common::TestApp;
+use httpmock::Method;
 use serde_json::json;
 use turso::Value as TursoValue;
 
@@ -17,9 +18,17 @@ use crate::common::generate_jwt;
 async fn test_ingest_text_endpoint_success() -> Result<()> {
     // --- Arrange ---
 
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_ingest_text_endpoint_success").await?;
     let user_identifier = "ingest-text-user@example.com";
     let token = generate_jwt(user_identifier)?;
+
+    // This test doesn't call the AI, but a placeholder mock is needed for stable app startup.
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_ingest_text_endpoint_success/v1/chat/completions");
+        then.status(200)
+            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "OK"}}]}));
+    });
 
     // 3. Define the text payload. It includes a short paragraph and one that
     // will be split into two chunks by the chunking logic (4096 limit).

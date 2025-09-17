@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 #[tokio::test]
 async fn test_knowledge_search_with_temporal_reasoning() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_knowledge_search_with_temporal_reasoning").await?;
     let user_identifier = "temporal-user@example.com";
     let db = &app.app_state.sqlite_provider.db;
     let user = get_or_create_user(db, user_identifier, None).await?;
@@ -91,7 +91,7 @@ async fn test_knowledge_search_with_temporal_reasoning() -> Result<()> {
     // A. Mock query analysis to extract the temporal keyword and the discoverable keyphrase.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_knowledge_search_with_temporal_reasoning/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{"message": {"role": "assistant", "content": json!({
@@ -103,7 +103,8 @@ async fn test_knowledge_search_with_temporal_reasoning() -> Result<()> {
 
     // B. Mock embedding for the search query. The vector is closer to the OLD document.
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_knowledge_search_with_temporal_reasoning/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": vec![0.9, 0.1, 0.0] }] }));
     });
@@ -113,7 +114,7 @@ async fn test_knowledge_search_with_temporal_reasoning() -> Result<()> {
     // to the final LLM call contains ONLY the content from the NEWEST document.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_knowledge_search_with_temporal_reasoning/v1/chat/completions")
             .body_contains("strict, factual AI") // Match the RAG system prompt
             .body_contains("## Anyrag Pro Features"); // Must contain content from the NEW doc
         then.status(200).json_body(

@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 #[tokio::test]
 async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_hybrid_search_llm_and_rrf_modes").await?;
     let token = generate_jwt("search-test-user@example.com")?;
 
     // --- 2. Mock External Services ---
@@ -51,7 +51,7 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     // This mock handles the batch embedding of the two documents from the RSS feed.
     let doc_embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/embeddings")
+            .path("/test_hybrid_search_llm_and_rrf_modes/v1/embeddings")
             .body_contains("Learning Rust"); // Differentiate it from the query embedding call
         then.status(200).json_body(json!({
             "data": [
@@ -64,7 +64,7 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     // This mock handles embedding the user's search query.
     let query_embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/embeddings")
+            .path("/test_hybrid_search_llm_and_rrf_modes/v1/embeddings")
             .body_contains("What is golang?"); // The actual search query
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.3, 0.4, 0.5] }] }));
@@ -74,7 +74,7 @@ async fn test_hybrid_search_llm_and_rrf_modes() -> Result<()> {
     // The AI should respond with the "Go" article first, as it's more relevant to the query "golang".
     let llm_rerank_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_hybrid_search_llm_and_rrf_modes/v1/chat/completions")
             .body_contains("expert search result re-ranker"); // Match the llm_rerank system prompt
         then.status(200).json_body(json!({
             "choices": [{

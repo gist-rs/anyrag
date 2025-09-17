@@ -10,13 +10,26 @@ use anyhow::Result;
 use anyrag_server::types::ApiResponse;
 use chrono::{Duration, Utc};
 use common::TestApp;
+use httpmock::Method;
 use serde_json::{json, Value};
 
 #[tokio::test]
 #[cfg(feature = "graph_db")]
 async fn test_knowledge_graph_endpoint_e2e() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_knowledge_graph_endpoint_e2e").await?;
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_knowledge_graph_endpoint_e2e/v1/chat/completions");
+        then.status(200).json_body(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Mock knowledge graph response."
+                }
+            }]
+        }));
+    });
 
     // Define time windows for the facts
     let now = Utc::now();

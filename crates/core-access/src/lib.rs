@@ -74,10 +74,10 @@ pub async fn get_or_create_user(
     user_identifier: &str,
     role_override: Option<&str>,
 ) -> Result<User, CoreAccessError> {
-    info!("[core_access] get_or_create_user for identifier: '{user_identifier}'");
+    // info!("[core_access] get_or_create_user for identifier: '{user_identifier}'");
     let conn = db.connect()?;
     let user_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, user_identifier.as_bytes()).to_string();
-    info!("[core_access] Calculated user_id: '{user_id}'");
+    // info!("[core_access] Calculated user_id: '{user_id}'");
 
     // 1. Try to SELECT the user first for maximum compatibility.
     let mut rows = conn
@@ -90,7 +90,7 @@ pub async fn get_or_create_user(
     if let Some(row) = rows.next().await? {
         // User exists, parse it.
         let mut user = User::try_from(&row)?;
-        info!("[core_access] Found existing user: {user:?}");
+        // info!("[core_access] Found existing user: {user:?}");
 
         // If a role override is provided and it's different, update the existing user's role.
         if let Some(new_role) = role_override {
@@ -111,10 +111,10 @@ pub async fn get_or_create_user(
         return Ok(user);
     }
 
-    info!("[core_access] User not found, creating new user.");
+    // info!("[core_access] User not found, creating new user.");
     // 2. User does not exist. Determine role.
     let role = role_override.unwrap_or("user");
-    info!("[core_access] Determined role for new user: '{role}'");
+    // info!("[core_access] Determined role for new user: '{role}'");
 
     // 2.5. If user doesn't exist, INSERT. If the INSERT fails due to a UNIQUE
     // constraint violation, it means a concurrent process created the user
@@ -146,7 +146,7 @@ pub async fn get_or_create_user(
         .ok_or_else(|| CoreAccessError::UserPersistenceFailed(user_identifier.to_string()))?;
 
     let user = User::try_from(&row)?;
-    info!("[core_access] Returning newly created user: {:?}", user);
+    // info!("[core_access] Returning newly created user: {:?}", user);
     Ok(user)
 }
 

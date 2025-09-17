@@ -243,9 +243,9 @@ curl -X POST http://localhost:9090/search/knowledge \
 ```sh
 curl -X POST http://localhost:9090/search/knowledge \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <your_jwt>" \
   -d '{
-    "query": "สร้าง My Twin เอา point ได้ถึงวันไหน"
+    "db": "anyrag-thai",
+    "query": "มีเงิน 2 หมื่นออมต่อได้มั้ย"
   }'
 ```
 

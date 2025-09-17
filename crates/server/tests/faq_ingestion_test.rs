@@ -1,9 +1,11 @@
 //! # Unified Ingestion Pipeline E2E Test
 //!
-//! This file contains a comprehensive integration test for the new, unified ingestion
-//! pipeline. It replaces the old tests for the deprecated `?faq=true` and `?faq=false`
-//! parameters. This single test verifies the entire end-to-end workflow: from PDF
-//! ingestion to structured YAML storage, embedding, and a final RAG query.
+//! This test verifies the entire end-to-end workflow for PDF ingestion and search:
+//! 1. A PDF is uploaded to `/ingest/pdf`.
+//! 2. The raw text is extracted and stored directly in the database.
+//! 3. The new document is embedded via `/embed/new`.
+//! 4. A RAG query is performed via `/search/knowledge`, which should retrieve
+//!    the raw text as context and synthesize the final answer.
 
 mod common;
 
@@ -17,75 +19,29 @@ use turso::{params, Builder, Value as TursoValue};
 #[tokio::test]
 async fn test_unified_pdf_ingestion_and_rag_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let test_name = "test_unified_pdf_ingestion_and_rag_workflow";
+    let app = TestApp::spawn(test_name).await?;
     let token = generate_jwt("unified-ingest-user@example.com")?;
 
     let pdf_content = "The magic word is AnyRAG. It is a powerful framework.";
     let pdf_data = generate_test_pdf(pdf_content)?;
-
-    // The intermediate step where raw text is cleaned into Markdown.
-    let refined_markdown = "- The magic word is AnyRAG.\n- It is a powerful framework.";
-
-    // The final structured data that should be stored in the database.
-    let expected_yaml = r#"
-sections:
-  - title: "General Information"
-    faqs:
-      - question: "What is the magic word?"
-        answer: "The magic word is AnyRAG."
-      - question: "What is AnyRAG?"
-        answer: "It is a powerful framework."
-"#;
     let final_rag_answer = "AnyRAG is a powerful framework.";
 
-    // --- 2. Mock External Services ---
+    // --- 2. Mock External Services for the Search Workflow ---
+    // The ingestion pipeline is now simpler and does not require AI refinement/restructuring mocks.
 
-    // A. Mock the LLM Refinement call (raw text -> clean markdown).
-    let refinement_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            // Matcher for PDF_REFINEMENT_SYSTEM_PROMPT
-            .body_contains("expert technical analyst");
-        then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": refined_markdown}}]}),
-        );
-    });
-
-    // B. Mock the LLM Restructuring call (clean markdown -> structured YAML)
-    let restructuring_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            // Matcher for KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT
-            .body_contains("expert document analyst and editor");
-        then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
-        );
-    });
-
-    // C. Mock the Metadata Extraction call
-    let metadata_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("extract Category, Keyphrases, and Entities");
-        then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": json!([
-                {"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "magic word"},
-                {"type": "ENTITY", "subtype": "PRODUCT", "value": "AnyRAG"}
-            ]).to_string()}}]}),
-        );
-    });
-
-    // D. Mock the Embedding API (for new doc and for search query)
+    // A. Mock the Embedding API (for new doc and for search query)
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path(format!("/{test_name}/v1/embeddings"));
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
 
-    // E. Mock the RAG Query Analysis
+    // B. Mock the RAG Query Analysis
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path(format!("/{test_name}/v1/chat/completions"))
             .body_contains("expert query analyst");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
@@ -94,12 +50,13 @@ sections:
         );
     });
 
-    // F. Mock the final RAG Synthesis call
+    // C. Mock the final RAG Synthesis call
+    // It should now receive the raw PDF content as context, not structured YAML.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("strict, factual AI") // Updated to match the new default prompt
-            .body_contains("## General Information");
+            .path(format!("/{test_name}/v1/chat/completions"))
+            .body_contains("strict, factual AI")
+            .body_contains(pdf_content); // Expect the raw content in the context
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
@@ -140,8 +97,8 @@ sections:
     };
     assert_eq!(
         stored_content.trim(),
-        expected_yaml.trim(),
-        "Stored content should be the structured YAML"
+        pdf_content.trim(),
+        "Stored content should be the raw extracted text"
     );
 
     // --- 5. Act: Embed the new document ---
@@ -167,9 +124,6 @@ sections:
     assert_eq!(search_body.result["text"], final_rag_answer);
 
     // --- 7. Assert All Mocks Were Called ---
-    refinement_mock.assert();
-    restructuring_mock.assert();
-    metadata_mock.assert();
     embedding_mock.assert_hits(2); // Once for ingestion, once for search
     query_analysis_mock.assert();
     rag_synthesis_mock.assert();

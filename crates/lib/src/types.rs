@@ -403,6 +403,9 @@ pub struct AppConfig {
     /// The path to the SQLite database file. Loaded from `DB_URL` env var.
     #[serde(default = "default_db_url")]
     pub db_url: String,
+    /// The directory for storing GitHub ingestion databases. Optional.
+    #[serde(default)]
+    pub github_db_dir: Option<String>,
     /// An optional API key for the Jina Reader service. Loaded from `JINA_API_KEY` env var.
     #[serde(default)]
     pub jina_api_key: Option<String>,

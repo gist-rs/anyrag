@@ -95,7 +95,7 @@ async fn seed_data(app: &TestApp) -> Result<()> {
 #[tokio::test]
 async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_authenticated_user_a_sees_own_and_guest_content").await?;
     seed_data(&app).await?;
     let user_a_identifier = "user_a@example.com";
     let user_query = "Find all documents about the searchable topic";
@@ -104,6 +104,7 @@ async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
     // --- 2. Mock External Services ---
     app.mock_server.mock(|when, then| {
         when.method(Method::POST)
+            .path("/test_authenticated_user_a_sees_own_and_guest_content/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{"message": {"role": "assistant", "content": json!({
@@ -112,12 +113,14 @@ async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
         }));
     });
     app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_authenticated_user_a_sees_own_and_guest_content/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
     });
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
+            .path("/test_authenticated_user_a_sees_own_and_guest_content/v1/chat/completions")
             .body_contains("strict, factual AI")
             .body_contains("This document is private to User A.")
             .body_contains("This document is public/guest owned.")
@@ -153,7 +156,7 @@ async fn test_authenticated_user_a_sees_own_and_guest_content() -> Result<()> {
 #[tokio::test]
 async fn test_user_b_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_user_b_sees_own_and_guest_content").await?;
     seed_data(&app).await?;
     let user_query = "Find all documents about the searchable topic";
     // The final answer should ONLY be based on the guest document.
@@ -162,6 +165,7 @@ async fn test_user_b_sees_own_and_guest_content() -> Result<()> {
     // --- 2. Mock External Services ---
     app.mock_server.mock(|when, then| {
         when.method(Method::POST)
+            .path("/test_user_b_sees_own_and_guest_content/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{"message": {"role": "assistant", "content": json!({
@@ -170,12 +174,14 @@ async fn test_user_b_sees_own_and_guest_content() -> Result<()> {
         }));
     });
     app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_user_b_sees_own_and_guest_content/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
     });
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
+            .path("/test_user_b_sees_own_and_guest_content/v1/chat/completions")
             .body_contains("strict, factual AI")
             // It MUST see the guest content.
             .body_contains("This document is public/guest owned.")
@@ -209,7 +215,13 @@ async fn test_user_b_sees_own_and_guest_content() -> Result<()> {
 #[tokio::test]
 async fn test_request_with_invalid_token_is_rejected() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_request_with_invalid_token_is_rejected").await?;
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_request_with_invalid_token_is_rejected/v1/chat/completions");
+        then.status(200)
+            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "OK"}}]}));
+    });
     let invalid_token = "this.is.not.a.valid.jwt";
 
     // --- 2. Act ---
@@ -232,7 +244,13 @@ async fn test_request_with_invalid_token_is_rejected() -> Result<()> {
 #[tokio::test]
 async fn test_request_with_expired_token_is_rejected() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_request_with_expired_token_is_rejected").await?;
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_request_with_expired_token_is_rejected/v1/chat/completions");
+        then.status(200)
+            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "OK"}}]}));
+    });
     let expired_token = generate_jwt_with_expiry("any-user@example.com", 0)?; // Expires immediately
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; // Ensure it's expired
 
@@ -256,7 +274,7 @@ async fn test_request_with_expired_token_is_rejected() -> Result<()> {
 #[tokio::test]
 async fn test_authenticated_user_b_sees_own_and_guest_content() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_authenticated_user_b_sees_own_and_guest_content").await?;
     seed_data(&app).await?;
     let user_b_identifier = "user_b@example.com";
     let user_query = "Find all documents about the searchable topic";
@@ -266,6 +284,7 @@ async fn test_authenticated_user_b_sees_own_and_guest_content() -> Result<()> {
     // --- 2. Mock External Services ---
     app.mock_server.mock(|when, then| {
         when.method(Method::POST)
+            .path("/test_authenticated_user_b_sees_own_and_guest_content/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{"message": {"role": "assistant", "content": json!({
@@ -274,12 +293,14 @@ async fn test_authenticated_user_b_sees_own_and_guest_content() -> Result<()> {
         }));
     });
     app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_authenticated_user_b_sees_own_and_guest_content/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5] }] }));
     });
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
+            .path("/test_authenticated_user_b_sees_own_and_guest_content/v1/chat/completions")
             .body_contains("strict, factual AI")
             .body_contains("This document is public/guest owned.")
             .body_contains("This document is private to User B.")

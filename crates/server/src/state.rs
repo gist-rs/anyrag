@@ -14,6 +14,7 @@ use anyrag::{
     types::{AppConfig, ResolvedTask},
     AnyragExecutor,
 };
+use anyrag_github::ingest::storage::StorageManager;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
@@ -34,6 +35,8 @@ pub struct AppState {
     pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
     /// The core logic executor, which holds shared dependencies.
     pub executor: Arc<AnyragExecutor>,
+    /// Manages databases for GitHub example ingestion and search.
+    pub storage_manager: Arc<StorageManager>,
 }
 
 /// Builds the shared application state from the configuration.
@@ -117,6 +120,19 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
     // Ensure the database schema is up-to-date on startup.
     sqlite_provider.initialize_schema().await?;
 
+    // Initialize the GitHub storage manager.
+    // When DB_URL is set (like in examples), prioritize its directory.
+    let db_dir = if let Ok(db_url) = std::env::var("DB_URL") {
+        std::path::Path::new(&db_url)
+            .parent()
+            .and_then(|p| p.to_str())
+            .map(|s| s.to_string())
+    } else {
+        config.github_db_dir.clone()
+    };
+    let storage_manager = StorageManager::new(db_dir.as_deref()).await?;
+    let storage_manager_arc = Arc::new(storage_manager);
+
     // Wrap dependencies in Arcs for sharing.
     let sqlite_provider_arc = Arc::new(sqlite_provider);
     let ai_providers_arc = Arc::new(ai_providers);
@@ -138,5 +154,6 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
         ai_providers: ai_providers_arc,
         knowledge_graph: Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory())),
         executor: Arc::new(executor),
+        storage_manager: storage_manager_arc,
     })
 }

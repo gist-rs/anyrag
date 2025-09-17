@@ -62,7 +62,7 @@ async fn test_extractor_and_storage_integration() {
     let final_examples = Extractor::extract(repo_path, version).unwrap();
 
     // Initialize the storage manager and create the repository database.
-    let storage = StorageManager::new(db_path_str).await.unwrap();
+    let storage = StorageManager::new(Some(db_path_str)).await.unwrap();
     let repo_url = "http://mock.com/user/test-repo";
     let repo_name = StorageManager::url_to_repo_name(repo_url);
     let tracked_repo = storage.track_repository(repo_url).await.unwrap();

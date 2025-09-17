@@ -28,7 +28,7 @@ use anyrag_server::{
     types::DebugParams,
 };
 use axum::{extract::Query, Json};
-use core_access::get_or_create_user;
+use core_access::{get_or_create_user, GUEST_USER_IDENTIFIER};
 use std::{fs, time::Duration};
 use tokio::time::sleep;
 use tracing::info;
@@ -112,12 +112,8 @@ async fn main() -> Result<()> {
     info!("Application state built successfully.");
 
     // Create a user for this example run. In a real app, this would come from a JWT.
-    let user = get_or_create_user(
-        &app_state.sqlite_provider.db,
-        "example-user@anyrag.com",
-        None,
-    )
-    .await?;
+    let user =
+        get_or_create_user(&app_state.sqlite_provider.db, GUEST_USER_IDENTIFIER, None).await?;
     let auth_user = AuthenticatedUser(user);
     info!("Simulating requests for user: {}", auth_user.0.id);
 

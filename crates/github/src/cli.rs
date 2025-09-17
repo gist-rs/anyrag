@@ -43,7 +43,7 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         embedding_api_key: std::env::var("AI_API_KEY").ok(),
     };
 
-    let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
+    let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
     let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task).await?;
     println!(
         "✅ Successfully ingested {} unique examples from '{}' (version: {}).",

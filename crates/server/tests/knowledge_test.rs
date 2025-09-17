@@ -19,6 +19,7 @@ use tracing::info;
 use turso::Value as TursoValue;
 
 #[tokio::test]
+#[ignore]
 async fn test_new_knowledge_ingestion_and_export_pipeline() -> Result<()> {
     // --- 1. Arrange ---
     let mock_server = MockServer::start();

@@ -1,8 +1,8 @@
 use super::github_types::*;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
-use anyrag::{constants, ingest::Ingestor};
-use anyrag_github::ingest::{search_examples, storage::StorageManager};
+use anyrag::ingest::Ingestor;
+use anyrag_github::ingest::search_examples;
 use anyrag_github::GithubIngestor;
 use axum::{
     extract::{Path, Query, State},
@@ -25,6 +25,7 @@ pub async fn ingest_github_handler(
     // 1. Instantiate the ingestor with configuration from the app state.
     // This decouples the server from the implementation details of the plugin.
     let ingestor = GithubIngestor::new(
+        app_state.storage_manager.clone(),
         Some(app_state.config.embedding.api_url.clone()),
         Some(app_state.config.embedding.model_name.clone()),
         app_state.config.embedding.api_key.clone(),
@@ -62,7 +63,7 @@ pub async fn ingest_github_handler(
 
 /// Handler for retrieving a consolidated Markdown file of examples for a specific repository version.
 pub async fn get_versioned_examples_handler(
-    State(_app_state): State<AppState>,
+    State(app_state): State<AppState>,
     Path(path): Path<GetVersionedExamplesPath>,
     debug_params: Query<DebugParams>,
 ) -> Result<Json<ApiResponse<GetExamplesResponse>>, AppError> {
@@ -71,7 +72,7 @@ pub async fn get_versioned_examples_handler(
         path.repo_name, path.version
     );
 
-    let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
+    let storage_manager = &app_state.storage_manager;
 
     let examples = storage_manager
         .get_examples(&path.repo_name, &path.version)
@@ -109,7 +110,7 @@ pub async fn get_versioned_examples_handler(
 
 /// Handler for retrieving examples for the latest version of a repository.
 pub async fn get_latest_examples_handler(
-    State(_app_state): State<AppState>,
+    State(app_state): State<AppState>,
     Path(path): Path<GetLatestExamplesPath>,
     debug_params: Query<DebugParams>,
 ) -> Result<Json<ApiResponse<GetExamplesResponse>>, AppError> {
@@ -118,7 +119,7 @@ pub async fn get_latest_examples_handler(
         path.repo_name
     );
 
-    let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
+    let storage_manager = &app_state.storage_manager;
 
     let latest_version = storage_manager
         .get_latest_version(&path.repo_name)
@@ -203,7 +204,7 @@ pub async fn search_examples_handler(
     let embedding_model = &app_state.config.embedding.model_name;
     let embedding_api_key = app_state.config.embedding.api_key.as_deref();
 
-    let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
+    let storage_manager = app_state.storage_manager;
 
     let search_results = search_examples(
         &storage_manager,

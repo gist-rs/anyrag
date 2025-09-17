@@ -7,12 +7,13 @@ mod common;
 
 use anyhow::Result;
 use common::TestApp;
+use httpmock::Method;
 use serde_json::json;
 
 #[tokio::test]
 async fn test_root_and_health_check_endpoints() -> Result<()> {
     // Arrange
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_root_and_health_check_endpoints").await?;
 
     // --- Test Root Endpoint ---
     let root_response = app
@@ -47,7 +48,7 @@ async fn test_root_and_health_check_endpoints() -> Result<()> {
 #[tokio::test]
 async fn test_prompt_handler_malformed_json() -> Result<()> {
     // Arrange
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_prompt_handler_malformed_json").await?;
     // This JSON is syntactically invalid (missing closing brace).
     let malformed_body = r#"{"prompt": "Count the corpus""#;
 
@@ -71,7 +72,16 @@ async fn test_prompt_handler_malformed_json() -> Result<()> {
 #[tokio::test]
 async fn test_prompt_handler_invalid_payload() -> Result<()> {
     // Arrange
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_prompt_handler_invalid_payload").await?;
+    // This test triggers an internal server error before any AI call is made,
+    // but the app startup still requires the mock provider URL to be valid.
+    // A placeholder mock prevents panics.
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_prompt_handler_invalid_payload/v1/chat/completions");
+        then.status(200)
+            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "OK"}}]}));
+    });
     // This JSON is syntactically valid but semantically incorrect
     // because it's missing the required `prompt` field.
     let invalid_payload = json!({

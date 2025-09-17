@@ -26,7 +26,7 @@ async fn setup_database_with_mock_data() -> (StorageManager, String, TempDir) {
     let db_path_str = db_dir.path().to_str().unwrap();
 
     // 2. Initialize the storage manager.
-    let storage = StorageManager::new(db_path_str)
+    let storage = StorageManager::new(Some(db_path_str))
         .await
         .expect("Failed to create StorageManager");
 

@@ -11,8 +11,8 @@ use axum_extra::extract::Multipart;
 use serde_json::json;
 use tracing::{info, warn};
 
-use super::web::IngestWebResponse;
 use base64::{engine::general_purpose, Engine as _};
+use serde_json::Value;
 
 // The ExtractorChoice is now defined in the `anyrag-pdf` crate as `PdfExtractor`.
 
@@ -22,7 +22,7 @@ pub async fn ingest_pdf_handler(
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     mut multipart: Multipart,
-) -> Result<Json<ApiResponse<IngestWebResponse>>, AppError> {
+) -> Result<Json<ApiResponse<Value>>, AppError> {
     let owner_id = Some(user.0.id);
     let mut pdf_data: Option<Vec<u8>> = None;
     let mut source_identifier: Option<String> = None;
@@ -142,10 +142,10 @@ pub async fn ingest_pdf_handler(
         .map_err(|e| AppError::Internal(anyhow::anyhow!("PDF ingestion failed: {e}")))?;
 
     // --- 4. Construct the response ---
-    let response = IngestWebResponse {
-        message: "PDF ingestion pipeline completed successfully.".to_string(),
-        ingested_documents: ingest_result.documents_added,
-    };
+    let response = json!({
+        "message": "PDF ingestion pipeline completed successfully.".to_string(),
+        "ingested_documents": ingest_result.documents_added,
+    });
 
     let debug_info = json!({
         "source": source_identifier,

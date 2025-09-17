@@ -11,10 +11,7 @@ pub mod ingest;
 pub use ingest::{run_github_ingestion, search_examples, types};
 
 use crate::ingest::{storage::StorageManager, types::IngestionTask};
-use anyrag::{
-    constants,
-    ingest::{IngestError, IngestionResult, Ingestor},
-};
+use anyrag::ingest::{IngestError, IngestionResult, Ingestor};
 use async_trait::async_trait;
 use serde::Deserialize;
 use types::GitHubIngestError;
@@ -36,8 +33,11 @@ struct IngestSource {
     version: Option<String>,
 }
 
+use std::sync::Arc;
+
 /// The Ingestor implementation for public GitHub repositories.
 pub struct GithubIngestor {
+    storage_manager: Arc<StorageManager>,
     embedding_api_url: Option<String>,
     embedding_model: Option<String>,
     embedding_api_key: Option<String>,
@@ -48,11 +48,13 @@ impl GithubIngestor {
     /// This allows dependencies like embedding configuration to be injected by the caller
     /// (e.g., the server) instead of being read from environment variables.
     pub fn new(
+        storage_manager: Arc<StorageManager>,
         embedding_api_url: Option<String>,
         embedding_model: Option<String>,
         embedding_api_key: Option<String>,
     ) -> Self {
         Self {
+            storage_manager,
             embedding_api_url,
             embedding_model,
             embedding_api_key,
@@ -88,9 +90,8 @@ impl Ingestor for GithubIngestor {
         };
 
         // 3. Run the ingestion pipeline.
-        let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
         let (ingested_count, ingested_version) =
-            run_github_ingestion(&storage_manager, task).await?;
+            run_github_ingestion(&self.storage_manager, task).await?;
 
         // 4. Return the standardized result.
         Ok(IngestionResult {

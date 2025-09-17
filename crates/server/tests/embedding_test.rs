@@ -16,7 +16,7 @@ use anyrag_server::types::ApiResponse;
 #[tokio::test]
 async fn test_embed_and_search_flow() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_embed_and_search_flow").await?;
     let user_identifier = "embed-test-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
@@ -29,7 +29,8 @@ async fn test_embed_and_search_flow() -> Result<()> {
 
     let mock_vector = vec![0.1, 0.2, 0.3, 0.4];
     let embeddings_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_embed_and_search_flow/v1/embeddings");
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(json!({

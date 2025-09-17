@@ -19,7 +19,7 @@ use anyrag_server::{handlers::PromptResponse, types::ApiResponse};
 async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     // --- 1. Arrange ---
     info!("[test] Starting test_sheet_ingestion_and_prompting_workflow");
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_sheet_ingestion_and_prompting_workflow").await?;
     let sqlite_provider =
         anyrag::providers::db::sqlite::SqliteProvider::new(app.db_path.to_str().unwrap()).await?;
 
@@ -41,7 +41,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     // We make it specific by checking for content unique to the query generation prompt.
     let query_gen_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_sheet_ingestion_and_prompting_workflow/v1/chat/completions")
             .body_contains("intelligent data assistant"); // Unique to DEFAULT_QUERY_SYSTEM_PROMPT
         then.status(200).json_body(json!({
             "choices": [{
@@ -54,7 +54,7 @@ async fn test_sheet_ingestion_and_prompting_workflow() -> Result<()> {
     // We make it specific by checking for content unique to the formatting prompt.
     let format_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_sheet_ingestion_and_prompting_workflow/v1/chat/completions")
             .body_contains("strict data processor"); // Unique to the updated DEFAULT_FORMAT_SYSTEM_PROMPT
         then.status(200).json_body(json!({
             "choices": [{
