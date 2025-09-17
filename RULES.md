@@ -54,6 +54,12 @@ This document establishes the official coding conventions and architectural rule
 
 -   For conditional logic with more than one `else if` case, a `match` statement MUST be used. This improves readability and ensures exhaustive checking.
 
+### Rule 2.6: Avoid Magic Strings
+
+-   String literals that are used in multiple places or represent important constants (e.g., database paths, configuration keys, task names) MUST NOT be hardcoded directly.
+-   They SHOULD be defined as `const` variables in a relevant module or loaded from a configuration file (`config.yml`, `.env`).
+-   **Example**: Instead of `let storage = StorageManager::new("db/github_ingest")`, prefer `const GITHUB_DB_DIR: &str = "db/github_ingest"; let storage = StorageManager::new(GITHUB_DB_DIR);`. This centralizes the value, making it easy to change and preventing typos.
+
 ---
 
 ## 3. Development Process

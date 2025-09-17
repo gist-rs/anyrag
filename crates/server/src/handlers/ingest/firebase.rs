@@ -52,7 +52,7 @@ pub async fn ingest_firebase_handler(
         payload.project_id, payload.collection
     );
 
-    let db_path = format!("db/{}.db", payload.project_id);
+    let db_path = format!("{}/{}.db", anyrag::constants::DB_DIR, payload.project_id);
     let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?;
 

@@ -7,6 +7,7 @@
 mod common;
 
 use anyhow::Result;
+use anyrag::constants;
 use anyrag_github::ingest::storage::StorageManager;
 use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
@@ -145,8 +146,8 @@ version = "0.1.0-test"
 
     // --- 5. Assert Database State ---
     let repo_name = StorageManager::url_to_repo_name(remote_url_str);
-    let db_path = format!("db/github_ingest/{repo_name}.db");
-    let db_dir = "db/github_ingest";
+    let db_path = format!("{}/{repo_name}.db", constants::GITHUB_DB_DIR);
+    let db_dir = constants::GITHUB_DB_DIR;
     fs::create_dir_all(db_dir)?;
     let db = Builder::new_local(&db_path).build().await?;
     let conn = db.connect()?;
@@ -180,7 +181,8 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
     let user_identifier = "get-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
-    let db_dir = "db/github_ingest";
+    // D. Clean up any previous test runs.
+    let db_dir = constants::GITHUB_DB_DIR;
     if fs::metadata(db_dir).is_ok() {
         fs::remove_dir_all(db_dir)?;
     }
@@ -297,7 +299,7 @@ async fn test_search_examples_e2e() -> Result<()> {
     let user_identifier = "search-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
-    let db_dir = "db/github_ingest";
+    let db_dir = constants::GITHUB_DB_DIR;
     if fs::metadata(db_dir).is_ok() {
         fs::remove_dir_all(db_dir)?;
     }

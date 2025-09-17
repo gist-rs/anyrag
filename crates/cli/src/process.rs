@@ -22,7 +22,7 @@ struct FileArgs {
     #[arg(required = true)]
     path: String,
     /// The path to the database file to use for storage
-    #[arg(long, default_value = "db/anyrag_processed.db")]
+    #[arg(long, default_value = anyrag::constants::DEFAULT_DB_FILE)]
     db_path: String,
     /// The separator string used to split the file content into chunks
     #[arg(long, default_value = "\n---\n")]

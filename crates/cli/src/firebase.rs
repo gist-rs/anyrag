@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 use anyrag::{
+    constants,
     ingest::{dump_firestore_collection, DumpFirestoreOptions},
     providers::db::sqlite::SqliteProvider,
 };
@@ -52,8 +53,8 @@ pub struct FirebaseArgs {
 
 pub async fn handle_dump_firebase(args: &FirebaseArgs) -> Result<()> {
     let project_id = resolve_project_id(args.project_id.as_deref())?;
-    let db_path = format!("db/{project_id}.db");
-    fs::create_dir_all("db")?;
+    let db_path = format!("{}/{project_id}.db", constants::DB_DIR);
+    fs::create_dir_all(constants::DB_DIR)?;
 
     let sqlite_provider = SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?;

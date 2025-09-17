@@ -24,6 +24,7 @@
 
 use anyhow::Result;
 use anyrag::{
+    constants,
     ingest::{
         knowledge::{IngestionPrompts, WebIngestStrategy},
         run_ingestion_pipeline, KnowledgeError,
@@ -71,8 +72,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Environment variables loaded.");
 
     // Use a dedicated, temporary DB for this example run.
-    let db_path = "db/anyrag_lib_example.db";
-    cleanup_db(db_path).await?;
+    let db_path = format!("{}/anyrag_lib_example.db", constants::DB_DIR);
+    cleanup_db(&db_path).await?;
 
     // --- Configuration from environment variables ---
     let ai_provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "gemini".to_string());

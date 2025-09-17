@@ -18,6 +18,7 @@
 //! `RUST_LOG=info cargo run -p anyrag-server --example knowledge_prompt2`
 
 use anyhow::{bail, Result};
+use anyrag::constants;
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
@@ -84,8 +85,8 @@ async fn main() -> Result<()> {
     dotenvy::from_path(".env").ok();
     info!("Environment variables loaded.");
 
-    let db_path = "db/anyrag-thai.db";
-    cleanup_db(db_path).await?;
+    let db_path = format!("{}/anyrag-thai.db", constants::DB_DIR);
+    cleanup_db(&db_path).await?;
     // This is set so the AppState builder uses the correct path.
     std::env::set_var("DB_URL", db_path);
 

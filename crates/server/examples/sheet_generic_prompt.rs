@@ -17,6 +17,7 @@
 //! `RUST_LOG=info cargo run -p anyrag-server --example sheet_generic_prompt`
 
 use anyhow::{bail, Result};
+use anyrag::constants;
 use anyrag_server::{config, handlers, state, types::DebugParams};
 use axum::{extract::Query, Json};
 use serde_json::json;
@@ -46,11 +47,11 @@ async fn main() -> Result<()> {
     dotenvy::from_path(".env").ok();
     info!("Environment variables loaded.");
 
-    let db_path = "db/anyrag_sheet_generic.db";
-    cleanup_db(db_path).await?;
+    let db_path = format!("{}/anyrag_sheet_generic.db", constants::DB_DIR);
+    cleanup_db(&db_path).await?;
 
-    // Set DB_URL so the app state uses the same DB as the cleanup function.
-    std::env::set_var("DB_URL", db_path);
+    // This is set so the AppState builder uses the correct path.
+    std::env::set_var("DB_URL", &db_path);
 
     // When running examples from the workspace root, we need to point to the config file.
     let config_path = "crates/server/config.yml";

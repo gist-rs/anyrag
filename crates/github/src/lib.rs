@@ -11,7 +11,10 @@ pub mod ingest;
 pub use ingest::{run_github_ingestion, search_examples, types};
 
 use crate::ingest::{storage::StorageManager, types::IngestionTask};
-use anyrag::ingest::{IngestError, IngestionResult, Ingestor};
+use anyrag::{
+    constants,
+    ingest::{IngestError, IngestionResult, Ingestor},
+};
 use async_trait::async_trait;
 use serde::Deserialize;
 use types::GitHubIngestError;
@@ -85,7 +88,7 @@ impl Ingestor for GithubIngestor {
         };
 
         // 3. Run the ingestion pipeline.
-        let storage_manager = StorageManager::new("db/github_ingest").await?;
+        let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
         let (ingested_count, ingested_version) =
             run_github_ingestion(&storage_manager, task).await?;
 

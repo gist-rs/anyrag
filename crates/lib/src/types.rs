@@ -3,6 +3,7 @@ use crate::prompts::tasks::{RSS_SUMMARIZATION_SYSTEM_PROMPT, RSS_SUMMARIZATION_U
 #[cfg(feature = "bigquery")]
 use crate::providers::db::bigquery::BigQueryProvider;
 use crate::{
+    constants,
     errors::PromptError,
     prompts::{
         core::{DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT},
@@ -384,7 +385,7 @@ fn default_port() -> u16 {
 
 /// Provides a default value for the `db_url` field if not set in the environment.
 fn default_db_url() -> String {
-    "db/anyrag.db".to_string()
+    constants::DEFAULT_DB_FILE.to_string()
 }
 
 /// Provides a default value for the `web_ingest_strategy` field.

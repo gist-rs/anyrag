@@ -1,7 +1,7 @@
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
-use anyrag::ingest::Ingestor;
 use anyrag::SearchResult;
+use anyrag::{constants, ingest::Ingestor};
 use anyrag_github::ingest::{search_examples, storage::StorageManager};
 use anyrag_github::GithubIngestor;
 use axum::{
@@ -112,7 +112,7 @@ pub async fn get_versioned_examples_handler(
         path.repo_name, path.version
     );
 
-    let storage_manager = StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
 
     let examples = storage_manager
         .get_examples(&path.repo_name, &path.version)
@@ -159,7 +159,7 @@ pub async fn get_latest_examples_handler(
         path.repo_name
     );
 
-    let storage_manager = StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
 
     let latest_version = storage_manager
         .get_latest_version(&path.repo_name)
@@ -244,7 +244,7 @@ pub async fn search_examples_handler(
     let embedding_model = &app_state.config.embedding.model_name;
     let embedding_api_key = app_state.config.embedding.api_key.as_deref();
 
-    let storage_manager = StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
 
     let search_results = search_examples(
         &storage_manager,

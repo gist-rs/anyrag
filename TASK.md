@@ -34,12 +34,12 @@ This document breaks down the architectural goals from `PLAN.md` into concrete, 
     -   **Details**: The trait should define a common interface for all ingestion plugins, such as `async fn ingest(&self, source: &str) -> Result<Output, Error>`.
     -   **Acceptance Criteria**: A clear, generic trait for ingestion exists in the `anyrag` library.
 
--   [ ] **Task 2.2: Isolate `github` Logic into a Plugin Crate**
+-   [x] **Task 2.2: Isolate `github` Logic into a Plugin Crate**
     -   **Action**: Create a new crate at `crates/github` and name it `anyrag-github` in its `Cargo.toml`.
     -   **Details**: Move all logic related to cloning, parsing, and storing GitHub examples into this new crate, following the flat `crates/` directory structure.
     -   **Acceptance Criteria**: The `github` ingestion logic is fully self-contained in the `anyrag-github` crate.
 
--   [ ] **Task 2.3: Implement the `Ingestor` Trait for `github`**
+-   [x] **Task 2.3: Implement the `Ingestor` Trait for `github`**
     -   **Action**: In the `crates/github` crate, create a `GithubIngestor` struct and implement the `Ingestor` trait for it.
     -   **Details**: The `ingest` method will encapsulate the existing `run_github_ingestion` pipeline.
     -   **Acceptance Criteria**: The `anyrag` library can use the `GithubIngestor` through the generic trait.
@@ -100,3 +100,14 @@ This document breaks down the architectural goals from `PLAN.md` into concrete, 
     -   **Action**: Execute `cargo test --workspace` and `cargo clippy --workspace -- -D warnings`.
     -   **Details**: Fix any failing tests or clippy warnings that arose from the refactoring.
     -   **Acceptance Criteria**: All tests pass and the codebase is free of clippy warnings.
+
+---
+
+### Epic 6: Configuration and Constants Refactoring
+
+**Goal**: Eliminate hardcoded "magic strings" and centralize configuration values according to `Rule 2.6`.
+
+-   [ ] **Task 6.1: Centralize Database Paths**
+    -   **Action**: Replace hardcoded database directory strings like `"db/github_ingest"` with shared constants.
+    -   **Details**: Define a `const GITHUB_DB_DIR: &str = "db/github_ingest";` in a suitable, shared location and update all usages in `anyrag-github`, `anyrag-cli`, and `anyrag-server`.
+    -   **Acceptance Criteria**: The string literal `"db/github_ingest"` no longer appears in the codebase.

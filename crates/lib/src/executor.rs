@@ -6,6 +6,7 @@
 //! that can be called by any consumer (like the `server` or `cli` crates).
 
 use crate::{
+    constants,
     ingest::{ingest_from_google_sheet_url, sheet_url_to_export_url_and_table_name},
     providers::{
         ai::AiProvider,
@@ -201,7 +202,7 @@ impl AnyragExecutor {
                 "'db' provided: '{}'. Creating a dynamic SQLite client for this request.",
                 db_name
             );
-            let db_path = format!("db/{db_name}.db");
+            let db_path = format!("{}/{db_name}.db", constants::DB_DIR);
             let provider = SqliteProvider::new(&db_path).await?;
             provider.initialize_schema().await?;
             Box::new(provider)

@@ -56,7 +56,7 @@ pub async fn graph_build_handler(
     );
 
     // 1. Connect to the specified database
-    let db_path = format!("db/{}.db", payload.db);
+    let db_path = format!("{}/{}.db", anyrag::constants::DB_DIR, payload.db);
     if !Path::new(&db_path).exists() {
         return Err(AppError::Internal(anyhow::anyhow!(
             "Database file for project '{}' not found at '{}'",

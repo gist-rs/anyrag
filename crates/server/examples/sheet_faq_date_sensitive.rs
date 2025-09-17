@@ -18,6 +18,7 @@
 //! `RUST_LOG=info cargo run -p anyrag-server --example sheet_faq_date_sensitive`
 
 use anyhow::{bail, Result};
+use anyrag::constants;
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
@@ -54,9 +55,9 @@ async fn main() -> Result<()> {
     dotenvy::from_path(".env").ok();
     info!("Environment variables loaded.");
 
-    let db_path = "db/anyrag_sheet_faq_date.db";
-    cleanup_db(db_path).await?;
-    std::env::set_var("DB_URL", db_path);
+    let db_path = format!("{}/anyrag_sheet_faq_date.db", constants::DB_DIR);
+    cleanup_db(&db_path).await?;
+    std::env::set_var("DB_URL", &db_path);
 
     // When running examples from the workspace root, we need to point to the config file.
     let config_path = "crates/server/config.yml";

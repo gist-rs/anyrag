@@ -86,7 +86,7 @@ pub async fn gen_text_handler(
             "Request specified db: '{}'. Creating dynamic SQLite provider.",
             db_name_str
         );
-        let db_path = format!("db/{db_name_str}.db");
+        let db_path = format!("{}/{db_name_str}.db", anyrag::constants::DB_DIR);
         let provider = SqliteProvider::new(&db_path).await?;
         provider.initialize_schema().await?;
         (Arc::new(provider), db_name_str)

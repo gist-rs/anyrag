@@ -1,6 +1,6 @@
 use crate::ingest::{run_github_ingestion, storage::StorageManager, types::IngestionTask};
 use anyhow::Result;
-use anyrag::ingest::markdown::EmbeddingConfig;
+use anyrag::{constants, ingest::markdown::EmbeddingConfig};
 use clap::Parser;
 use std::fs;
 use tracing::info;
@@ -39,7 +39,7 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         embedding_api_key: std::env::var("AI_API_KEY").ok(),
     };
 
-    let storage_manager = StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new(constants::GITHUB_DB_DIR).await?;
     let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task).await?;
     println!(
         "✅ Successfully ingested {} unique examples from '{}' (version: {}).",
@@ -98,7 +98,7 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     // Automatically process the generated file into chunks unless disabled.
     if !args.no_process {
         println!("🚀 Automatically processing generated file into chunks...");
-        let chunk_db_dir = "db/github_chunks";
+        let chunk_db_dir = constants::GITHUB_CHUNKS_DB_DIR;
         fs::create_dir_all(chunk_db_dir)?;
         let chunk_db_path = format!("{chunk_db_dir}/{repo_name}.db");
 
