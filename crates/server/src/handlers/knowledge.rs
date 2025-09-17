@@ -8,8 +8,9 @@ use super::{
 };
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
+    constants,
     ingest::export_for_finetuning,
-    providers::ai::generate_embeddings_batch,
+    providers::{ai::generate_embeddings_batch, db::sqlite::SqliteProvider},
     search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ContentType, ExecutePromptOptions, PromptClientBuilder},
 };
@@ -182,6 +183,17 @@ pub async fn knowledge_search_handler(
 ) -> Result<Json<super::ApiResponse<PromptResponse>>, AppError> {
     let owner_id = Some(user.0.id);
     let limit = payload.limit.unwrap_or(5);
+
+    // --- Dynamic DB Connection ---
+    let sqlite_provider = if let Some(db_name) = &payload.db {
+        let db_path = format!("{}/{}.db", constants::DB_DIR, db_name);
+        info!("Connecting to dynamic database: {}", db_path);
+        let provider = SqliteProvider::new(&db_path).await?;
+        Arc::new(provider)
+    } else {
+        app_state.sqlite_provider.clone()
+    };
+
     info!(
         "User '{:?}' sending knowledge RAG search for query: '{}', limit: {}",
         owner_id, payload.query, limit
@@ -225,12 +237,8 @@ pub async fn knowledge_search_handler(
         temporal_ranking_config,
     };
 
-    let search_results = hybrid_search(
-        app_state.sqlite_provider.clone(),
-        ai_provider,
-        search_options,
-    )
-    .await?;
+    let search_results =
+        hybrid_search(sqlite_provider.clone(), ai_provider, search_options).await?;
 
     let kg_fact = if payload.use_knowledge_graph.unwrap_or(false) {
         info!("Knowledge graph search is enabled for this request.");
@@ -322,7 +330,7 @@ pub async fn knowledge_search_handler(
 
     let client = PromptClientBuilder::new()
         .ai_provider(synthesis_provider.clone())
-        .storage_provider(Box::new(app_state.sqlite_provider.as_ref().clone()))
+        .storage_provider(Box::new(sqlite_provider.as_ref().clone()))
         .build()?;
 
     let prompt_result = client.execute_prompt_with_options(options.clone()).await?;

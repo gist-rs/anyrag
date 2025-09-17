@@ -27,6 +27,7 @@ use tracing::info;
 
 #[derive(Deserialize)]
 pub struct SearchRequest {
+    pub db: Option<String>,
     pub query: String,
     pub limit: Option<u32>,
     pub instruction: Option<String>,

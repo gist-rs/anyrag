@@ -137,9 +137,10 @@ async fn main() -> Result<()> {
     info!("--- Asking Date-Sensitive Question against Sheet Knowledge ---");
     let question = "What is the current hobby?";
     let search_payload = SearchRequest {
+        db: Some("sheet-faq-test".to_string()),
         query: question.to_string(),
+        limit: Some(5),
         instruction: None,
-        limit: Some(3),
         mode: Default::default(),
         use_knowledge_graph: Some(false),
     };
