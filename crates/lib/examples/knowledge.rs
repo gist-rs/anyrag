@@ -25,10 +25,7 @@
 use anyhow::Result;
 use anyrag::{
     constants,
-    ingest::{
-        knowledge::{IngestionPrompts, WebIngestStrategy},
-        run_ingestion_pipeline, KnowledgeError,
-    },
+    ingest::Ingestor,
     prompts::knowledge::{
         KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
         QUERY_ANALYSIS_SYSTEM_PROMPT, QUERY_ANALYSIS_USER_PROMPT,
@@ -43,8 +40,10 @@ use anyrag::{
     types::{ContentType, ExecutePromptOptions},
     PromptClientBuilder,
 };
+use anyrag_web::{IngestionPrompts, WebIngestStrategy, WebIngestor};
 use core_access::get_or_create_user;
 use dotenvy::dotenv;
+use serde_json::json;
 use std::{env, fs, sync::Arc};
 use tokio::time::{sleep, Duration};
 use tracing::info;
@@ -139,24 +138,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         restructuring_system_prompt: KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT,
         metadata_extraction_system_prompt: METADATA_EXTRACTION_SYSTEM_PROMPT,
     };
-    match run_ingestion_pipeline(
-        &sqlite_provider.db,
-        ai_provider.as_ref(),
-        ingest_url,
-        Some(&user.id),
-        prompts,
-        web_ingest_strategy,
-    )
-    .await
-    {
-        Ok(count) => {
-            info!("Ingestion successful. Stored {} new FAQs.", count);
+
+    // Instantiate the ingestor plugin.
+    let ingestor = WebIngestor::new(&sqlite_provider.db, ai_provider.as_ref(), prompts);
+
+    // Serialize the source information into the JSON format expected by the ingestor.
+    let source_json = json!({
+        "url": ingest_url,
+        "strategy": web_ingest_strategy
+    })
+    .to_string();
+
+    // Call the generic ingest method.
+    match ingestor.ingest(&source_json, Some(&user.id)).await {
+        Ok(ingest_result) => {
+            let count = ingest_result.documents_added;
+            info!(
+                "Ingestion successful. Stored {} new document chunks.",
+                count
+            );
             if count == 0 {
-                info!("Content may be unchanged from a previous run. Continuing...");
+                info!("Content may be unchanged or no new chunks were generated. Continuing...");
             }
-        }
-        Err(KnowledgeError::ContentUnchanged(_)) => {
-            info!("Content is unchanged. Skipping ingestion.");
         }
         Err(e) => {
             return Err(format!(

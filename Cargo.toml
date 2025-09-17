@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cli", "crates/core-access", "crates/github", "crates/lib", "crates/server", "crates/html"]
+members = ["crates/cli", "crates/core-access", "crates/github", "crates/lib", "crates/server", "crates/html", "crates/web", "crates/pdf"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -10,6 +10,7 @@ tokio = { version = "1.47.1", features = ["full"] }
 thiserror = "2.0.16"
 regex = "1.11.2"
 serde_json = "1.0.143"
+serde_yaml = "0.9"
 log = "0.4"
 env_logger = "0.11.8"
 async-trait = "0.1.89"
@@ -20,12 +21,14 @@ turso = { git = "https://github.com/tursodatabase/turso.git", rev = "494ce41", f
 ] }
 chrono = "0.4"
 anyhow = "1.0"
+base64 = "0.22.1"
 csv = "1.3"
 futures = "0.3"
 dotenvy = "0.15.7"
 uuid = { version = "1.18.1", features = ["v4", "serde", "v5"] }
 clap = { version = "4.5.47", features = ["derive", "env"] }
 md5 = "0.7.0"
+wiremock = "0.6.5"
 
 # For server
 axum = "0.8.4"

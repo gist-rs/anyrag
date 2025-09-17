@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use html::{clean_html, html_to_clean_markdown, url_to_md};
+    use anyrag_html::{clean_html, html_to_clean_markdown, url_to_md};
 
     #[test]
     fn test_clean_html() {

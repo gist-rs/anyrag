@@ -2,10 +2,9 @@ use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{
     graph_handlers, wrap_response, ApiResponse, AppError, AppState, DebugParams,
 };
-use anyrag::ingest::{
-    dump_firestore_collection, knowledge::extract_and_store_metadata, DumpFirestoreOptions,
-};
+use anyrag::ingest::{dump_firestore_collection, DumpFirestoreOptions};
 use anyrag::providers::factory::create_dynamic_provider;
+use anyrag_web::extract_and_store_metadata;
 use axum::{
     extract::{Query, State},
     Json,

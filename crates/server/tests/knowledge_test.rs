@@ -8,11 +8,10 @@ mod common;
 
 use anyhow::Result;
 use anyrag::{
-    ingest::knowledge::{
-        export_for_finetuning, run_ingestion_pipeline, IngestionPrompts, WebIngestStrategy,
-    },
+    ingest::{knowledge::export_for_finetuning, Ingestor},
     providers::{ai::local::LocalAiProvider, db::sqlite::SqliteProvider},
 };
+use anyrag_web::{IngestionPrompts, WebIngestStrategy, WebIngestor};
 use httpmock::{Method, MockServer};
 use serde_json::{json, Value};
 use tempfile::NamedTempFile;
@@ -82,15 +81,19 @@ sections:
         metadata_extraction_system_prompt: "You are an expert metadata extractor.",
     };
 
-    let ingested_count = run_ingestion_pipeline(
-        db,
-        &ai_provider,
-        &page_url,
-        None, // No owner for this test
-        prompts,
-        WebIngestStrategy::RawHtml,
-    )
-    .await?;
+    // Instantiate the ingestor plugin.
+    let ingestor = WebIngestor::new(db, &ai_provider, prompts);
+
+    // Serialize the source information into the JSON format expected by the ingestor.
+    let source_json = json!({
+        "url": page_url,
+        "strategy": WebIngestStrategy::RawHtml
+    })
+    .to_string();
+
+    // Call the generic ingest method.
+    let ingest_result = ingestor.ingest(&source_json, None).await?;
+    let ingested_count = ingest_result.documents_added;
 
     // --- 3. Assert Database State ---
     info!(

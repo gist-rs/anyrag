@@ -44,10 +44,35 @@ This document breaks down the architectural goals from `PLAN.md` into concrete, 
     -   **Details**: The `ingest` method will encapsulate the existing `run_github_ingestion` pipeline.
     -   **Acceptance Criteria**: The `anyrag` library can use the `GithubIngestor` through the generic trait.
 
--   [ ] **Task 2.4 (Stretch): Isolate Other Ingestion Sources**
-    -   **Action**: Repeat tasks 2.2 and 2.3 for `pdf`, `html`, `rss`, and `sheets`.
-    -   **Details**: Create new crates for each and implement the `Ingestor` trait.
-    -   **Acceptance Criteria**: All data sources are modular plugins.
+-   [ ] **Task 2.4: Isolate `pdf` Logic into a Plugin Crate**
+    -   **Action**: Create an `anyrag-pdf` crate and move the PDF ingestion pipeline from `anyrag-lib` and the handler logic into it.
+    -   **Details**: The new crate should implement the `Ingestor` trait. The server handler will be updated to call it.
+    -   **Acceptance Criteria**: PDF ingestion is a self-contained plugin.
+
+-   [ ] **Task 2.5: Isolate `web` Logic into a Plugin Crate**
+    -   **Action**: Create an `anyrag-web` crate for URL ingestion.
+    -   **Details**: Move the `run_ingestion_pipeline` logic for web content into this crate and implement the `Ingestor` trait.
+    -   **Acceptance Criteria**: Web ingestion is a self-contained plugin.
+
+-   [ ] **Task 2.6: Isolate `rss` Logic into a Plugin Crate**
+    -   **Action**: Create an `anyrag-rss` crate.
+    -   **Details**: Move the `ingest_from_url` logic for RSS feeds into this crate and implement the `Ingestor` trait.
+    -   **Acceptance Criteria**: RSS ingestion is a self-contained plugin.
+
+-   [ ] **Task 2.7: Isolate `sheet` Logic into a Plugin Crate**
+    -   **Action**: Create an `anyrag-sheets` crate.
+    -   **Details**: Move the Google Sheets ingestion logic into this crate and implement the `Ingestor` trait.
+    -   **Acceptance Criteria**: Google Sheets ingestion is a self-contained plugin.
+
+-   [ ] **Task 2.8: Isolate `text` Logic into a Plugin Crate**
+    -   **Action**: Create an `anyrag-text` crate.
+    -   **Details**: Move the raw text chunking and ingestion logic into this crate and implement the `Ingestor` trait.
+    -   **Acceptance Criteria**: Text ingestion is a self-contained plugin.
+
+-   [ ] **Task 2.9: Isolate `firebase` Logic into a Plugin Crate**
+    -   **Action**: Create an `anyrag-firebase` crate.
+    -   **Details**: Move the Firestore dump logic into this crate and implement the `Ingestor` trait.
+    -   **Acceptance Criteria**: Firebase ingestion is a self-contained plugin.
 
 ---
 
@@ -107,7 +132,7 @@ This document breaks down the architectural goals from `PLAN.md` into concrete, 
 
 **Goal**: Eliminate hardcoded "magic strings" and centralize configuration values according to `Rule 2.6`.
 
--   [ ] **Task 6.1: Centralize Database Paths**
+-   [x] **Task 6.1: Centralize Database Paths**
     -   **Action**: Replace hardcoded database directory strings like `"db/github_ingest"` with shared constants.
     -   **Details**: Define a `const GITHUB_DB_DIR: &str = "db/github_ingest";` in a suitable, shared location and update all usages in `anyrag-github`, `anyrag-cli`, and `anyrag-server`.
     -   **Acceptance Criteria**: The string literal `"db/github_ingest"` no longer appears in the codebase.

@@ -7,10 +7,8 @@ use crate::{
     auth::middleware::AuthenticatedUser,
     handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams},
 };
-use anyrag::ingest::{
-    knowledge::{extract_and_store_metadata, restructure_with_llm, IngestionPrompts},
-    shared::{construct_export_url_and_table_name, download_csv},
-};
+use anyrag::ingest::shared::{construct_export_url_and_table_name, download_csv};
+use anyrag_web::{extract_and_store_metadata, restructure_with_llm, IngestionPrompts};
 use axum::{
     extract::{Query, State},
     Json,

@@ -6,6 +6,7 @@ use anyrag::{
     PromptError,
 };
 use anyrag_github::types::GitHubIngestError;
+use anyrag_web::WebIngestError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -34,6 +35,8 @@ pub enum AppError {
     Sheet(SheetError),
     /// Errors from the GitHub ingestion process.
     GitHubIngest(GitHubIngestError),
+    /// Errors from the web ingestion process.
+    WebIngest(WebIngestError),
 
     /// Errors from the embedding process.
     Embedding(EmbeddingError),
@@ -113,6 +116,13 @@ impl From<GitHubIngestError> for AppError {
     }
 }
 
+/// Conversion from `WebIngestError` to `AppError`.
+impl From<WebIngestError> for AppError {
+    fn from(err: WebIngestError) -> Self {
+        AppError::WebIngest(err)
+    }
+}
+
 /// Conversion from `PromptError` to `AppError`.
 impl From<PromptError> for AppError {
     fn from(err: PromptError) -> Self {
@@ -166,19 +176,19 @@ impl IntoResponse for AppError {
                     format!("Failed to process sheet: {err}"),
                 )
             }
+            AppError::WebIngest(err) => {
+                error!("WebIngestError: {:?}", err);
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("Failed to ingest from web: {err}"),
+                )
+            }
             AppError::Knowledge(err) => {
                 error!("KnowledgeError: {:?}", err);
                 let (status, msg) = match &err {
-                    KnowledgeError::JinaReaderFailed { status, body } => (
-                        StatusCode::BAD_GATEWAY,
-                        format!("Upstream fetch failed (status: {status}): {body}"),
-                    ),
-                    KnowledgeError::Llm(e) => {
-                        (StatusCode::BAD_GATEWAY, format!("AI provider error: {e}"))
-                    }
                     KnowledgeError::Parse(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to parse LLM response: {e}"),
+                        format!("Failed to parse data: {e}"),
                     ),
                     _ => (
                         StatusCode::INTERNAL_SERVER_ERROR,

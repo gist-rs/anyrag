@@ -131,6 +131,8 @@ name = "anyrag"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "anyrag-html",
+ "anyrag-web",
  "async-trait",
  "chrono",
  "core-access",
@@ -141,7 +143,6 @@ dependencies = [
  "futures",
  "gcloud-sdk",
  "gcp-bigquery-client",
- "html",
  "html2md",
  "indradb-lib",
  "md5 0.8.0",
@@ -196,14 +197,53 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyrag-html"
+version = "0.1.0"
+dependencies = [
+ "html2md",
+ "md5 0.7.0",
+ "regex",
+ "reqwest",
+ "scraper",
+ "tokio",
+]
+
+[[package]]
+name = "anyrag-pdf"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyrag",
+ "anyrag-web",
+ "async-trait",
+ "base64 0.22.1",
+ "dotenvy",
+ "md5 0.7.0",
+ "pdf",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.16",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "turso",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
 name = "anyrag-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "anyrag",
  "anyrag-github",
+ "anyrag-pdf",
+ "anyrag-web",
  "axum",
  "axum-extra",
+ "base64 0.22.1",
  "chrono",
  "config",
  "core-access",
@@ -225,6 +265,30 @@ dependencies = [
  "tracing-subscriber",
  "turso",
  "uuid",
+]
+
+[[package]]
+name = "anyrag-web"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyrag",
+ "anyrag-html",
+ "async-trait",
+ "dotenvy",
+ "md5 0.7.0",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror 2.0.16",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "turso",
+ "url",
+ "uuid",
+ "wiremock",
 ]
 
 [[package]]
@@ -2163,18 +2227,6 @@ dependencies = [
  "html-escape",
  "html5ever 0.31.0",
  "markup5ever_rcdom 0.5.3-unofficial",
-]
-
-[[package]]
-name = "html"
-version = "0.1.0"
-dependencies = [
- "html2md",
- "md5 0.7.0",
- "regex",
- "reqwest",
- "scraper",
- "tokio",
 ]
 
 [[package]]

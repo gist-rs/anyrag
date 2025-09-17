@@ -1,0 +1,29 @@
+[package]
+name = "anyrag-web"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Internal & Workspace
+anyrag = { path = "../lib" }
+anyrag-html = { path = "../html" }
+anyhow = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+turso = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+
+# External
+reqwest = { workspace = true }
+md5 = { workspace = true }
+uuid = { workspace = true, features = ["v5"] }
+url = "2.5.7"
+
+[dev-dependencies]
+dotenvy = { workspace = true }
+tracing-subscriber = { workspace = true }
+wiremock = { workspace = true }

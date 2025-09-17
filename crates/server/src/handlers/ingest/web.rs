@@ -1,7 +1,7 @@
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
-use anyrag::ingest::knowledge::{IngestionPrompts, WebIngestStrategy};
-use anyrag::ingest::run_ingestion_pipeline;
+use anyrag::ingest::Ingestor;
+use anyrag_web::{IngestionPrompts, WebIngestStrategy, WebIngestor};
 use axum::{
     extract::{Query, State},
     Json,
@@ -34,6 +34,7 @@ pub async fn ingest_web_handler(
         payload.url, owner_id
     );
 
+    // 1. Get necessary providers and prompts from app state
     let task_name = "knowledge_distillation";
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Task '{}' not found in config", task_name))
@@ -41,14 +42,6 @@ pub async fn ingest_web_handler(
     let provider_name = &task_config.provider;
     let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Provider '{}' not found", provider_name))
-    })?;
-
-    let aug_task_name = "knowledge_augmentation";
-    let _aug_task_config = app_state.tasks.get(aug_task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!(
-            "Task '{}' not found in config",
-            aug_task_name
-        ))
     })?;
 
     let meta_task_name = "knowledge_metadata_extraction";
@@ -64,33 +57,33 @@ pub async fn ingest_web_handler(
         metadata_extraction_system_prompt: &meta_task_config.system_prompt,
     };
 
+    // 2. Instantiate the ingestor plugin
+    let ingestor = WebIngestor::new(&app_state.sqlite_provider.db, ai_provider.as_ref(), prompts);
+
+    // 3. Determine the strategy and serialize the source for the ingestor
     let web_ingest_strategy = match app_state.config.web_ingest_strategy.as_str() {
-        "jina" => {
-            info!("Using Jina API for web ingestion.");
-            WebIngestStrategy::Jina {
-                api_key: app_state.config.jina_api_key.as_deref(),
-            }
-        }
-        _ => {
-            info!("Using raw HTML for web ingestion.");
-            WebIngestStrategy::RawHtml
-        }
+        "jina" => WebIngestStrategy::Jina {
+            api_key: app_state.config.jina_api_key.as_deref(),
+        },
+        _ => WebIngestStrategy::RawHtml,
     };
 
-    let ingested_count = run_ingestion_pipeline(
-        &app_state.sqlite_provider.db,
-        ai_provider.as_ref(),
-        &payload.url,
-        owner_id.as_deref(),
-        prompts,
-        web_ingest_strategy,
-    )
-    .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("Knowledge ingestion failed: {}", e)))?;
+    let source_json = json!({
+        "url": payload.url,
+        "strategy": web_ingest_strategy,
+    })
+    .to_string();
 
+    // 4. Call the generic ingest method
+    let ingest_result = ingestor
+        .ingest(&source_json, owner_id.as_deref())
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Web ingestion failed: {e}")))?;
+
+    // 5. Construct the response
     let response = IngestWebResponse {
         message: "Knowledge ingestion pipeline completed successfully.".to_string(),
-        ingested_faqs: ingested_count,
+        ingested_faqs: ingest_result.documents_added,
     };
     let debug_info = json!({ "url": payload.url, "owner_id": owner_id });
     Ok(wrap_response(response, debug_params, Some(debug_info)))

@@ -22,8 +22,8 @@
 //! `RUST_LOG=info cargo run -p anyrag-server --example backfill_metadata`
 
 use anyhow::{bail, Result};
-use anyrag::ingest::knowledge::extract_and_store_metadata;
 use anyrag_server::{config, state};
+use anyrag_web::extract_and_store_metadata;
 use futures::stream::{self, StreamExt};
 use std::env;
 use tracing::info;
