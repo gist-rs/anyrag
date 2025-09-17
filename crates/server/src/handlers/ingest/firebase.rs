@@ -5,6 +5,7 @@ use crate::handlers::{
 use anyrag::ingest::{
     dump_firestore_collection, knowledge::extract_and_store_metadata, DumpFirestoreOptions,
 };
+use anyrag::providers::factory::create_dynamic_provider;
 use axum::{
     extract::{Query, State},
     Json,
@@ -97,7 +98,7 @@ pub async fn ingest_firebase_handler(
         .get("knowledge_metadata_extraction")
         .unwrap();
     let (meta_ai_provider, _) = if let Some(model_name) = &payload.model {
-        crate::providers::create_dynamic_provider(&app_state, model_name).await?
+        create_dynamic_provider(&app_state.config.providers, model_name)?
     } else {
         let provider_name = &meta_task_config.provider;
         let provider = app_state

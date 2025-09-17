@@ -7,6 +7,7 @@
 pub mod graph;
 
 pub mod errors;
+pub mod executor;
 
 pub mod ingest;
 pub mod prompts;
@@ -16,10 +17,12 @@ pub mod search;
 pub mod types;
 
 pub use errors::PromptError;
+pub use executor::AnyragExecutor;
 pub use rerank::{RerankError, Rerankable};
 pub use search::{SearchError, SearchMode};
 pub use types::{
-    ExecutePromptOptions, PromptClient, PromptClientBuilder, PromptResult, SearchResult,
+    ExecutePromptOptions, HttpRequestPromptOptions, PromptClient, PromptClientBuilder,
+    PromptResult, SearchResult,
 };
 
 use crate::prompts::{

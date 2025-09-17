@@ -79,3 +79,31 @@ This document establishes the official coding conventions and architectural rule
 -   Each file in `examples/` is a small, runnable binary that acts as a client, demonstrating usage and asserting correctness.
 -   **Documentation**: The `README.md` of the crate must document how to run these examples (e.g., `cargo run --example <example_filename>`).
 -   This provides both a robust E2E test suite and living documentation for consumers of the library.
+
+---
+
+## 5. Standard Toolchain
+
+To ensure consistency and leverage high-quality, community-vetted solutions, this project standardizes on the following foundational crates. All new code should prefer these libraries for their respective tasks.
+
+-   **Asynchronous Runtime**: `tokio`
+    -   **Use Case**: The required runtime for all `async` operations. This includes networking, file I/O, and managing green threads (tasks).
+
+-   **Error Handling**: `anyhow` and `thiserror`
+    -   **`thiserror`**: MUST be used in library crates (`anyrag-lib`, `anyrag-github`, etc.) to create specific, structured, and typed errors (e.g., `IngestError`, `PromptError`).
+    -   **`anyhow`**: SHOULD be used in binary entrypoints (`main.rs`) and examples for simple, flexible error handling where the exact error type is less important than the context message.
+
+-   **HTTP Client**: `reqwest`
+    -   **Use Case**: The standard for making all outgoing HTTP requests to external APIs (e.g., AI providers, web scrapers).
+
+-   **Serialization / Deserialization**: `serde`
+    -   **Use Case**: The universal framework for all data serialization and deserialization. This applies to JSON, YAML, and any other data format.
+
+-   **Date and Time**: `chrono`
+    -   **Use Case**: The standard for all date and time manipulation, parsing, and formatting.
+
+-   **Async Primitives**: `futures`
+    -   **Use Case**: For advanced asynchronous operations, such as working with streams or joining multiple futures.
+
+-   **Configuration Loading**: `dotenvy`
+    -   **Use Case**: Used exclusively in binary entrypoints (`main.rs`) to load secrets and configuration from `.env` files into the environment.

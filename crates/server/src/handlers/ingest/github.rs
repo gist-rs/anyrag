@@ -1,12 +1,12 @@
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use anyrag::SearchResult;
+use anyrag_github::ingest::{
+    run_github_ingestion, search_examples, storage::StorageManager, types::IngestionTask,
+};
 use axum::{
     extract::{Path, Query, State},
     Json,
-};
-use github::ingest::{
-    run_github_ingestion, search_examples, storage::StorageManager, types::IngestionTask,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;

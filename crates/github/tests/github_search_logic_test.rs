@@ -6,14 +6,14 @@
 // Make the common module available.
 mod common;
 
-use common::{setup_mock_embedding_server, setup_tracing, MockAiProvider};
-use github::{
+use anyrag_github::{
     ingest::{
         storage::StorageManager,
         types::{ExampleSourceType, GeneratedExample},
     },
     search_examples,
 };
+use common::{setup_mock_embedding_server, setup_tracing, MockAiProvider};
 use serde_json::json;
 use std::sync::Arc;
 use tempfile::{tempdir, TempDir};

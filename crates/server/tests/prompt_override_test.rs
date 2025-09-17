@@ -7,10 +7,8 @@
 mod common;
 
 use anyhow::Result;
-use anyrag_server::{
-    config::{get_config, AppConfig},
-    state::build_app_state,
-};
+use anyrag::types::AppConfig;
+use anyrag_server::{config::get_config, state::build_app_state};
 use common::TestApp;
 use httpmock::{Method, MockServer};
 use serde_json::json;

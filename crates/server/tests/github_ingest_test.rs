@@ -7,9 +7,9 @@
 mod common;
 
 use anyhow::Result;
+use anyrag_github::ingest::storage::StorageManager;
 use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
-use github::ingest::storage::StorageManager;
 use httpmock::Method;
 use serde_json::{json, Value};
 use std::fs;

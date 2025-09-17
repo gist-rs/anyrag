@@ -5,8 +5,9 @@
 mod auth;
 mod firebase;
 mod process;
-
 use anyhow::{bail, Result};
+
+use anyrag_github::cli::{handle_dump_github, GithubArgs};
 use clap::{Parser, Subcommand};
 use keyring::Entry;
 use std::fs;
@@ -54,7 +55,7 @@ enum DumpCommands {
     Firebase(firebase::FirebaseArgs),
     /// Dump examples from a public GitHub repository
     #[command(disable_version_flag = true)]
-    Github(github::cli::GithubArgs),
+    Github(GithubArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -143,7 +144,7 @@ async fn handle_dump(args: &DumpArgs) -> Result<()> {
             firebase::handle_dump_firebase(firebase_args).await?;
         }
         DumpCommands::Github(github_args) => {
-            github::cli::handle_dump_github(github_args).await?;
+            handle_dump_github(github_args).await?;
         }
     }
     Ok(())

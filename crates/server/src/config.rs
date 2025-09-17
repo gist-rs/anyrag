@@ -5,14 +5,15 @@
 //! variables. This approach allows for a structured, flexible, and maintainable
 //! configuration setup.
 
-use anyrag::prompts::knowledge::KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT;
-use anyrag::prompts::tasks::*;
+use anyrag::{
+    prompts::{knowledge::KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, tasks::*},
+    types::AppConfig,
+};
 use config::{
     Config as ConfigBuilder, Environment, File, FileFormat, Value as ConfigValue,
     ValueKind as ConfigValueKind,
 };
 use regex::Regex;
-use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -42,106 +43,6 @@ impl From<config::ConfigError> for ConfigError {
     fn from(err: config::ConfigError) -> Self {
         ConfigError::General(err.to_string())
     }
-}
-
-/// Configuration for temporal reasoning.
-#[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
-pub struct TemporalReasoningConfig {
-    #[serde(default = "default_temporal_keywords")]
-    pub keywords: Vec<String>,
-    #[serde(default = "default_temporal_property_name")]
-    pub property_name: String,
-}
-
-fn default_temporal_keywords() -> Vec<String> {
-    vec![
-        "newest".to_string(),
-        "latest".to_string(),
-        "most recent".to_string(),
-    ]
-}
-
-fn default_temporal_property_name() -> String {
-    "release_date".to_string()
-}
-
-/// The root configuration structure, mapping directly to `config.yml`.
-#[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
-pub struct AppConfig {
-    /// The port for the server to listen on. Loaded from `PORT` env var.
-    #[serde(default = "default_port")]
-    pub port: u16,
-    /// The path to the SQLite database file. Loaded from `DB_URL` env var.
-    #[serde(default = "default_db_url")]
-    pub db_url: String,
-    /// An optional API key for the Jina Reader service. Loaded from `JINA_API_KEY` env var.
-    #[serde(default)]
-    pub jina_api_key: Option<String>,
-    /// The web ingestion strategy to use ("raw_html" or "jina"). Loaded from `WEB_INGEST_STRATEGY` env var.
-    #[serde(default = "default_web_ingest_strategy")]
-    pub web_ingest_strategy: String,
-
-    /// Configuration for temporal reasoning.
-    #[serde(default)]
-    pub temporal_reasoning: Option<TemporalReasoningConfig>,
-
-    /// Configuration for the text embedding model.
-    pub embedding: EmbeddingConfig,
-    /// A map of named, reusable AI provider configurations.
-    pub providers: HashMap<String, ProviderConfig>,
-    /// A map of tasks, each specifying a provider and prompts.
-    pub tasks: HashMap<String, TaskConfig>,
-}
-
-/// Provides a default value for the `port` field if not set in the environment.
-fn default_port() -> u16 {
-    9090
-}
-/// Provides a default value for the `db_url` field if not set in the environment.
-fn default_db_url() -> String {
-    "db/anyrag.db".to_string()
-}
-
-/// Provides a default value for the `web_ingest_strategy` field.
-fn default_web_ingest_strategy() -> String {
-    "raw_html".to_string()
-}
-
-/// Configuration for the embedding model provider.
-#[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
-pub struct EmbeddingConfig {
-    pub api_url: String,
-    pub model_name: String,
-    pub api_key: Option<String>,
-}
-
-/// A reusable configuration for a specific AI provider instance.
-#[derive(Debug, Deserialize, Clone)]
-#[allow(dead_code)]
-pub struct ProviderConfig {
-    /// The type of provider (e.g., "gemini", "local").
-    pub provider: String,
-    /// The API URL. Optional for providers like Gemini where it can be derived.
-    pub api_url: Option<String>,
-    /// The API key, which can be null for local providers.
-    pub api_key: Option<String>,
-    pub model_name: String,
-}
-
-/// Defines the prompts and provider for a specific application task.
-#[derive(Debug, Deserialize, Clone, Default)]
-#[allow(dead_code)]
-pub struct TaskConfig {
-    /// The key of the provider to use from the `providers` map.
-    #[serde(default)]
-    pub provider: Option<String>,
-    #[serde(default)]
-    pub system_prompt: Option<String>,
-    #[serde(default)]
-    pub user_prompt: Option<String>,
 }
 
 /// Constructs a `config::Value` map of the default, hardcoded tasks from the library.

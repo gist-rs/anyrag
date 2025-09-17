@@ -5,9 +5,9 @@
 //! that decides the best method to retrieve context for generation.
 
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptResponse};
-use crate::{auth::middleware::AuthenticatedUser, providers::create_dynamic_provider};
+use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
-    providers::db::sqlite::SqliteProvider,
+    providers::{db::sqlite::SqliteProvider, factory::create_dynamic_provider},
     search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ExecutePromptOptions as LibExecutePromptOptions, PromptClientBuilder},
 };
@@ -304,7 +304,7 @@ pub async fn gen_text_handler(
     // --- Stage 2: Content Generation ---
     let gen_task_config = app_state.tasks.get("direct_generation").unwrap();
     let (generation_provider, model_used_name) = if let Some(model_name) = &payload.model {
-        create_dynamic_provider(&app_state, model_name).await?
+        create_dynamic_provider(&app_state.config.providers, model_name)?
     } else {
         let provider_name = &gen_task_config.provider;
         let provider = app_state.ai_providers.get(provider_name).unwrap().clone();

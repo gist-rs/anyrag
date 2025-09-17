@@ -21,6 +21,7 @@ pub mod sheet_faq;
 pub mod sheets;
 pub mod state_manager;
 pub mod text;
+pub mod traits;
 
 pub use embedding::{embed_article, EmbeddingError};
 #[cfg(feature = "firebase")]
@@ -40,3 +41,4 @@ pub use sheets::{
     ingest_from_google_sheet_url, sheet_url_to_export_url_and_table_name, IngestSheetError,
 };
 pub use text::{chunk_text, IngestError as TextIngestError};
+pub use traits::{IngestError, IngestionResult, Ingestor};

@@ -5,12 +5,12 @@ use anyrag::{
     search::SearchError,
     PromptError,
 };
+use anyrag_github::types::GitHubIngestError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use github::types::GitHubIngestError;
 use serde_json::json;
 use tracing::error;
 use turso::Error as TursoError;
@@ -230,9 +230,9 @@ impl IntoResponse for AppError {
                 // Log the original error for debugging purposes
                 error!("PromptError: {:?}", err);
                 match err {
-                    PromptError::MissingAiProvider | PromptError::MissingStorageProvider => (
+                    PromptError::MissingAiProvider(e) | PromptError::MissingStorageProvider(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        "Server is not configured correctly.".to_string(),
+                        format!("Server configuration error: {e}"),
                     ),
                     PromptError::AiRequest(e) => (
                         StatusCode::BAD_GATEWAY,

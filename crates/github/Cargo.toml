@@ -1,5 +1,5 @@
 [package]
-name = "github"
+name = "anyrag-github"
 version = "0.1.0"
 edition = "2021"
 
@@ -27,6 +27,7 @@ serde_json = { workspace = true }
 turso = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 thiserror = { workspace = true }
+async-trait.workspace = true
 
 [dev-dependencies]
 async-trait = { workspace = true }
