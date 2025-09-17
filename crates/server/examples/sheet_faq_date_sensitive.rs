@@ -107,9 +107,9 @@ async fn main() -> Result<()> {
         Ok(Json(response)) => {
             info!(
                 "Ingestion successful. Stored {} new FAQs.",
-                response.result.ingested_faqs
+                response.result.ingested_documents
             );
-            if response.result.ingested_faqs == 0 {
+            if response.result.ingested_documents == 0 {
                 bail!("No FAQs were ingested. The sheet might be empty or already processed.");
             }
         }
