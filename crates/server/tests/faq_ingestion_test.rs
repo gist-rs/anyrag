@@ -122,7 +122,7 @@ sections:
 
     // Assert API Response for ingestion
     let ingest_body: ApiResponse<Value> = ingest_response.json().await?;
-    assert_eq!(ingest_body.result["ingested_faqs"], 1);
+    assert_eq!(ingest_body.result["ingested_documents"], 1);
 
     // --- 4. Assert Database State ---
     let db = Builder::new_local(app.db_path.to_str().unwrap())

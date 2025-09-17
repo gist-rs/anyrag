@@ -18,7 +18,7 @@ pub struct IngestWebRequest {
 #[derive(Serialize)]
 pub struct IngestWebResponse {
     pub message: String,
-    pub ingested_faqs: usize,
+    pub ingested_documents: usize,
 }
 
 /// Handler for the knowledge base ingestion pipeline from a web URL.
@@ -83,7 +83,7 @@ pub async fn ingest_web_handler(
     // 5. Construct the response
     let response = IngestWebResponse {
         message: "Knowledge ingestion pipeline completed successfully.".to_string(),
-        ingested_faqs: ingest_result.documents_added,
+        ingested_documents: ingest_result.documents_added,
     };
     let debug_info = json!({ "url": payload.url, "owner_id": owner_id });
     Ok(wrap_response(response, debug_params, Some(debug_info)))

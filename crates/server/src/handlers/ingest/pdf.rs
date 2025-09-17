@@ -144,7 +144,7 @@ pub async fn ingest_pdf_handler(
     // --- 4. Construct the response ---
     let response = IngestWebResponse {
         message: "PDF ingestion pipeline completed successfully.".to_string(),
-        ingested_faqs: ingest_result.documents_added,
+        ingested_documents: ingest_result.documents_added,
     };
 
     let debug_info = json!({
