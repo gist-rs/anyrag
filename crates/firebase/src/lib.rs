@@ -81,9 +81,8 @@ impl<'a> Ingestor for FirebaseIngestor<'a> {
             serde_json::from_str(source).map_err(|e| AnyragIngestError::Parse(e.to_string()))?;
         let collection_name = firebase_source.collection.clone();
 
-        let documents_added = dump_firestore_collection(self.sqlite_provider, firebase_source)
-            .await
-            .map_err(FirebaseIngestError::from)?;
+        let documents_added =
+            dump_firestore_collection(self.sqlite_provider, firebase_source).await?;
 
         Ok(IngestionResult {
             documents_added,

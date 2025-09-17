@@ -47,7 +47,7 @@ pub async fn ingest_firebase_handler(
     let sqlite_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?;
 
-    let firebase_source = FirebaseSource::from(&*payload);
+    let firebase_source = FirebaseSource::from(&payload);
     let source_str = serde_json::to_string(&firebase_source).map_err(|e| {
         AppError::Internal(anyhow!(
             "Failed to serialize Firebase source for project '{}': {}",
