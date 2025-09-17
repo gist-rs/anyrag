@@ -5,38 +5,18 @@
 //! database for later use in RAG.
 
 pub mod embedding;
-#[cfg(feature = "firebase")]
-pub mod firebase;
-pub mod knowledge;
-pub mod markdown;
 
-#[cfg(feature = "rss")]
-pub mod rss;
+pub mod knowledge;
+
 #[cfg(feature = "sheets")]
 pub mod shared;
-#[cfg(feature = "sheets")]
-pub mod sheet_faq;
-#[cfg(feature = "sheets")]
-pub mod sheets;
+
 pub mod state_manager;
-pub mod text;
+
 pub mod traits;
 
 pub use embedding::{embed_article, EmbeddingError};
-#[cfg(feature = "firebase")]
-pub use firebase::{dump_firestore_collection, DumpFirestoreOptions, FirebaseIngestError};
-pub use knowledge::{export_for_finetuning, KnowledgeError};
-pub use markdown::{ingest_markdown_file, MarkdownIngestError};
 
-#[cfg(feature = "rss")]
-pub use rss::{ingest_from_url, IngestError as RssIngestError};
-#[cfg(feature = "sheets")]
-pub use shared::SheetError;
-#[cfg(feature = "sheets")]
-pub use sheet_faq::{ingest_faq_from_google_sheet, IngestSheetFaqError};
-#[cfg(feature = "sheets")]
-pub use sheets::{
-    ingest_from_google_sheet_url, sheet_url_to_export_url_and_table_name, IngestSheetError,
-};
-pub use text::{chunk_text, IngestError as TextIngestError};
+pub use knowledge::{export_for_finetuning, KnowledgeError};
+
 pub use traits::{IngestError, IngestionResult, Ingestor};

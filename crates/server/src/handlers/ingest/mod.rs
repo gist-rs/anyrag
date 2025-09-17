@@ -1,6 +1,9 @@
 #[cfg(feature = "firebase")]
 pub mod firebase;
+#[cfg(feature = "firebase")]
+pub mod firebase_types;
 pub mod github;
+pub mod github_types;
 pub mod pdf;
 #[cfg(feature = "rss")]
 pub mod rss;

@@ -19,6 +19,7 @@ regex = { workspace = true }
 
 # Internal & Workspace
 anyrag = { path = "../lib" }
+anyrag-markdown = { path = "../markdown" }
 anyhow = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }

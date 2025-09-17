@@ -1,6 +1,7 @@
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
-use anyrag::ingest::text::{chunk_text, ingest_chunks_as_documents};
+use anyrag::ingest::Ingestor;
+use anyrag_text::TextIngestor;
 use axum::{
     extract::{Query, State},
     Json,
@@ -26,7 +27,7 @@ pub struct IngestTextResponse {
     pub ingested_chunks: usize,
 }
 
-/// Handler for ingesting raw text content.
+/// Handler for ingesting raw text content using the `anyrag-text` plugin.
 pub async fn ingest_text_handler(
     State(app_state): State<AppState>,
     user: AuthenticatedUser,
@@ -38,32 +39,41 @@ pub async fn ingest_text_handler(
         "User '{:?}' sending text ingest request from source: {}",
         owner_id, payload.source
     );
-    let chunks = chunk_text(&payload.text)?;
-    let total_chunks = chunks.len();
 
-    let mut conn = app_state.sqlite_provider.db.connect()?;
+    // 1. Instantiate the ingestor plugin.
+    let ingestor = TextIngestor::new(&app_state.sqlite_provider.db);
 
-    let new_document_ids =
-        ingest_chunks_as_documents(&mut conn, chunks, &payload.source, owner_id.as_deref()).await?;
-    let ingested_count = new_document_ids.len();
+    // 2. Serialize the source information into a JSON string for the generic ingest method.
+    let source_json = json!({
+        "text": payload.text,
+        "source": payload.source
+    })
+    .to_string();
 
-    let message = if ingested_count > 0 {
-        format!("Text ingestion successful. Stored {ingested_count} new document chunks.",)
-    } else if total_chunks > 0 {
-        "All content may already exist. No new chunks were ingested.".to_string()
+    // 3. Call the generic ingest method from the trait.
+    let result = ingestor
+        .ingest(&source_json, owner_id.as_deref())
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Text ingestion failed: {}", e)))?;
+
+    // 4. Construct the final HTTP response.
+    let message = if result.documents_added > 0 {
+        format!(
+            "Text ingestion successful. Stored {} new document chunks.",
+            result.documents_added
+        )
     } else {
-        "No text chunks found to ingest.".to_string()
+        "No new text chunks were ingested. The content might be empty or already exist.".to_string()
     };
 
     let response = IngestTextResponse {
         message,
-        ingested_chunks: ingested_count,
+        ingested_chunks: result.documents_added,
     };
     let debug_info = json!({
-        "source": payload.source,
-        "chunks_created": ingested_count,
-        "original_text_length": payload.text.len(),
-        "document_ids": new_document_ids,
+        "source": result.source,
+        "chunks_created": result.documents_added,
+        "document_ids": result.document_ids,
         "owner_id": owner_id,
     });
     Ok(wrap_response(response, debug_params, Some(debug_info)))

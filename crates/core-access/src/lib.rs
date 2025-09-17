@@ -6,6 +6,7 @@
 pub const GUEST_USER_IDENTIFIER: &str = "::guest::";
 
 use anyhow::Result;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

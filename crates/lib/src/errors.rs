@@ -50,17 +50,3 @@ impl From<String> for PromptError {
         PromptError::StorageOperationFailed(s)
     }
 }
-
-#[cfg(feature = "sheets")]
-impl From<crate::ingest::SheetError> for PromptError {
-    fn from(err: crate::ingest::SheetError) -> Self {
-        PromptError::StorageOperationFailed(err.to_string())
-    }
-}
-
-#[cfg(feature = "sheets")]
-impl From<crate::ingest::IngestSheetError> for PromptError {
-    fn from(err: crate::ingest::IngestSheetError) -> Self {
-        PromptError::StorageOperationFailed(err.to_string())
-    }
-}

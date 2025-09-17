@@ -7,7 +7,6 @@
 
 use crate::{
     constants,
-    ingest::{ingest_from_google_sheet_url, sheet_url_to_export_url_and_table_name},
     providers::{
         ai::AiProvider,
         db::{sqlite::SqliteProvider, storage::Storage},
@@ -95,40 +94,6 @@ impl AnyragExecutor {
                 "List the first {limit} rows from the `{table_name}` table, showing all columns."
             );
             info!("Transformed prompt: '{}'", options.prompt);
-        }
-
-        // --- On-the-fly Google Sheet Ingestion ---
-        let sheet_url = options
-            .prompt
-            .split_whitespace()
-            .find(|word| word.contains("/spreadsheets/d/"));
-
-        if let Some(url) = sheet_url {
-            // This logic requires the concrete SqliteProvider, which we have in the executor.
-            let (export_url, table_name) =
-                sheet_url_to_export_url_and_table_name(url).map_err(|e| {
-                    PromptError::StorageOperationFailed(format!(
-                        "Sheet URL transformation failed: {e}"
-                    ))
-                })?;
-
-            if self
-                .sqlite_provider
-                .get_table_schema(&table_name)
-                .await
-                .is_err()
-            {
-                info!("Table '{}' does not exist. Starting ingestion.", table_name);
-                ingest_from_google_sheet_url(&self.sqlite_provider.db, &export_url, &table_name)
-                    .await
-                    .map_err(|e| {
-                        PromptError::StorageOperationFailed(format!("Sheet ingestion failed: {e}"))
-                    })?;
-            } else {
-                info!("Table '{}' already exists. Skipping ingestion.", table_name);
-            }
-            // Modify the options for the rest of the pipeline.
-            options.table_name = Some(table_name);
         }
 
         // --- Task-based Configuration Loading ---

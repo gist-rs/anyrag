@@ -1,5 +1,6 @@
 use anyhow::Result;
-use anyrag::ingest::markdown::{ingest_markdown_file, EmbeddingConfig};
+use anyrag::ingest::Ingestor;
+use anyrag_markdown::{EmbeddingConfig, MarkdownIngestor, MarkdownSource};
 use clap::{Parser, Subcommand};
 use std::path::Path;
 use tracing::info;
@@ -51,18 +52,28 @@ async fn handle_process_file(args: &FileArgs) -> Result<()> {
     }
 
     let embedding_api_key = std::env::var("AI_API_KEY").ok();
-    let embedding_config = args.embedding_api_url.as_deref().and_then(|url| {
-        args.embedding_model
-            .as_deref()
-            .map(|model| EmbeddingConfig {
-                api_url: url,
-                model,
-                api_key: embedding_api_key.as_deref(),
+    let embedding_config =
+        if let (Some(url), Some(model)) = (&args.embedding_api_url, &args.embedding_model) {
+            Some(EmbeddingConfig {
+                api_url: url.clone(),
+                model: model.clone(),
+                api_key: embedding_api_key,
             })
-    });
+        } else {
+            None
+        };
 
-    let count =
-        ingest_markdown_file(&args.db_path, &args.path, &args.separator, embedding_config).await?;
+    let markdown_source = MarkdownSource {
+        db_path: args.db_path.clone(),
+        file_path: args.path.clone(),
+        separator: args.separator.clone(),
+        embedding_config,
+    };
+
+    let ingestor = MarkdownIngestor;
+    let source_json = serde_json::to_string(&markdown_source)?;
+    let result = ingestor.ingest(&source_json, None).await?;
+    let count = result.documents_added;
 
     println!(
         "✅ Successfully ingested {} chunks from '{}' into '{}'.",

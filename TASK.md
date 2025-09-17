@@ -29,7 +29,7 @@ This document breaks down the architectural goals from `PLAN.md` into concrete, 
 
 **Goal**: Make the ingestion system modular and extensible by treating each data source as a plugin.
 
--   [ ] **Task 2.1: Define a Generic `Ingestor` Trait**
+-   [x] **Task 2.1: Define a Generic `Ingestor` Trait**
     -   **Action**: Create a new trait `Ingestor` in `anyrag/src/ingest/mod.rs`.
     -   **Details**: The trait should define a common interface for all ingestion plugins, such as `async fn ingest(&self, source: &str) -> Result<Output, Error>`.
     -   **Acceptance Criteria**: A clear, generic trait for ingestion exists in the `anyrag` library.
@@ -44,32 +44,32 @@ This document breaks down the architectural goals from `PLAN.md` into concrete, 
     -   **Details**: The `ingest` method will encapsulate the existing `run_github_ingestion` pipeline.
     -   **Acceptance Criteria**: The `anyrag` library can use the `GithubIngestor` through the generic trait.
 
--   [ ] **Task 2.4: Isolate `pdf` Logic into a Plugin Crate**
+-   [x] **Task 2.4: Isolate `pdf` Logic into a Plugin Crate**
     -   **Action**: Create an `anyrag-pdf` crate and move the PDF ingestion pipeline from `anyrag-lib` and the handler logic into it.
     -   **Details**: The new crate should implement the `Ingestor` trait. The server handler will be updated to call it.
     -   **Acceptance Criteria**: PDF ingestion is a self-contained plugin.
 
--   [ ] **Task 2.5: Isolate `web` Logic into a Plugin Crate**
+-   [x] **Task 2.5: Isolate `web` Logic into a Plugin Crate**
     -   **Action**: Create an `anyrag-web` crate for URL ingestion.
     -   **Details**: Move the `run_ingestion_pipeline` logic for web content into this crate and implement the `Ingestor` trait.
     -   **Acceptance Criteria**: Web ingestion is a self-contained plugin.
 
--   [ ] **Task 2.6: Isolate `rss` Logic into a Plugin Crate**
+-   [x] **Task 2.6: Isolate `rss` Logic into a Plugin Crate**
     -   **Action**: Create an `anyrag-rss` crate.
     -   **Details**: Move the `ingest_from_url` logic for RSS feeds into this crate and implement the `Ingestor` trait.
     -   **Acceptance Criteria**: RSS ingestion is a self-contained plugin.
 
--   [ ] **Task 2.7: Isolate `sheet` Logic into a Plugin Crate**
+-   [x] **Task 2.7: Isolate `sheet` Logic into a Plugin Crate**
     -   **Action**: Create an `anyrag-sheets` crate.
     -   **Details**: Move the Google Sheets ingestion logic into this crate and implement the `Ingestor` trait.
     -   **Acceptance Criteria**: Google Sheets ingestion is a self-contained plugin.
 
--   [ ] **Task 2.8: Isolate `text` Logic into a Plugin Crate**
+-   [x] **Task 2.8: Isolate `text` Logic into a Plugin Crate**
     -   **Action**: Create an `anyrag-text` crate.
     -   **Details**: Move the raw text chunking and ingestion logic into this crate and implement the `Ingestor` trait.
     -   **Acceptance Criteria**: Text ingestion is a self-contained plugin.
 
--   [ ] **Task 2.9: Isolate `firebase` Logic into a Plugin Crate**
+-   [x] **Task 2.9: Isolate `firebase` Logic into a Plugin Crate**
     -   **Action**: Create an `anyrag-firebase` crate.
     -   **Details**: Move the Firestore dump logic into this crate and implement the `Ingestor` trait.
     -   **Acceptance Criteria**: Firebase ingestion is a self-contained plugin.

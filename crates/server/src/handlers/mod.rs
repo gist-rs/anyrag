@@ -11,6 +11,7 @@ pub mod db_handlers;
 pub mod document_handlers;
 pub mod general;
 pub mod generation_handlers;
+pub mod generation_types;
 pub mod graph_handlers;
 pub mod ingest;
 pub mod knowledge;

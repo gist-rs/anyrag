@@ -1,3 +1,4 @@
+use super::github_types::*;
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use anyrag::SearchResult;
@@ -8,49 +9,8 @@ use axum::{
     extract::{Path, Query, State},
     Json,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
-
-#[derive(Deserialize)]
-pub struct IngestGitHubRequest {
-    pub url: String,
-    pub version: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct IngestGitHubResponse {
-    pub message: String,
-    pub ingested_examples: usize,
-    pub version: String,
-}
-
-#[derive(Deserialize)]
-pub struct GetVersionedExamplesPath {
-    pub repo_name: String,
-    pub version: String,
-}
-
-#[derive(Deserialize)]
-pub struct GetLatestExamplesPath {
-    pub repo_name: String,
-}
-
-#[derive(Serialize)]
-pub struct GetExamplesResponse {
-    pub content: String,
-}
-
-#[derive(Deserialize)]
-pub struct SearchExamplesRequest {
-    pub query: String,
-    pub repos: Vec<String>,
-}
-
-#[derive(Serialize)]
-pub struct SearchExamplesResponse {
-    pub results: Vec<SearchResult>,
-}
 
 /// Handler for ingesting code examples from a public GitHub repository.
 /// This handler acts as a thin web layer, orchestrating the call to the

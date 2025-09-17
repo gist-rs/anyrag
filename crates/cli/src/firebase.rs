@@ -1,9 +1,5 @@
 use anyhow::{bail, Result};
-use anyrag::{
-    constants,
-    ingest::{dump_firestore_collection, DumpFirestoreOptions},
-    providers::db::sqlite::SqliteProvider,
-};
+use anyrag::{constants, providers::db::sqlite::SqliteProvider};
 use clap::Parser;
 use std::fs;
 use tracing::info;
