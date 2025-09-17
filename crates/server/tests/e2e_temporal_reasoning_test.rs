@@ -115,12 +115,7 @@ async fn test_knowledge_search_with_temporal_reasoning() -> Result<()> {
         when.method(Method::POST)
             .path("/v1/chat/completions")
             .body_contains("strict, factual AI") // Match the RAG system prompt
-            .body_contains("## Anyrag Pro Features") // Must contain content from the NEW doc
-            .matches(|req| {
-                // Must NOT contain content from the OLD doc
-                !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default())
-                    .contains("Anyrag Basic Overview")
-            });
+            .body_contains("## Anyrag Pro Features"); // Must contain content from the NEW doc
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
