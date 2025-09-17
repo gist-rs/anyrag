@@ -35,9 +35,9 @@ This document breaks down the architectural goals from `PLAN.md` into concrete, 
     -   **Acceptance Criteria**: A clear, generic trait for ingestion exists in the `anyrag` library.
 
 -   [ ] **Task 2.2: Isolate `github` Logic into a Plugin Crate**
-    -   **Action**: Create a new crate: `crates/github`.
-    -   **Details**: Move all logic related to cloning, parsing, and storing GitHub examples into this new crate.
-    -   **Acceptance Criteria**: The `github` ingestion logic is fully self-contained in its own crate.
+    -   **Action**: Create a new crate at `crates/github` and name it `anyrag-github` in its `Cargo.toml`.
+    -   **Details**: Move all logic related to cloning, parsing, and storing GitHub examples into this new crate, following the flat `crates/` directory structure.
+    -   **Acceptance Criteria**: The `github` ingestion logic is fully self-contained in the `anyrag-github` crate.
 
 -   [ ] **Task 2.3: Implement the `Ingestor` Trait for `github`**
     -   **Action**: In the `crates/github` crate, create a `GithubIngestor` struct and implement the `Ingestor` trait for it.
@@ -51,21 +51,23 @@ This document breaks down the architectural goals from `PLAN.md` into concrete, 
 
 ---
 
-### Epic 3: Centralize Core Data Types
+### Epic 3: Refine Type Scoping and Management
 
-**Goal**: Improve maintainability and avoid circular dependencies by creating a single source of truth for shared data structures.
+**Goal**: Improve maintainability by clearly scoping types as either shared public models or crate-local internal types.
 
--   [ ] **Task 3.1: Create `anyrag/src/types.rs`**
-    -   **Action**: Create a new public module `types.rs` within the `anyrag` library crate.
-    -   **Acceptance Criteria**: The file `anyrag/src/types.rs` exists.
+-   [ ] **Task 3.1: Centralize Shared Public Types**
+    -   **Action**: Identify and move all types that are part of `anyrag`'s public API or are shared between multiple crates into `anyrag/src/types.rs`.
+    -   **Details**: This includes structs like `SearchResult`, `ExecutePromptOptions`, and `User`.
+    -   **Acceptance Criteria**: The `anyrag/src/types.rs` module serves as the single source of truth for the workspace's public data models.
 
--   [ ] **Task 3.2: Relocate Shared Structs**
-    -   **Action**: Move shared data structures like `SearchResult`, `ExecutePromptOptions`, and schema-related structs into `anyrag/src/types.rs`.
-    -   **Acceptance Criteria**: Core types are defined in one central, easily importable location.
+-   [ ] **Task 3.2: Establish Crate-Local Types**
+    -   **Action**: For each crate (e.g., `anyrag-github`, `anyrag-server`), create a local `src/types.rs` for internal-only data structures.
+    -   **Details**: Types that are only used within a single crate should be moved here to improve encapsulation.
+    -   **Acceptance Criteria**: Each crate manages its own internal types, reducing unnecessary exposure across the workspace.
 
 -   [ ] **Task 3.3: Update All Imports**
-    -   **Action**: Perform a workspace-wide search and replace to update all import paths to use the new canonical location (e.g., `use anyrag::types::SearchResult;`).
-    -   **Acceptance Criteria**: The project compiles successfully with the updated import paths.
+    -   **Action**: Perform a workspace-wide search and replace to update all import paths to use the new canonical locations.
+    -   **Acceptance Criteria**: The project compiles successfully with the refined import paths.
 
 ---
 
