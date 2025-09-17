@@ -139,6 +139,7 @@ async fn main() -> Result<()> {
     let search_payload = SearchRequest {
         db: Some("sheet-faq-test".to_string()),
         query: question.to_string(),
+        model: None,
         limit: Some(5),
         instruction: None,
         mode: Default::default(),

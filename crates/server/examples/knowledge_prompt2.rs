@@ -57,6 +57,7 @@ async fn ask_question(
     let payload = SearchRequest {
         db: None,
         query: query.to_string(),
+        model: None,
         instruction: instruction.map(String::from),
         limit: Some(5), // How many KB entries to use for context
         mode: Default::default(),

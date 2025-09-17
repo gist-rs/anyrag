@@ -29,6 +29,7 @@ use tracing::info;
 pub struct SearchRequest {
     pub db: Option<String>,
     pub query: String,
+    pub model: Option<String>,
     pub limit: Option<u32>,
     pub instruction: Option<String>,
     #[serde(default)]

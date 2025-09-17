@@ -63,6 +63,7 @@ async fn ask_question(
     let payload = SearchRequest {
         db: None,
         query: query.to_string(),
+        model: None,
         instruction: None,
         limit: Some(5),
         mode: Default::default(),

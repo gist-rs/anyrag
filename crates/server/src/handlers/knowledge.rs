@@ -204,10 +204,29 @@ pub async fn knowledge_search_handler(
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
     })?;
-    let provider_name = &task_config.provider;
-    let analysis_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
-    })?;
+
+    let analysis_provider = if let Some(model_name) = &payload.model {
+        info!("Model override requested for analysis: {}", model_name);
+        let provider_name = app_state
+            .config
+            .providers
+            .iter()
+            .find(|(_, p)| p.model_name == *model_name)
+            .map(|(name, _)| name)
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Model '{model_name}' not found in any configured provider"
+                ))
+            })?;
+        app_state.ai_providers.get(provider_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+        })?
+    } else {
+        let provider_name = &task_config.provider;
+        app_state.ai_providers.get(provider_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+        })?
+    };
     let ai_provider = Arc::from(analysis_provider.clone());
 
     let temporal_keywords: Vec<&str>;
@@ -300,10 +319,30 @@ pub async fn knowledge_search_handler(
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
     })?;
-    let provider_name = &task_config.provider;
-    let synthesis_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
-    })?;
+
+    let synthesis_provider = if let Some(model_name) = &payload.model {
+        info!("Model override requested for synthesis: {}", model_name);
+        // We can reuse the same logic as for the analysis provider
+        let provider_name = app_state
+            .config
+            .providers
+            .iter()
+            .find(|(_, p)| p.model_name == *model_name)
+            .map(|(name, _)| name)
+            .ok_or_else(|| {
+                AppError::Internal(anyhow::anyhow!(
+                    "Model '{model_name}' not found in any configured provider"
+                ))
+            })?;
+        app_state.ai_providers.get(provider_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+        })?
+    } else {
+        let provider_name = &task_config.provider;
+        app_state.ai_providers.get(provider_name).ok_or_else(|| {
+            AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
+        })?
+    };
 
     // Manually combine prompt and instruction for the final synthesis step.
     // This is safer than modifying the library's prompt templates or logic.
