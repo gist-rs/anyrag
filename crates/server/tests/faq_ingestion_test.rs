@@ -11,7 +11,8 @@ mod common;
 
 use anyhow::Result;
 use anyrag_server::types::ApiResponse;
-use common::{generate_jwt, pdf_helper::generate_test_pdf, TestApp};
+use anyrag_test_utils::helpers::generate_test_pdf;
+use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use serde_json::{json, Value};
 use turso::{params, Builder, Value as TursoValue};

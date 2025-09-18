@@ -350,6 +350,7 @@ dependencies = [
  "anyrag-pdf",
  "anyrag-rss",
  "anyrag-sheets",
+ "anyrag-test-utils",
  "anyrag-text",
  "anyrag-web",
  "axum",
@@ -363,7 +364,6 @@ dependencies = [
  "httpmock",
  "jsonwebtoken",
  "md5 0.8.0",
- "pdf-writer 0.13.0",
  "regex",
  "reqwest",
  "serde",
@@ -4204,18 +4204,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pdf-writer"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ea27c5015ab81753fc61e49f8cde74999346605ee148bb20008ef3d3150e0dc"
-dependencies = [
- "bitflags 2.9.4",
- "itoa 1.0.15",
- "memchr",
- "ryu",
-]
-
-[[package]]
 name = "pdf_derive"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5969,7 +5957,7 @@ dependencies = [
  "log",
  "miniz_oxide",
  "once_cell",
- "pdf-writer 0.12.1",
+ "pdf-writer",
  "resvg",
  "siphasher 1.0.1",
  "subsetter",

@@ -60,6 +60,7 @@ rss = ["anyrag/rss"]
 firebase = ["anyrag/firebase"]
 
 [dev-dependencies]
+anyrag-test-utils = { path = "../test-utils", features = ["pdf"] }
 chrono = { workspace = true }
 httpmock = "0.7.0"
 jsonwebtoken = "9.3.1"
@@ -67,7 +68,6 @@ tempfile = "3.22.0"
 turso = { workspace = true }
 regex = { workspace = true }
 serial_test = "3.2.0"
-pdf-writer = "0.13.0"
 uuid = { workspace = true }
 
 [[test]]
@@ -81,8 +81,8 @@ path = "tests/server_test.rs"
 harness = true
 
 [[test]]
-name = "ingest_test"
-path = "tests/ingest_test.rs"
+name = "ingest_rss_test"
+path = "tests/ingest_rss_test.rs"
 harness = true
 
 [[test]]

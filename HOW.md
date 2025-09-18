@@ -25,7 +25,7 @@ Inside your plugin's crate (e.g., `crates/my-plugin/`), create the standard Rust
     ```
 2.  **Create the main test file**:
     ```sh
-    touch crates/my-plugin/tests/ingest_test.rs
+    touch crates/my-plugin/tests/ingest_rss_test.rs
     ```
 3.  **Create a `common` module for shared utilities**:
     ```sh
@@ -136,10 +136,10 @@ impl AiProvider for MockAiProvider {
 
 ### Step 3: Write the Test Case
 
-Now, in your `ingest_test.rs`, write the test following the "Arrange, Act, Assert" pattern.
+Now, in your `ingest_rss_test.rs`, write the test following the "Arrange, Act, Assert" pattern.
 
 ```rust
-// In: crates/my-plugin/tests/ingest_test.rs
+// In: crates/my-plugin/tests/ingest_rss_test.rs
 
 // Import common modules and necessary items
 mod common;
@@ -196,7 +196,7 @@ async fn test_ingestion_workflow() -> Result<()> {
         |row| row.get(0)
     ).await?;
     assert_eq!(stored_content.trim(), expected_restructured_content.trim());
-    
+
     // C. Check metadata
     let stored_meta_value: String = conn.query_row(
         "SELECT metadata_value FROM content_metadata WHERE document_id = ?",
@@ -223,7 +223,7 @@ Add the necessary testing libraries to your plugin's `Cargo.toml`.
 [dev-dependencies]
 httpmock = "0.7.0"
 # dyn-clone is sometimes needed by mock objects if the trait uses it.
-# dyn-clone = "1.0.17" 
+# dyn-clone = "1.0.17"
 ```
 
 ---
