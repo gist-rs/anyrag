@@ -327,6 +327,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "anyrag",
+ "anyrag-test-utils",
  "async-trait",
  "reqwest",
  "rss",
@@ -337,6 +338,7 @@ dependencies = [
  "tracing",
  "turso",
  "uuid",
+ "wiremock",
 ]
 
 [[package]]

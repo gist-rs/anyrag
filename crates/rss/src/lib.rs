@@ -78,6 +78,8 @@ impl Ingestor for RssIngestor {
         let content = reqwest::get(feed_url)
             .await
             .map_err(RssIngestError::from)?
+            .error_for_status()
+            .map_err(RssIngestError::from)?
             .bytes()
             .await
             .map_err(RssIngestError::from)?;
