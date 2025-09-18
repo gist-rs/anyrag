@@ -3,14 +3,19 @@
 //! This crate provides the ingestion logic for web URLs, acting as a plugin
 //! for the `anyrag` ecosystem. It implements the `Ingestor` trait.
 
-use anyrag::ingest::{IngestError, IngestionResult, Ingestor};
-use anyrag::providers::ai::AiProvider;
-use anyrag::{ingest::knowledge::clean_llm_response, PromptError};
+use anyrag::{
+    ingest::{
+        knowledge::{extract_and_store_metadata, restructure_with_llm, YamlContent},
+        IngestError, IngestionPrompts, IngestionResult, Ingestor,
+    },
+    providers::ai::AiProvider,
+    PromptError,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{debug, info, warn};
-use turso::{params, Connection, Database};
+use tracing::{info, warn};
+use turso::{params, Database};
 use uuid::Uuid;
 
 // --- Error Definitions ---
@@ -68,47 +73,6 @@ struct IngestSource<'a> {
     #[serde(default)]
     #[serde(borrow)]
     strategy: WebIngestStrategy<'a>,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct Faq {
-    question: String,
-    answer: String,
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct Section {
-    title: String,
-    faqs: Vec<Faq>,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-struct YamlContent {
-    sections: Vec<Section>,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct ContentMetadata {
-    #[serde(rename = "type")]
-    #[serde(default)]
-    pub metadata_type: String,
-    #[serde(default)]
-    pub subtype: String,
-    #[serde(default)]
-    pub value: String,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct MetadataResponse {
-    #[serde(default)]
-    metadata: Vec<ContentMetadata>,
-}
-
-/// Holds the prompts for the ingestion pipeline.
-#[derive(Debug, Clone, Copy)]
-pub struct IngestionPrompts<'a> {
-    pub restructuring_system_prompt: &'a str,
-    pub metadata_extraction_system_prompt: &'a str,
 }
 
 #[derive(Debug, Clone)]
@@ -222,76 +186,6 @@ async fn ingest_and_cache_url(
     Ok((document_id, ingested_document))
 }
 
-pub async fn restructure_with_llm(
-    ai_provider: &dyn AiProvider,
-    markdown_content: &str,
-    system_prompt: &str,
-) -> Result<String, WebIngestError> {
-    let user_prompt = format!("# Markdown Content to Process:\n{markdown_content}");
-    let llm_response = ai_provider.generate(system_prompt, &user_prompt).await?;
-    let cleaned_yaml = llm_response
-        .trim()
-        .strip_prefix("```yaml")
-        .unwrap_or(&llm_response)
-        .strip_suffix("```")
-        .unwrap_or(&llm_response)
-        .trim();
-    Ok(cleaned_yaml.to_string())
-}
-
-pub async fn extract_and_store_metadata(
-    conn: &Connection,
-    ai_provider: &dyn AiProvider,
-    document_id: &str,
-    owner_id: Option<&str>,
-    content: &str,
-    system_prompt: &str,
-) -> Result<(), WebIngestError> {
-    let user_prompt = content;
-    let llm_response = ai_provider.generate(system_prompt, user_prompt).await?;
-    debug!("LLM metadata response: {}", llm_response);
-    let cleaned_response = clean_llm_response(&llm_response);
-
-    let metadata_items: Vec<ContentMetadata> =
-        if let Ok(items) = serde_json::from_str(&cleaned_response) {
-            items
-        } else if let Ok(response) = serde_json::from_str::<MetadataResponse>(&cleaned_response) {
-            response.metadata
-        } else {
-            warn!(
-                "Failed to parse metadata response, skipping. Raw response: '{}'",
-                &cleaned_response
-            );
-            return Ok(());
-        };
-
-    conn.execute(
-        "DELETE FROM content_metadata WHERE document_id = ?",
-        params![document_id],
-    )
-    .await?;
-
-    if metadata_items.is_empty() {
-        return Ok(());
-    }
-
-    conn.execute("BEGIN TRANSACTION", ()).await?;
-    let mut stmt = conn.prepare("INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)")
-        .await?;
-    for item in &metadata_items {
-        stmt.execute(params![
-            document_id.to_string(),
-            owner_id.map(|s| s.to_string()),
-            item.metadata_type.to_uppercase(),
-            item.subtype.clone(),
-            item.value.clone()
-        ])
-        .await?;
-    }
-    conn.execute("COMMIT", ()).await?;
-    Ok(())
-}
-
 async fn run_web_ingestion_pipeline(
     db: &Database,
     ai_provider: &dyn AiProvider,
@@ -315,7 +209,8 @@ async fn run_web_ingestion_pipeline(
         &ingested_document.content,
         prompts.restructuring_system_prompt,
     )
-    .await?;
+    .await
+    .map_err(|e| WebIngestError::Internal(anyhow::anyhow!(e)))?;
 
     if structured_yaml.trim().is_empty() {
         warn!(
@@ -376,7 +271,8 @@ async fn run_web_ingestion_pipeline(
             &yaml_chunk,
             prompts.metadata_extraction_system_prompt,
         )
-        .await?;
+        .await
+        .map_err(|e| WebIngestError::Internal(anyhow::anyhow!(e)))?;
     }
     Ok(chunks_created)
 }

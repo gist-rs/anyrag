@@ -5,9 +5,13 @@
 //! core `anyrag` library.
 
 use anyhow::anyhow;
-use anyrag::ingest::{IngestError, IngestionResult, Ingestor};
-use anyrag::providers::ai::AiProvider;
-use anyrag_web::{extract_and_store_metadata, restructure_with_llm, IngestionPrompts};
+use anyrag::{
+    ingest::{
+        knowledge::{extract_and_store_metadata, restructure_with_llm},
+        traits::{IngestError, IngestionPrompts, IngestionResult, Ingestor},
+    },
+    providers::ai::AiProvider,
+};
 use async_trait::async_trait;
 use regex::Regex;
 use serde::Deserialize;

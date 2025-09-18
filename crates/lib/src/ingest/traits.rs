@@ -61,3 +61,11 @@ pub trait Ingestor: Send + Sync {
         owner_id: Option<&str>,
     ) -> Result<IngestionResult, IngestError>;
 }
+
+/// A struct to hold the prompts for the knowledge ingestion pipeline.
+/// This is passed to ingestors that use LLMs for content restructuring and metadata extraction.
+#[derive(Debug, Clone, Copy)]
+pub struct IngestionPrompts<'a> {
+    pub restructuring_system_prompt: &'a str,
+    pub metadata_extraction_system_prompt: &'a str,
+}

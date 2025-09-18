@@ -15,8 +15,11 @@ pub mod state_manager;
 
 pub mod traits;
 
+pub mod types;
+
 pub use embedding::{embed_article, EmbeddingError};
 
 pub use knowledge::{export_for_finetuning, KnowledgeError};
 
-pub use traits::{IngestError, IngestionResult, Ingestor};
+pub use traits::{IngestError, IngestionPrompts, IngestionResult, Ingestor};
+pub use types::{ContentMetadata, MetadataResponse};

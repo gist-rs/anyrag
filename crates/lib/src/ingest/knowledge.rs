@@ -5,30 +5,33 @@
 //! The core ingestion pipelines are now located in their respective plugin crates
 //! (e.g., `anyrag-web`, `anyrag-pdf`).
 
+use crate::ingest::types::{ContentMetadata, MetadataResponse};
+use crate::providers::ai::AiProvider;
+use crate::PromptError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tracing::{info, warn};
-use turso::Database;
+use tracing::{debug, info, warn};
+use turso::{params, Connection, Database};
 
 // --- Data Structures for YAML Parsing ---
 // These structs are used for parsing the structured YAML content stored in the documents table,
 // particularly for the fine-tuning export functionality.
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-struct Faq {
-    question: String,
-    answer: String,
+pub struct Faq {
+    pub question: String,
+    pub answer: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-struct Section {
-    title: String,
-    faqs: Vec<Faq>,
+pub struct Section {
+    pub title: String,
+    pub faqs: Vec<Faq>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-struct YamlContent {
-    sections: Vec<Section>,
+pub struct YamlContent {
+    pub sections: Vec<Section>,
 }
 
 // --- Error Definition ---
@@ -39,6 +42,8 @@ pub enum KnowledgeError {
     Database(#[from] turso::Error),
     #[error("Failed to parse or serialize data: {0}")]
     Parse(#[from] serde_json::Error),
+    #[error("LLM processing failed: {0}")]
+    Llm(#[from] PromptError),
 }
 
 // --- Helper Functions ---
@@ -130,4 +135,76 @@ pub async fn export_for_finetuning(db: &Database) -> Result<String, KnowledgeErr
         jsonl_output.lines().count()
     );
     Ok(jsonl_output)
+}
+
+// --- Core Ingestion Pipeline Functions ---
+
+pub async fn restructure_with_llm(
+    ai_provider: &dyn AiProvider,
+    markdown_content: &str,
+    system_prompt: &str,
+) -> Result<String, KnowledgeError> {
+    let user_prompt = format!("# Markdown Content to Process:\n{markdown_content}");
+    let llm_response = ai_provider.generate(system_prompt, &user_prompt).await?;
+    let cleaned_yaml = llm_response
+        .trim()
+        .strip_prefix("```yaml")
+        .unwrap_or(&llm_response)
+        .strip_suffix("```")
+        .unwrap_or(&llm_response)
+        .trim();
+    Ok(cleaned_yaml.to_string())
+}
+
+pub async fn extract_and_store_metadata(
+    conn: &Connection,
+    ai_provider: &dyn AiProvider,
+    document_id: &str,
+    owner_id: Option<&str>,
+    content: &str,
+    system_prompt: &str,
+) -> Result<(), KnowledgeError> {
+    let user_prompt = content;
+    let llm_response = ai_provider.generate(system_prompt, user_prompt).await?;
+    debug!("LLM metadata response: {}", llm_response);
+    let cleaned_response = clean_llm_response(&llm_response);
+
+    let metadata_items: Vec<ContentMetadata> =
+        if let Ok(items) = serde_json::from_str(&cleaned_response) {
+            items
+        } else if let Ok(response) = serde_json::from_str::<MetadataResponse>(&cleaned_response) {
+            response.metadata
+        } else {
+            warn!(
+                "Failed to parse metadata response, skipping. Raw response: '{}'",
+                &cleaned_response
+            );
+            return Ok(());
+        };
+
+    conn.execute(
+        "DELETE FROM content_metadata WHERE document_id = ?",
+        params![document_id],
+    )
+    .await?;
+
+    if metadata_items.is_empty() {
+        return Ok(());
+    }
+
+    conn.execute("BEGIN TRANSACTION", ()).await?;
+    let mut stmt = conn.prepare("INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)")
+        .await?;
+    for item in &metadata_items {
+        stmt.execute(params![
+            document_id.to_string(),
+            owner_id.map(|s| s.to_string()),
+            item.metadata_type.to_uppercase(),
+            item.subtype.clone(),
+            item.value.clone()
+        ])
+        .await?;
+    }
+    conn.execute("COMMIT", ()).await?;
+    Ok(())
 }

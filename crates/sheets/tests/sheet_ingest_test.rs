@@ -3,9 +3,9 @@
 mod common;
 
 use anyhow::Result;
+use anyrag::ingest::IngestionPrompts;
 use anyrag::ingest::Ingestor;
 use anyrag_sheets::SheetsIngestor;
-use anyrag_web::IngestionPrompts;
 use common::{MockAiProvider, TestSetup};
 use httpmock::{Method, MockServer};
 use serde_json::json;

@@ -48,9 +48,9 @@ regex = { workspace = true }
 md5 = { workspace = true }
 
 # Config
-config = { version = "0.15.15", features = ["yaml"] }
+config = { version = "0.15.16", features = ["yaml"] }
 uuid = { workspace = true }
-futures = "0.3.30"
+futures = "0.3.31"
 
 [features]
 default = ["bigquery", "graph_db", "rss", "firebase"]
@@ -63,7 +63,7 @@ firebase = ["anyrag/firebase"]
 chrono = { workspace = true }
 httpmock = "0.7.0"
 jsonwebtoken = "9.3.1"
-tempfile = "3.21.0"
+tempfile = "3.22.0"
 turso = { workspace = true }
 regex = { workspace = true }
 serial_test = "3.2.0"

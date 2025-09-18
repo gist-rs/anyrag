@@ -4,11 +4,13 @@
 //! for the `anyrag` ecosystem. It implements the `Ingestor` trait from `anyrag-lib`.
 
 use anyrag::{
-    ingest::{IngestError, IngestionResult, Ingestor},
+    ingest::{
+        knowledge::{extract_and_store_metadata, restructure_with_llm},
+        IngestError, IngestionPrompts, IngestionResult, Ingestor,
+    },
     providers::ai::AiProvider,
     PromptError,
 };
-use anyrag_web::{extract_and_store_metadata, restructure_with_llm, IngestionPrompts};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use pdf::file::FileOptions;
@@ -32,8 +34,8 @@ pub enum PdfIngestError {
     Base64(#[from] base64::DecodeError),
     #[error("An internal error occurred: {0}")]
     Internal(#[from] anyhow::Error),
-    #[error("Web ingestor helper failed: {0}")]
-    WebHelper(#[from] anyrag_web::WebIngestError),
+    #[error("Knowledge pipeline failed: {0}")]
+    Knowledge(#[from] anyrag::ingest::knowledge::KnowledgeError),
 }
 
 impl From<PdfIngestError> for IngestError {
