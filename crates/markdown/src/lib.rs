@@ -134,6 +134,10 @@ impl Ingestor for MarkdownIngestor {
         // --- Embedding Generation ---
         if let Some(config) = source_payload.embedding_config {
             if !ingested_ids.is_empty() {
+                println!(
+                    "Generating embeddings for {} new chunks",
+                    ingested_ids.len()
+                );
                 info!(
                     "Generating embeddings for {} new chunks using model '{}'...",
                     ingested_ids.len(),

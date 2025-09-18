@@ -72,7 +72,13 @@ async fn handle_process_file(args: &FileArgs) -> Result<()> {
 
     let ingestor = MarkdownIngestor;
     let source_json = serde_json::to_string(&markdown_source)?;
-    let result = ingestor.ingest(&source_json, None).await?;
+    let result = ingestor.ingest(&source_json, None).await.map_err(|e| {
+        if e.to_string().contains("Embedding generation failed") {
+            anyhow::anyhow!("Embedding generation failed")
+        } else {
+            anyhow::anyhow!(e)
+        }
+    })?;
     let count = result.documents_added;
 
     println!(
