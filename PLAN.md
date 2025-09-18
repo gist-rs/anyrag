@@ -89,3 +89,48 @@ Configuration files, especially prompts, should be organized for clarity and mai
 3.  **Hybrid Retrieval**: `anyrag-lib` executes its multi-stage hybrid search pipeline (metadata, keyword, vector) against the database to find relevant document chunks.
 4.  **Synthesis**: The retrieved chunks are passed as context to a configured LLM provider, which synthesizes a final answer.
 5.  **Response**: The synthesized answer is returned through the library to the server, which then sends it to the client.
+
+---
+
+# Engineering Plan: PDF Ingestion Refactoring
+
+## 1. Goal
+
+Refactor the PDF ingestion pipeline to process and store documents as contextual chunks, aligning it with the more advanced strategy used by the `anyrag-web` ingestor.
+
+## 2. The "Why" - Rationale
+
+Storing entire documents as single, monolithic entries is inefficient for Retrieval-Augmented Generation (RAG). When a user asks a question, the system retrieves the whole document, forcing the Language Model (LLM) to sift through potentially irrelevant information to find the answer. This leads to:
+
+-   **Reduced Accuracy:** The LLM can get lost in the noise of a large, unfocused context, resulting in less precise answers.
+-   **Increased Latency & Cost:** Processing larger contexts is slower and more expensive.
+-   **Inconsistency:** Other ingestors, like the web ingestor, already use a superior chunking method. This refactoring will standardize our data model.
+
+By breaking the document into smaller, structured YAML chunks (e.g., one per FAQ section), we enable the retrieval of highly-focused context. This provides the LLM with exactly the information it needs, leading to faster, more accurate, and cheaper responses.
+
+## 3. The "How" - Implementation Steps
+
+1.  **Adopt Web Ingestor's Data Structures:**
+    *   In `anyrag-pdf`, import and use the `YamlContent`, `Section`, and `Faq` structs from `anyrag-web` to handle the structured data.
+
+2.  **Refactor `run_pdf_ingestion_pipeline` in `anyrag/crates/pdf/src/lib.rs`:**
+    *   **Step 1: Extract Raw Text:** Keep the existing logic that uses `extract_text_from_pdf` to get the raw string content.
+    *   **Step 2: Restructure to YAML:** Re-introduce the call to `restructure_with_llm`, passing it the raw text to get a structured YAML string.
+    *   **Step 3: Parse the YAML:** Use `serde_yaml::from_str` to parse the YAML string into the `YamlContent` struct.
+    *   **Step 4: Chunk and Store:**
+        *   Iterate through the `sections` in the parsed `YamlContent`.
+        *   For each `section`, create a new YAML string representing just that single section (as a `YamlContent` object with one section).
+        *   Generate a unique ID for each chunk document.
+        *   Insert each chunk into the `documents` table. The `source_url` should be modified slightly to ensure uniqueness (e.g., `test.pdf#section_0`).
+        *   The original, full PDF document should *not* be stored. Only the chunks will be saved.
+    *   **Step 5: Extract Metadata:** The `extract_and_store_metadata` function should be called for *each chunk* that is created.
+
+3.  **Update the Test (`faq_ingestion_test.rs`):**
+    *   The test must be updated to validate the new chunking behavior.
+    *   **Database Assertions:** Instead of checking for one document with raw text, the test will need to:
+        *   Query the database for multiple documents based on the source PDF name (e.g., using `LIKE 'test.pdf%'`).
+        *   Assert that the expected number of chunks were created.
+        *   Assert that the content of each chunk is the correct, structured YAML for that section.
+    *   **Mock Updates:** The mock for the restructuring call will need to be re-enabled and provide a valid multi-section YAML response for the test to parse.
+
+This plan will result in a more robust, efficient, and consistent ingestion pipeline.
