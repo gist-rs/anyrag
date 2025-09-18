@@ -25,7 +25,7 @@
 use anyhow::Result;
 use anyrag::{
     constants,
-    ingest::Ingestor,
+    ingest::{IngestionPrompts, Ingestor},
     prompts::knowledge::{
         KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
         QUERY_ANALYSIS_SYSTEM_PROMPT, QUERY_ANALYSIS_USER_PROMPT,
@@ -40,7 +40,7 @@ use anyrag::{
     types::{ContentType, ExecutePromptOptions},
     PromptClientBuilder,
 };
-use anyrag_web::{IngestionPrompts, WebIngestStrategy, WebIngestor};
+use anyrag_web::{WebIngestStrategy, WebIngestor};
 use core_access::get_or_create_user;
 use dotenvy::dotenv;
 use serde_json::json;

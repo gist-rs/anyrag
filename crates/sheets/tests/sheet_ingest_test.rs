@@ -1,12 +1,9 @@
 //! # Sheets Ingestor Integration Tests
 
-mod common;
-
 use anyhow::Result;
-use anyrag::ingest::IngestionPrompts;
-use anyrag::ingest::Ingestor;
+use anyrag::ingest::{IngestionPrompts, Ingestor};
 use anyrag_sheets::SheetsIngestor;
-use common::{MockAiProvider, TestSetup};
+use anyrag_test_utils::{MockAiProvider, TestSetup};
 use httpmock::{Method, MockServer};
 use serde_json::json;
 use turso::{params, Value as TursoValue};

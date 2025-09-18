@@ -24,3 +24,4 @@ chrono = { workspace = true }
 [dev-dependencies]
 httpmock = "0.7.0"
 dyn-clone = "1.0.20"
+anyrag-test-utils = { path = "../test-utils" }

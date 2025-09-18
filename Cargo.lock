@@ -302,6 +302,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "anyrag",
+ "anyrag-test-utils",
  "async-trait",
  "base64 0.22.1",
  "dotenvy",
@@ -383,6 +384,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "anyrag",
+ "anyrag-test-utils",
  "async-trait",
  "chrono",
  "core-access",
@@ -398,6 +400,19 @@ dependencies = [
  "tracing",
  "turso",
  "uuid",
+]
+
+[[package]]
+name = "anyrag-test-utils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyrag",
+ "async-trait",
+ "base64 0.22.1",
+ "printpdf",
+ "tokio",
+ "turso",
 ]
 
 [[package]]
@@ -2880,7 +2895,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -4768,7 +4783,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "thiserror 2.0.16",
  "tokio",
  "tracing",
@@ -4805,7 +4820,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.0",
  "tracing",
  "windows-sys 0.60.2",
 ]

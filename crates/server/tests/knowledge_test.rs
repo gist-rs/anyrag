@@ -8,10 +8,10 @@ mod common;
 
 use anyhow::Result;
 use anyrag::{
-    ingest::{knowledge::export_for_finetuning, Ingestor},
+    ingest::{knowledge::export_for_finetuning, IngestionPrompts, Ingestor},
     providers::{ai::local::LocalAiProvider, db::sqlite::SqliteProvider},
 };
-use anyrag_web::{IngestionPrompts, WebIngestStrategy, WebIngestor};
+use anyrag_web::{WebIngestStrategy, WebIngestor};
 use httpmock::{Method, MockServer};
 use serde_json::{json, Value};
 use tempfile::NamedTempFile;

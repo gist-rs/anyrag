@@ -1,7 +1,5 @@
 //! # PDF Ingestor Integration Tests
 
-mod common;
-
 use anyhow::Result;
 use anyrag::{
     ingest::{IngestionPrompts, Ingestor},
@@ -10,8 +8,8 @@ use anyrag::{
     },
 };
 use anyrag_pdf::PdfIngestor;
+use anyrag_test_utils::{helpers::generate_test_pdf, MockAiProvider, TestSetup};
 use base64::{engine::general_purpose, Engine as _};
-use common::{helpers::generate_test_pdf, MockAiProvider, TestSetup};
 use serde_json::json;
 use turso::{params, Value as TursoValue};
 

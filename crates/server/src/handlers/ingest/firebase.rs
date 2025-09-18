@@ -4,10 +4,10 @@ use crate::handlers::{
     graph_handlers, wrap_response, ApiResponse, AppError, AppState, DebugParams,
 };
 use anyhow::anyhow;
+use anyrag::ingest::knowledge::extract_and_store_metadata;
 use anyrag::ingest::Ingestor;
 use anyrag::providers::factory::create_dynamic_provider;
 use anyrag_firebase::{sanitize_table_name, FirebaseIngestor, FirebaseSource};
-use anyrag_web::extract_and_store_metadata;
 use axum::{
     extract::{Query, State},
     Json,

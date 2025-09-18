@@ -1,8 +1,8 @@
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
+use anyrag::ingest::IngestionPrompts;
 use anyrag::ingest::Ingestor;
 use anyrag_pdf::{PdfExtractor, PdfIngestor};
-use anyrag_web::IngestionPrompts;
 use axum::{
     extract::{Query, State},
     Json,

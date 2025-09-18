@@ -8,9 +8,8 @@ use crate::{
     auth::middleware::AuthenticatedUser,
     handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams},
 };
-use anyrag::ingest::Ingestor;
+use anyrag::ingest::{IngestionPrompts, Ingestor};
 use anyrag_sheets::SheetsIngestor;
-use anyrag_web::IngestionPrompts;
 use axum::{
     extract::{Query, State},
     Json,
