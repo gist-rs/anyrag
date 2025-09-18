@@ -339,6 +339,8 @@ dependencies = [
  "chrono",
  "core-access",
  "csv",
+ "dyn-clone",
+ "httpmock",
  "regex",
  "reqwest",
  "serde",
