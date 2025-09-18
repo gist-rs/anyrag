@@ -35,6 +35,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 /// Cleans up database files for a fresh run.
+#[allow(dead_code)]
 async fn cleanup_db(db_path: &str) -> Result<()> {
     for path in [db_path, &format!("{db_path}-wal")] {
         if fs::metadata(path).is_ok() {
