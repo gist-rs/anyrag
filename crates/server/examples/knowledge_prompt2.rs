@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
     info!("Environment variables loaded.");
 
     let db_path = format!("{}/anyrag-thai.db", constants::DB_DIR);
-    cleanup_db(&db_path).await?;
+    // cleanup_db(&db_path).await?;
     // This is set so the AppState builder uses the correct path.
     std::env::set_var("DB_URL", db_path);
 
@@ -123,7 +123,35 @@ async fn main() -> Result<()> {
 
     // --- 2. Ingest Knowledge ---
     info!("--- Starting Knowledge Ingestion ---");
-    // let ingest_url = "https://www.gpf.or.th/thai2019/10contact/main.php?page=7&menu=askfreq&lang=th&size=n&pattern=n";
+    let ingest_url = "https://www.gpf.or.th/thai2019/10contact/main.php?page=7&menu=askfreq&lang=th&size=n&pattern=n";
+    let ingest_payload = IngestWebRequest {
+        url: ingest_url.to_string(),
+    };
+
+    match ingest_web_handler(
+        axum::extract::State(app_state.clone()),
+        auth_user.clone(),
+        Query(DebugParams::default()),
+        Json(ingest_payload),
+    )
+    .await
+    {
+        Ok(Json(response)) => {
+            info!(
+                "Ingestion successful. Stored {} new FAQs.",
+                response.result.ingested_documents
+            );
+            if response.result.ingested_documents == 0 {
+                info!("Content may be unchanged from a previous run. Continuing...");
+            }
+        }
+        Err(e) => {
+            anyhow::bail!("Knowledge ingestion failed: {:?}. Please ensure your AI provider is running and configured in .env", e);
+        }
+    }
+
+    // --- 2.1 Ingest More Knowledge ---
+    info!("--- Starting Knowledge Ingestion ---");
     let ingest_url = "https://www.gpf.or.th/thai2019/About/main.php?page=chart&menu=statistic&lang=th&size=n&pattern=n";
     let ingest_payload = IngestWebRequest {
         url: ingest_url.to_string(),
@@ -172,26 +200,29 @@ async fn main() -> Result<()> {
     }
 
     // --- 4. Ask Questions using RAG ---
-    // let question1 = "GPF Point แจกถึงวันไหน";
-    let question1 = "จำนวนสมาชิกรายเดือนเมษายนกับมกรารวมกัน";
+    let question1 = "GPF Point แจกถึงวันไหน";
     let answer1 = ask_question(app_state.clone(), auth_user.clone(), question1, None).await?;
 
-    // let question2 = "สร้าง My GPF ได้รับที่คะแนน";
-    // let answer2 = ask_question(app_state.clone(), auth_user.clone(), question2, None).await?;
+    let question2 = "สร้าง My GPF ได้รับที่คะแนน";
+    let answer2 = ask_question(app_state.clone(), auth_user.clone(), question2, None).await?;
 
-    // // With custom instructions
-    // let question3 = "สร้าง My GPF ได้รับที่คะแนน";
-    // let instruction3 = "สรุปเงื่อนไขการรับ GPF point, and start the answer with `สรุปเงื่อนไขได้ว่า`";
-    // let answer3 = ask_question(
-    //     app_state.clone(),
-    //     auth_user.clone(),
-    //     question3,
-    //     Some(instruction3),
-    // )
-    // .await?;
+    // With custom instructions
+    let question3 = "สร้าง My GPF ได้รับที่คะแนน";
+    let instruction3 = "สรุปเงื่อนไขการรับ GPF point, and start the answer with `สรุปเงื่อนไขได้ว่า`";
+    let answer3 = ask_question(
+        app_state.clone(),
+        auth_user.clone(),
+        question3,
+        Some(instruction3),
+    )
+    .await?;
 
-    // let question4 = "มีเงิน 2 หมื่นออมต่อได้มั้ย";
-    // let answer4 = ask_question(app_state.clone(), auth_user, question4, None).await?;
+    let question4 = "มีเงิน 2 หมื่นออมต่อได้มั้ย";
+    let answer4 = ask_question(app_state.clone(), auth_user.clone(), question4, None).await?;
+
+    // Prove 2 ingests
+    let question5 = "จำนวนสมาชิกรายเดือนเมษายนกับมกรารวมกัน";
+    let answer5 = ask_question(app_state.clone(), auth_user.clone(), question5, None).await?;
 
     // --- 5. Print Final Results ---
 
@@ -199,18 +230,22 @@ async fn main() -> Result<()> {
     println!("========================================");
     println!("❓ Question 1: {question1}");
     println!("💡 Answer 1:\n---\n{answer1}\n---");
-    // println!("\n========================================");
-    // println!("❓ Question 2: {question2}");
-    // println!("💡 Answer 2:\n---\n{answer2}\n---");
-    // println!("\n========================================");
-    // println!("❓ Question 3: {question3}");
-    // println!("💡 Answer 3:\n---\n{answer3}\n---");
-    // println!("\n========================================");
-    // println!("❓ Question 4: {question4}");
-    // println!("💡 Answer 4:\n---\n{answer4}\n---");
+    println!("\n========================================");
+    println!("❓ Question 2: {question2}");
+    println!("💡 Answer 2:\n---\n{answer2}\n---");
+    println!("\n========================================");
+    println!("❓ Question 3: {question3}");
+    println!("💡 Answer 3:\n---\n{answer3}\n---");
+    println!("\n========================================");
+    println!("❓ Question 4: {question4}");
+    println!("💡 Answer 4:\n---\n{answer4}\n---");
+    println!("\n========================================");
+    println!("❓ Question 5: {question5}");
+    println!("💡 Answer 5:\n---\n{answer5}\n---");
 
-    // assert!(_answer3.trim_matches('"').starts_with("สรุปเงื่อนไขได้ว่า"));
-    // assert!(answer4.trim_matches('"').contains("35,000"));
+    assert!(answer3.trim_matches('"').starts_with("สรุปเงื่อนไขได้ว่า"));
+    assert!(answer4.trim_matches('"').contains("35,000"));
+    assert!(answer5.trim_matches('"').contains("2,515,037"));
 
     Ok(())
     /* Expect
