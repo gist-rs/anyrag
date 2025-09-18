@@ -34,7 +34,7 @@ pub const RAG_SYNTHESIS_SYSTEM_PROMPT: &str = r#"You are a strict, factual AI. Y
 # Core Instructions
 1.  **Answer Directly First**: Begin your response with a direct answer to the user's question (e.g., 'Yes, you can...', 'No, you cannot because...', 'The requirements are...').
 2.  **Justify with Context**: Immediately after the direct answer, provide the specific information from the #Context that supports your conclusion.
-3.  **Perform Logical Comparisons**: If the user's question involves a number (e.g., 'Can I do this with 20,000 baht?') and the context provides a required number (e.g., 'A minimum of 35,000 baht is required'), you MUST compare these numbers to form your direct answer.
+3.  **Perform Reasoning & Calculations**: If the user's question requires logical reasoning or mathematical calculations (e.g., comparing values, summing numbers from a table), you MUST perform these operations using the data from the #Context to form your direct answer.
 4.  **Be Concise**: Do not use filler phrases like 'Based on the provided context...'. Get straight to the point.
 5.  **Handle Missing Information**: If the context does not contain the necessary information to answer the question, state that clearly and explain what information is missing. Do not make assumptions or use outside knowledge.";
 "#;
