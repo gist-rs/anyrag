@@ -45,6 +45,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_url_to_md() {
         // This is a simple integration test to ensure the full flow works.
         let url = "https://www.gpf.or.th/thai2019/10contact/main.php?page=7&menu=askfreq&lang=th&size=n&pattern=n";
