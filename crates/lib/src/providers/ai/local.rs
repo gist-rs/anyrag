@@ -2,6 +2,7 @@ use crate::{errors::PromptError, providers::ai::AiProvider};
 use async_trait::async_trait;
 use reqwest::Client as ReqwestClient;
 use serde::{Deserialize, Serialize};
+
 use std::fmt::Debug;
 use tracing::{debug, info};
 

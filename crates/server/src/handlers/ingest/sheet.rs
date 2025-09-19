@@ -28,7 +28,8 @@ pub struct IngestSheetRequest {
 #[derive(Serialize)]
 pub struct IngestSheetResponse {
     pub message: String,
-    pub ingested_documents: usize,
+    pub ingested_chunks: usize,
+    pub document_ids: Vec<String>,
 }
 
 /// Handler for ingesting a Google Sheet using the `anyrag-sheets` plugin.
@@ -84,17 +85,18 @@ pub async fn ingest_sheet_handler(
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Sheet ingestion failed: {e}")))?;
 
     // --- 3. Construct the response ---
-    let response = IngestSheetResponse {
-        message: "Sheet ingestion pipeline completed successfully.".to_string(),
-        ingested_documents: ingest_result.documents_added,
-    };
-
     let debug_info = json!({
         "url": payload.url,
         "gid": payload.gid,
         "owner_id": owner_id,
         "document_id": ingest_result.document_ids.first(),
     });
+
+    let response = IngestSheetResponse {
+        message: "Sheet ingestion pipeline completed successfully.".to_string(),
+        ingested_chunks: ingest_result.documents_added,
+        document_ids: ingest_result.document_ids,
+    };
 
     Ok(wrap_response(response, debug_params, Some(debug_info)))
 }

@@ -1,159 +1,56 @@
-# HOWTO: Write Integration Tests for `anyrag` Plugins
+# HOWTO: Write Integration Tests for `anyrag`
 
-This guide provides a comprehensive walkthrough for creating integration tests for `anyrag` ingestion plugins. The goal is to verify a plugin's logic in isolation, ensuring it correctly processes source data, interacts with dependencies, and stores data in the database as expected.
-
-We will use the `anyrag-sheets` plugin as a reference example.
+This guide provides a comprehensive walkthrough for creating integration tests for `anyrag` ingestion plugins and server endpoints. The goal is to verify logic in isolation, ensuring it correctly processes source data, interacts with dependencies, and stores data as expected.
 
 ## Guiding Principles
 
-1.  **Test in Isolation**: Plugin tests should not depend on a running server or external network services. They should test the plugin's crate directly.
+1.  **Test in Isolation**: Tests should not depend on external network services. They should test the specific crate or server endpoint directly.
 2.  **Mock External Dependencies**: All external services, especially AI models and web downloads, MUST be mocked. This ensures tests are fast, deterministic, and free from network flakiness.
-3.  **Verify Database State**: The primary assertion of an ingestion test is to check the state of the database *after* the ingestion process is complete. Did it store the correct content? Was metadata extracted properly?
-4.  **Use In-Memory Databases**: Each test should run against a fresh, isolated, in-memory SQLite database to prevent tests from interfering with each other.
+3.  **Verify Final State**: The primary assertion of an ingestion test is to check the final state. For server tests, this includes both the API response and the state of the database.
+4.  **Use Temporary Databases**: Each test should run against a fresh, isolated database (e.g., a temporary file or in-memory instance) to prevent tests from interfering with each other.
 
 ---
 
-## Step-by-Step Guide
+## Step-by-Step Guide for Plugin Tests
+
+This example shows how to test an ingestion plugin's crate directly.
 
 ### Step 1: Set Up the Test Environment
 
-Inside your plugin's crate (e.g., `crates/my-plugin/`), create the standard Rust test directory structure.
+Inside your plugin's crate (e.g., `crates/sheets/`), create a `tests` directory.
 
-1.  **Create the `tests` directory**:
-    ```sh
-    mkdir crates/my-plugin/tests
-    ```
-2.  **Create the main test file**:
-    ```sh
-    touch crates/my-plugin/tests/ingest_rss_test.rs
-    ```
-3.  **Create a `common` module for shared utilities**:
-    ```sh
-    mkdir crates/my-plugin/tests/common
-    touch crates/my-plugin/tests/common/mod.rs
-    ```
-
-### Step 2: Create Test Utilities in `common/mod.rs`
-
-This file will contain helpers to set up the database and mock the AI provider.
-
-#### A. The `TestSetup` Struct
-
-This helper creates an isolated in-memory database and ensures the application schema is initialized before each test.
-
-```rust
-// In: crates/my-plugin/tests/common/mod.rs
-
-use anyhow::Result;
-use turso::Database;
-
-/// A helper struct to manage database creation for each test.
-pub struct TestSetup {
-    pub db: Database,
-}
-
-impl TestSetup {
-    pub async fn new() -> Result<Self> {
-        // Use a unique in-memory DB for each test to ensure isolation.
-        let db = turso::Builder::new_local(":memory:").build().await?;
-
-        // Connect and initialize the schema using the SQL constants from `anyrag-lib`.
-        let conn = db.connect()?;
-        for statement in anyrag::providers::db::sqlite::sql::ALL_TABLE_CREATION_SQL {
-            conn.execute(statement, ()).await?;
-        }
-
-        Ok(Self { db })
-    }
-}
+```sh
+mkdir crates/sheets/tests
+touch crates/sheets/tests/sheet_ingest_test.rs
 ```
 
-#### B. The `MockAiProvider`
+### Step 2: Add Dev Dependencies
 
-This is a mock implementation of the `anyrag::providers::ai::AiProvider` trait. It lets you program responses for expected AI calls and verify that the correct calls were made.
+In your plugin's `Cargo.toml`, add `httpmock` for mocking network calls and `anyrag-test-utils` for helpers.
 
-```rust
-// In: crates/my-plugin/tests/common/mod.rs (continued)
-
-use anyrag::errors::PromptError;
-use anyrag::providers::ai::AiProvider;
-use async_trait::async_trait;
-use std::collections::HashMap;
-use std::fmt::Debug;
-use std::sync::{Arc, Mutex};
-
-#[derive(Clone, Debug)]
-pub struct MockAiProvider {
-    responses: Arc<Mutex<HashMap<String, String>>>,
-    calls: Arc<Mutex<Vec<(String, String)>>>,
-}
-
-impl MockAiProvider {
-    pub fn new() -> Self {
-        Self {
-            responses: Arc::new(Mutex::new(HashMap::new())),
-            calls: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    /// Pre-programs a response for a specific prompt.
-    /// The key should be a unique substring of the system prompt.
-    pub fn add_response(&self, key: &str, response: &str) {
-        let mut responses = self.responses.lock().unwrap();
-        responses.insert(key.to_string(), response.to_string());
-    }
-
-    /// Retrieves the recorded calls for assertion.
-    pub fn get_calls(&self) -> Vec<(String, String)> {
-        self.calls.lock().unwrap().clone()
-    }
-}
-
-#[async_trait]
-impl AiProvider for MockAiProvider {
-    async fn generate(
-        &self,
-        system_prompt: &str,
-        user_prompt: &str,
-    ) -> Result<String, PromptError> {
-        let mut calls = self.calls.lock().unwrap();
-        calls.push((system_prompt.to_string(), user_prompt.to_string()));
-
-        let responses = self.responses.lock().unwrap();
-        for (key, response) in responses.iter() {
-            if system_prompt.contains(key) {
-                return Ok(response.clone());
-            }
-        }
-
-        Err(PromptError::AiApi(format!(
-            "MockAiProvider: No response programmed for system prompt. Got: '{}'",
-            system_prompt
-        )))
-    }
-}
+```toml
+# In: crates/sheets/Cargo.toml
+[dev-dependencies]
+httpmock = "0.7.0"
+anyrag-test-utils = { path = "../test-utils" }
 ```
 
 ### Step 3: Write the Test Case
 
-Now, in your `ingest_rss_test.rs`, write the test following the "Arrange, Act, Assert" pattern.
+Write the test following the "Arrange, Act, Assert" pattern. This pattern is crucial for creating clear, readable, and maintainable tests.
 
 ```rust
-// In: crates/my-plugin/tests/ingest_rss_test.rs
-
-// Import common modules and necessary items
-mod common;
-
+// In: crates/sheets/tests/sheet_ingest_test.rs
 use anyhow::Result;
-use anyrag::ingest::Ingestor;
-use crate::common::{MockAiProvider, TestSetup}; // Replace with your plugin's Ingestor
+use anyrag::ingest::{IngestionPrompts, Ingestor};
+use anyrag_sheets::SheetsIngestor; // Your plugin's ingestor
+use anyrag_test_utils::{MockAiProvider, TestSetup}; // Helpers
 use httpmock::{Method, MockServer};
 use serde_json::json;
-use turso::{params, Value as TursoValue};
-use your_plugin::MyIngestor; // Example
+use turso::params;
 
 #[tokio::test]
-async fn test_ingestion_workflow() -> Result<()> {
+async fn test_sheet_ingestion_workflow() -> Result<()> {
     // --- 1. Arrange ---
     let setup = TestSetup::new().await?;
     let ai_provider = MockAiProvider::new();
@@ -161,92 +58,183 @@ async fn test_ingestion_workflow() -> Result<()> {
     let owner_id = "test-user-001";
 
     // Define mock data and expected outcomes
-    let mock_source_content = "some data to be ingested";
-    let expected_restructured_content = "structured version of the data";
-    let mock_metadata_response = `json!([{"type": "KEYPHRASE", "value": "test"}]).to_string()`;
+    let csv_content = "question,answer\nWhat is the new feature?,It is the flux capacitor.";
+    let expected_yaml = r#"sections:\n  - title: "Sheet Data""#; // (abbreviated)
+    let mock_metadata = json!([{"type": "KEYPHRASE", "value": "flux capacitor"}]).to_string();
 
     // --- 2. Mock External Services ---
-    // A. Mock a web server if your plugin downloads content
-    let download_mock = mock_server.mock(|when, then| {
-        when.method(Method::GET).path("/source-data");
-        then.status(200).body(mock_source_content);
+    // A. Mock the web server for the CSV download
+    let sheet_serve_mock = mock_server.mock(|when, then| {
+        when.method(Method::GET).path("/spreadsheets/d/mock_sheet_id/export");
+        then.status(200).body(csv_content);
     });
 
-    // B. Program the Mock AI Provider with expected responses
-    ai_provider.add_response("prompt for restructuring", expected_restructured_content);
-    ai_provider.add_response("prompt for metadata", &mock_metadata_response);
+    // B. Program the Mock AI Provider with expected responses for each AI call
+    ai_provider.add_response("expert document analyst", expected_yaml);
+    ai_provider.add_response("extract Category, Keyphrases", &mock_metadata);
 
     // --- 3. Act ---
-    let prompts = ... // Define the prompts your ingestor needs
-    let ingestor = MyIngestor::new(&setup.db, &ai_provider, prompts);
-    let source = json!({ "url": mock_server.url("/source-data") }).to_string();
+    let prompts = IngestionPrompts { /* ... */ };
+    let ingestor = SheetsIngestor::new(&setup.db, &ai_provider, prompts);
+    let source = json!({ "url": mock_server.url("/spreadsheets/d/mock_sheet_id/edit") }).to_string();
 
     let result = ingestor.ingest(&source, Some(owner_id)).await?;
 
     // --- 4. Assert ---
-    // A. Check the result struct
+    // A. Assert the result from the ingestor
     assert_eq!(result.documents_added, 1);
     let doc_id = &result.document_ids[0];
 
-    // B. Check the database state
+    // B. Assert the final state of the database
     let conn = setup.db.connect()?;
-    let stored_content: String = conn.query_row(
-        "SELECT content FROM documents WHERE id = ?",
-        params![doc_id.clone()],
-        |row| row.get(0)
-    ).await?;
-    assert_eq!(stored_content.trim(), expected_restructured_content.trim());
+    let stored_content: String = conn.query_row(/* ... */).await?;
+    assert_eq!(stored_content.trim(), expected_yaml.trim());
 
-    // C. Check metadata
-    let stored_meta_value: String = conn.query_row(
-        "SELECT metadata_value FROM content_metadata WHERE document_id = ?",
-        params![doc_id.clone()],
-        |row| row.get(0)
-    ).await?;
-    assert_eq!(stored_meta_value, "test");
-
-    // D. Assert mocks were called
-    download_mock.assert();
-    assert_eq!(ai_provider.get_calls().len(), 2);
+    // C. Assert that mocks were called as expected
+    sheet_serve_mock.assert();
+    assert_eq!(ai_provider.get_calls().len(), 2, "Expected 2 AI calls");
 
     Ok(())
 }
-```
-
-### Step 4: Configure `Cargo.toml`
-
-Add the necessary testing libraries to your plugin's `Cargo.toml`.
-
-```toml
-# In: crates/my-plugin/Cargo.toml
-
-[dev-dependencies]
-httpmock = "0.7.0"
-# dyn-clone is sometimes needed by mock objects if the trait uses it.
-# dyn-clone = "1.0.17"
 ```
 
 ---
 
 ## Troubleshooting Guide
 
-If your tests fail, consult this guide for common solutions.
+### Basic Troubleshooting
 
-### Compilation Error: `unresolved import` / `unlinked crate`
+-   **Compilation Error: `unresolved import`**: You are using a crate in your test that isn't declared as a dependency. Add the missing crate to the `[dev-dependencies]` section of your plugin's `Cargo.toml`.
+-   **Compilation Error: `private item`**: Your test needs to access an item from another crate that is not `pub`. Go to the source crate and make the item public (e.g., change `mod sql;` to `pub mod sql;`).
+-   **Test Failure: `MockAiProvider: No response programmed`**: The `ingestor` called the AI provider, but you didn't program a response for the specific `system_prompt` it used. Ensure the key in `ai_provider.add_response("key", ...)` is a unique substring of the system prompt being sent.
 
--   **Symptom**: `error[E0432]: unresolved import` or `use of unresolved module or unlinked crate`.
--   **Solution**: You are using a crate in your test code that hasn't been declared as a dependency. Add the missing crate (e.g., `httpmock`, `dyn-clone`) to the `[dev-dependencies]` section of your plugin's `Cargo.toml`.
+### Advanced Troubleshooting: Debugging Mock Failures
 
-### Compilation Error: `private module` or `private item`
+This is the most common and difficult issue to debug. The test fails with a message like `AI provider returned an error: {"message":"Request did not match any route or mock"}`.
 
--   **Symptom**: `error[E0603]: module 'sql' is private`.
--   **Solution**: Your test needs to access an item (module, function, constant) from another crate (`anyrag` or a sibling plugin) that is not public. To fix this, you must go to the source crate and make the item public. For example, change `mod sql;` to `pub mod sql;`.
+**Cause**: The HTTP request payload sent by your application code does not **exactly** match the payload you defined in your test's mock, even if they look similar. Simple matchers like `.body_contains()` can be too lenient and cause ambiguity, while precise matchers like `.json_body()` can fail due to subtle, invisible differences.
 
-### Test Failure: `MockAiProvider: No response programmed`
+**Solution**: Follow this workflow to find the exact payload and create a perfect mock.
 
--   **Symptom**: The test panics at runtime with an error from the `MockAiProvider`.
--   **Cause**: The `ingestor` called the AI provider's `generate` method, but you did not program a response for the specific `system_prompt` it used.
--   **Solution**:
-    1.  **Check Your Key**: The string key you use in `ai_provider.add_response("key", ...)` **must be a unique substring** of the system prompt being sent. Double-check for typos.
-    2.  **Verify the Prompt Constant**: Ensure you are passing the correct prompt constant (e.g., `KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT`) to your ingestor. An incorrect prompt will lead to a key mismatch.
-    3.  **Count Your Calls**: Make sure the number of AI calls your code makes matches the number of responses you've programmed. If you expect two calls (e.g., restructure and metadata), you need two `add_response` calls with the correct keys.
+#### Step 1: Add Temporary Logging to the Source Code
+
+Modify the application code that makes the HTTP call to print the *exact* request body before it's sent. For example, in the `LocalAiProvider`:
+
+```rust
+// In: crates/lib/src/providers/ai/local.rs
+// Temporarily add `serde_json` to imports if needed.
+
+// ... inside the `generate` function ...
+let request_body = LocalAiRequest { /* ... */ };
+
+// ADD THIS LINE TEMPORARILY
+println!("-- AI Request Body: {}", serde_json::to_string_pretty(&request_body).unwrap());
+
+let response = request_builder.json(&request_body).send().await;
+// ...
+```
+
+#### Step 2: Run the Failing Test and Capture the Output
+
+Run the test again. It will still fail, but now the console output will contain the exact, pretty-printed JSON payload that was sent to the mock server.
+
+```sh
+cargo test -p anyrag-server --test ingest_sheet_test
+```
+
+Look for the `-- AI Request Body:` output in the test logs.
+
+#### Step 3: Compare the Actual Payload with Your Test's Mock
+
+Carefully compare the logged payload with the one you constructed in your test. You will likely find subtle but critical differences.
+
+**Example Scenario**:
+
+-   **Your Test Payload (`restructure_payload`)**:
+    ```json
+    {
+      "model": "mock-local-model",
+      "messages": [
+        { "role": "system", "content": "..." },
+        { "role": "user", "content": "question,answer..." }
+      ]
+    }
+    ```
+-   **Actual Logged Payload (from `println!`)**:
+    ```json
+    {
+      "messages": [
+        { "role": "system", "content": "..." },
+        { "role": "user", "content": "# Markdown Content to Process:\nquestion,answer..." }
+      ],
+      "model": "mock-gemini-model",
+      "temperature": 0.0,
+      "max_tokens": 8192,
+      "stream": false
+    }
+    ```
+
+**Discrepancies Found**:
+1.  **`model`**: The app used `"mock-gemini-model"`, not `"mock-local-model"`.
+2.  **`user.content`**: The app added a prefix (`# Markdown Content to Process:\n`).
+3.  **Missing Fields**: The actual payload includes `temperature`, `max_tokens`, and `stream`, which were missing from the test's mock.
+
+#### Step 4: Correct the Mock in Your Test
+
+Update the JSON payload in your test to be an exact match of the logged output. Using a precise matcher like `.json_body()` is now possible and highly recommended for robustness.
+
+```rust
+// In: crates/server/tests/ingest_sheet_test.rs
+let restructure_payload = json!({
+    "model": "mock-gemini-model", // Corrected
+    "messages": [
+        {"role": "system", "content": "..."},
+        // Corrected user content
+        {"role": "user", "content": "# Markdown Content to Process:\nquestion,answer..."}
+    ],
+    // Added missing fields
+    "temperature": 0.0,
+    "max_tokens": 8192,
+    "stream": false
+});
+
+let restructure_mock = app.mock_server.mock(|when, then| {
+    when.method(Method::POST)
+        .path(...)
+        .json_body(restructure_payload); // Use a precise matcher
+    then.status(200).json_body(...);
+});
+```
+
+#### Step 5: Remove the Temporary Logging
+
+Once the test passes, **remove the `println!` statement** from the application code.
+
+### Compilation Error: Borrow of Moved Value (`E0382`)
+
+-   **Symptom**: `error[E0382]: borrow of moved value: ingest_result.document_ids`.
+-   **Cause**: You moved ownership of a value into one variable, then tried to use (borrow) it from the original variable. This often happens when constructing response structs.
+-   **Example**:
+    ```rust
+    // This code FAILS
+    let response = IngestSheetResponse {
+        document_ids: ingest_result.document_ids, // `document_ids` is MOVED here
+    };
+
+    let debug_info = json!({
+        // ERROR: Trying to BORROW `document_ids` after it was moved
+        "document_id": ingest_result.document_ids.first(),
+    });
+    ```
+-   **Solution**: Reorder your statements. Create the variables that borrow the value *before* you create the variable that takes ownership (moves the value).
+    ```rust
+    // This code PASSES
+    let debug_info = json!({
+        // BORROW happens here first, which is fine
+        "document_id": ingest_result.document_ids.first(),
+    });
+
+    let response = IngestSheetResponse {
+        document_ids: ingest_result.document_ids, // MOVE happens here, which is now safe
+    };
+    ```

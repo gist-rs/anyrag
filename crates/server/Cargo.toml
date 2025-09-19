@@ -145,6 +145,7 @@ name = "github_search_test"
 path = "tests/github_search_test.rs"
 harness = true
 
-[[example]]
-name = "backfill_metadata"
-path = "examples/backfill_metadata.rs"
+[[test]]
+name = "ingest_sheet_test"
+path = "tests/ingest_sheet_test.rs"
+harness = true
