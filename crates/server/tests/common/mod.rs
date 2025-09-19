@@ -57,6 +57,7 @@ pub struct TestApp {
     pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
     _db_file: Option<NamedTempFile>,
     _config_dir: Option<TempDir>,
+    _github_db_dir: Option<TempDir>,
     _server_handle: JoinHandle<()>,
     shutdown_tx: Option<tokio::sync::oneshot::Sender<()>>,
 }
@@ -69,6 +70,9 @@ impl TestApp {
         let db_file = NamedTempFile::new()?;
         let db_path = db_file.path().to_path_buf();
 
+        let github_db_dir = tempdir()?;
+        let github_db_path = github_db_dir.path();
+
         let config_dir = tempdir()?;
         let config_path = config_dir.path().join("config.yml");
 
@@ -79,6 +83,7 @@ impl TestApp {
             r#"
 port: 0
 db_url: "{db_path}"
+github_db_dir: "{github_db_path}"
 embedding:
   api_url: "{embedding_url}"
   model_name: "mock-embedding-model"
@@ -98,6 +103,7 @@ providers:
     model_name: "mock-local-model"
 "#,
             db_path = db_path.to_str().unwrap(),
+            github_db_path = github_db_path.to_str().unwrap(),
             embedding_url = mock_server.url(format!("/{test_case_name}/v1/embeddings")),
             chat_completions_url =
                 mock_server.url(format!("/{test_case_name}/v1/chat/completions"))
@@ -113,6 +119,7 @@ providers:
         let mut app = TestApp::spawn_with_state(app_state, mock_server).await?;
         app._db_file = Some(db_file);
         app._config_dir = Some(config_dir);
+        app._github_db_dir = Some(github_db_dir);
         Ok(app)
     }
 
@@ -153,6 +160,7 @@ providers:
             knowledge_graph: knowledge_graph_clone,
             _db_file: None,
             _config_dir: None,
+            _github_db_dir: None,
             _server_handle: server_handle,
             shutdown_tx: Some(shutdown_tx),
         })
