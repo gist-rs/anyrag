@@ -125,26 +125,31 @@ pub async fn generate_embeddings_batch(
         .await
         .map_err(PromptError::AiRequest)?;
 
-    if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(PromptError::AiApi(error_text));
+    let status = response.status();
+    let response_text = response.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        debug!(response_body = %response_text, "<- Received non-success response from embeddings API");
+        return Err(PromptError::AiApi(response_text));
     }
 
+    debug!(response_body = %response_text, "<- Received success response from embeddings API");
+
     if is_gemini {
-        let gemini_response: GeminiBatchEmbeddingResponse = response
-            .json()
-            .await
-            .map_err(PromptError::AiDeserialization)?;
+        let gemini_response: GeminiBatchEmbeddingResponse = serde_json::from_str(&response_text)
+            .map_err(|e| {
+                PromptError::AiApi(format!("Deserialization error: {e}. Body: {response_text}"))
+            })?;
         Ok(gemini_response
             .embeddings
             .into_iter()
             .map(|e| e.values)
             .collect())
     } else {
-        let openai_response: OpenAIEmbeddingResponse = response
-            .json()
-            .await
-            .map_err(PromptError::AiDeserialization)?;
+        let openai_response: OpenAIEmbeddingResponse = serde_json::from_str(&response_text)
+            .map_err(|e| {
+                PromptError::AiApi(format!("Deserialization error: {e}. Body: {response_text}"))
+            })?;
 
         Ok(openai_response
             .data

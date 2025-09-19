@@ -43,12 +43,20 @@ Clones a public GitHub repository, extracts all Rust code examples, and stores t
 *   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model.
 *   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use.
 
-**Example:**
+**Examples:**
 ```sh
-cargo run -p cli -- dump github \
+cargo run -p cli dump github \
   --url https://github.com/rust-lang/book \
   --version v2.0.0 \
-  --embedding-api-url "http://localhost:1234/api/embeddings" \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/tursodatabase/turso \
+  --version v0.1.5 \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
   --embedding-model "text-embedding-qwen3-embedding-8b"
 ```
 

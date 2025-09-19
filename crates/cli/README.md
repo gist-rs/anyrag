@@ -82,14 +82,23 @@ Clones a public GitHub repository, extracts all Rust code examples (from `README
 *   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model. If provided, embeddings will be generated for each extracted code example.
 *   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use.
 
-**Example:**
+**Examples:**
 
 This command ingests version `v1.2.3` of the `tokio` repository and generates embeddings for all found examples.
 ```sh
-cargo run -p cli -- dump github \
+cargo run -p cli dump github \
   --url https://github.com/tokio-rs/tokio \
   --version v1.2.3 \
-  --embedding-api-url "http://localhost:1234/api/embeddings" \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
+This command ingests version `v0.1.5` of the `turso` repository.
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/tursodatabase/turso \
+  --version v0.1.5 \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
   --embedding-model "text-embedding-qwen3-embedding-8b"
 ```
 
@@ -112,6 +121,6 @@ This command will take a local context file, split it by the `---` separator, an
 cargo run -p cli -- process file my-project-context.md \
   --db-path db/chunks/my-project.db \
   --separator "---" \
-  --embedding-api-url "http://localhost:1234/api/embeddings" \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
   --embedding-model "text-embedding-qwen3-embedding-8b"
 ```

@@ -170,7 +170,7 @@ async fn run_web_ingestion_pipeline(
             Err(_) => continue,
         };
 
-        let source_url_with_chunk = format!("{}#section_{}", url, i);
+        let source_url_with_chunk = format!("{url}#section_{i}");
         let chunk_id =
             Uuid::new_v5(&Uuid::NAMESPACE_URL, source_url_with_chunk.as_bytes()).to_string();
 

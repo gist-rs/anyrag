@@ -12,7 +12,7 @@ use tracing::info;
 #[derive(Parser, Debug)]
 pub struct GithubArgs {
     /// The URL of the public GitHub repository to ingest
-    #[arg(required = true)]
+    #[arg(long, required = true)]
     pub url: String,
     /// An optional git version (tag, branch, commit hash) to ingest. Defaults to the latest release tag.
     #[arg(long)]
