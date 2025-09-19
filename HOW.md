@@ -283,3 +283,43 @@ let rag_answer_mock = app.mock_server.mock(|when, then| {
         document_ids: ingest_result.document_ids, // MOVE happens here, which is now safe
     };
     ```
+
+### Scenario 4: `400 Bad Request` on Ingestion Endpoints
+
+-   **Symptom**: The test fails with `HTTP status client error (400 Bad Request)` when calling an ingestion endpoint like `/ingest/pdf`.
+-   **Cause**: The server-side handler for the endpoint expects the request payload to be in a specific format, typically `multipart/form-data`, but the test client is sending it in a different format, such as `application/json`. This format mismatch causes the server to reject the request as it cannot parse the body correctly.
+-   **Solution**: Review the signature of the server-side handler for the endpoint to determine the expected request format. Update the test client to construct and send the request in that format. For ingestion endpoints that handle file uploads or URL-based ingestion, `multipart` is a common choice.
+
+**Example Walkthrough (`pdf_url_ingest_test`):**
+
+1.  **The Failure**: The `test_pdf_url_ingestion_and_rag_workflow` failed with a `400 Bad Request` error.
+2.  **Analysis**: An inspection of the `ingest_pdf_handler` on the server showed that it uses an `axum_extra::extract::Multipart` extractor. This means it is designed to parse a `multipart/form-data` body, looking for specific fields like `url`, `file`, and `extractor`. The test, however, was incorrectly sending a single JSON object.
+3.  **The Fix**: The test was refactored to use `reqwest::multipart::Form` to build the request body, correctly structuring the data into parts that the server handler could parse.
+
+```rust
+// In: crates/server/tests/pdf_url_ingest_test.rs
+
+// --- Incorrect code sending JSON ---
+/*
+let ingest_res = app
+    .client
+    .post(app.url("/ingest/pdf"))
+    .bearer_auth(token.clone())
+    .json(&json!({ "url": pdf_url, "extractor": "local" })) // INCORRECT
+    .send()
+    .await?;
+*/
+
+// --- Corrected code sending a multipart form ---
+let form = reqwest::multipart::Form::new()
+    .part("url", reqwest::multipart::Part::text(pdf_url)) // Correctly creates a 'url' part
+    .part("extractor", reqwest::multipart::Part::text("local"));
+
+let ingest_res = app
+    .client
+    .post(app.url("/ingest/pdf"))
+    .bearer_auth(token.clone())
+    .multipart(form) // Uses .multipart() instead of .json()
+    .send()
+    .await?;
+```

@@ -53,6 +53,7 @@ pub struct TestApp {
     pub client: Client,
     pub mock_server: MockServer,
     pub db_path: PathBuf,
+    pub github_db_dir: PathBuf,
     pub app_state: AppState,
     pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
     _db_file: Option<NamedTempFile>,
@@ -131,6 +132,7 @@ providers:
             .try_init();
 
         let db_path = PathBuf::from(&app_state.config.db_url);
+        let github_db_dir = PathBuf::from(app_state.config.github_db_dir.as_ref().unwrap().clone());
         let knowledge_graph_clone = app_state.knowledge_graph.clone();
         let app_state_for_harness = app_state.clone();
 
@@ -140,7 +142,7 @@ providers:
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let server_handle = tokio::spawn(async move {
-            let app = router::create_router(app_state);
+            let app = router::create_router(app_state.clone());
             let server = serve(listener, app).with_graceful_shutdown(async {
                 shutdown_rx.await.ok();
             });
@@ -156,6 +158,7 @@ providers:
             client: Client::new(),
             mock_server,
             db_path,
+            github_db_dir,
             app_state: app_state_for_harness,
             knowledge_graph: knowledge_graph_clone,
             _db_file: None,

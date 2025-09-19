@@ -134,10 +134,14 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
     ingest_embedding_mock.delete();
 
     // D. Manually update embeddings for the ingested examples to have known vectors.
-    let db_a_path = format!("{}/{repo_a_name}.db", anyrag::constants::GITHUB_DB_DIR);
-    let db_b_path = format!("{}/{repo_b_name}.db", anyrag::constants::GITHUB_DB_DIR);
-    let db_a = Builder::new_local(&db_a_path).build().await?;
-    let db_b = Builder::new_local(&db_b_path).build().await?;
+    let db_a_path = app.github_db_dir.join(format!("{repo_a_name}.db"));
+    let db_b_path = app.github_db_dir.join(format!("{repo_b_name}.db"));
+    let db_a = Builder::new_local(db_a_path.to_str().unwrap())
+        .build()
+        .await?;
+    let db_b = Builder::new_local(db_b_path.to_str().unwrap())
+        .build()
+        .await?;
     let (conn_a, conn_b) = (db_a.connect()?, db_b.connect()?);
 
     let vector_a = [1.0, 0.0, 0.0]; // "database" vector
