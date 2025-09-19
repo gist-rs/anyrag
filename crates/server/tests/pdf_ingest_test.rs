@@ -16,7 +16,7 @@ use anyrag_test_utils::helpers::generate_test_pdf;
 use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use serde_json::{json, Value};
-use turso::{params, Builder, Value as TursoValue};
+use turso::{Builder, Value as TursoValue};
 
 #[tokio::test]
 async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
