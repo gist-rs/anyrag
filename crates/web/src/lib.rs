@@ -75,13 +75,6 @@ struct IngestSource<'a> {
     strategy: WebIngestStrategy<'a>,
 }
 
-#[derive(Debug, Clone)]
-struct IngestedDocument {
-    #[allow(unused)]
-    id: String,
-    content: String,
-}
-
 // --- Core Pipeline Logic (Moved from anyrag-lib) ---
 
 pub async fn fetch_web_content(
@@ -118,74 +111,6 @@ pub async fn fetch_web_content(
     }
 }
 
-async fn ingest_and_cache_url(
-    db: &Database,
-    url: &str,
-    owner_id: Option<&str>,
-    strategy: WebIngestStrategy<'_>,
-) -> Result<(String, IngestedDocument), WebIngestError> {
-    let conn = db.connect()?;
-    let markdown_content = fetch_web_content(url, strategy).await?;
-    let new_content_hash = format!("{:x}", md5::compute(markdown_content.as_bytes()));
-
-    let title = markdown_content
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(|line| {
-            line.trim_start_matches(|c: char| c == '#' || c.is_whitespace())
-                .trim()
-                .chars()
-                .take(150)
-                .collect::<String>()
-        })
-        .unwrap_or_else(|| url.to_string());
-
-    if let Some(row) = conn
-        .query(
-            "SELECT id, content FROM documents WHERE source_url = ?",
-            params![url],
-        )
-        .await?
-        .next()
-        .await?
-    {
-        let doc_id: String = row.get(0)?;
-        let existing_content: String = row.get(1)?;
-        let existing_hash = format!("{:x}", md5::compute(existing_content.as_bytes()));
-        if existing_hash == new_content_hash {
-            return Err(WebIngestError::ContentUnchanged(url.to_string()));
-        }
-        conn.execute(
-            "UPDATE documents SET content = ?, title = ? WHERE id = ?",
-            params![markdown_content.clone(), title, doc_id.clone()],
-        )
-        .await?;
-        let ingested_document = IngestedDocument {
-            id: doc_id.clone(),
-            content: markdown_content,
-        };
-        return Ok((doc_id, ingested_document));
-    }
-
-    let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, url.as_bytes()).to_string();
-    conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
-        params![
-            document_id.clone(),
-            owner_id,
-            url,
-            title,
-            markdown_content.clone()
-        ],
-    )
-    .await?;
-    let ingested_document = IngestedDocument {
-        id: document_id.clone(),
-        content: markdown_content,
-    };
-    Ok((document_id, ingested_document))
-}
-
 async fn run_web_ingestion_pipeline(
     db: &Database,
     ai_provider: &dyn AiProvider,
@@ -194,19 +119,12 @@ async fn run_web_ingestion_pipeline(
     prompts: IngestionPrompts<'_>,
     web_ingest_strategy: WebIngestStrategy<'_>,
 ) -> Result<usize, WebIngestError> {
-    let (temp_doc_id, ingested_document) =
-        match ingest_and_cache_url(db, url, owner_id, web_ingest_strategy).await {
-            Ok(content) => content,
-            Err(WebIngestError::ContentUnchanged(url)) => {
-                info!("Content for {} is unchanged, pipeline finished.", url);
-                return Ok(0);
-            }
-            Err(e) => return Err(e),
-        };
+    // 1. Fetch and restructure content first.
+    let markdown_content = fetch_web_content(url, web_ingest_strategy).await?;
 
     let structured_yaml = restructure_with_llm(
         ai_provider,
-        &ingested_document.content,
+        &markdown_content,
         prompts.restructuring_system_prompt,
     )
     .await
@@ -217,18 +135,9 @@ async fn run_web_ingestion_pipeline(
             "LLM restructuring resulted in empty content for source: {}",
             url
         );
-        let conn = db.connect()?;
-        conn.execute("DELETE FROM documents WHERE id = ?", params![temp_doc_id])
-            .await?;
         return Ok(0);
     }
 
-    let conn = db.connect()?;
-    conn.execute(
-        "DELETE FROM documents WHERE id = ?",
-        params![temp_doc_id.clone()],
-    )
-    .await?;
     let yaml_content: YamlContent = match serde_yaml::from_str(&structured_yaml) {
         Ok(content) => content,
         Err(e) => {
@@ -236,11 +145,22 @@ async fn run_web_ingestion_pipeline(
                 "Failed to parse structured YAML for source: {}. Error: {}",
                 url, e
             );
-            return Ok(0);
+            // Even if parsing fails, we should store the raw structured YAML as a fallback.
+            let fallback_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, url.as_bytes()).to_string();
+            let conn = db.connect()?;
+            conn.execute(
+                "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT(source_url) DO UPDATE SET title=excluded.title, content=excluded.content",
+                params![fallback_id, owner_id, url, "Unparsed Content", structured_yaml],
+            ).await?;
+            return Ok(1); // Return 1 as the parent doc was created/updated.
         }
     };
 
+    // 2. Atomically upsert all chunks.
+    let conn = db.connect()?;
     let mut chunks_created = 0;
+
     for (i, section) in yaml_content.sections.into_iter().enumerate() {
         let chunk_content = YamlContent {
             sections: vec![section.clone()],
@@ -249,10 +169,14 @@ async fn run_web_ingestion_pipeline(
             Ok(s) => s,
             Err(_) => continue,
         };
-        let chunk_id = Uuid::new_v4().to_string();
-        let source_url_with_chunk = format!("{url}#section_{i}");
+
+        let source_url_with_chunk = format!("{}#section_{}", url, i);
+        let chunk_id =
+            Uuid::new_v5(&Uuid::NAMESPACE_URL, source_url_with_chunk.as_bytes()).to_string();
+
         conn.execute(
-            "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(source_url) DO UPDATE SET title=excluded.title, content=excluded.content",
             params![
                 chunk_id.clone(),
                 owner_id,
@@ -260,8 +184,8 @@ async fn run_web_ingestion_pipeline(
                 section.title.clone(),
                 yaml_chunk.clone()
             ],
-        )
-        .await?;
+        ).await?;
+
         chunks_created += 1;
         extract_and_store_metadata(
             &conn,
@@ -274,6 +198,7 @@ async fn run_web_ingestion_pipeline(
         .await
         .map_err(|e| WebIngestError::Internal(anyhow::anyhow!(e)))?;
     }
+
     Ok(chunks_created)
 }
 

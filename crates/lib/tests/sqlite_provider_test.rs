@@ -151,3 +151,69 @@ async fn test_sqlite_provider_shared_db_and_datetime_query() {
 
     assert_eq!(result_json, expected_json);
 }
+
+/// Verifies that `INSERT ... ON CONFLICT DO UPDATE` (UPSERT) works correctly.
+#[tokio::test]
+async fn test_sqlite_provider_upsert_logic() {
+    setup_tracing();
+
+    // 1. Arrange: Create a provider and use the real application schema.
+    let provider = SqliteProvider::new(":memory:")
+        .await
+        .expect("Failed to create SqliteProvider");
+    provider
+        .initialize_schema()
+        .await
+        .expect("Failed to initialize schema");
+    let initial_insert = "INSERT INTO documents (id, source_url, title, content) VALUES ('doc1', 'http://example.com', 'Original Title', 'Original Content')";
+    provider
+        .initialize_with_data(initial_insert)
+        .await
+        .expect("Failed to insert initial data");
+
+    // 2. Act: Execute an INSERT with a conflicting source_url.
+    let upsert_sql = "
+        INSERT INTO documents (id, source_url, title, content)
+        VALUES ('doc1_ignored', 'http://example.com', 'Updated Title', 'Updated Content')
+        ON CONFLICT(source_url) DO UPDATE SET
+        title = excluded.title,
+        content = excluded.content;
+    ";
+    provider
+        .initialize_with_data(upsert_sql)
+        .await
+        .expect("UPSERT operation failed");
+
+    // 3. Assert: Verify that the original row was updated and no new row was added.
+    let result_json = provider
+        .execute_query("SELECT id, source_url, title, content FROM documents")
+        .await
+        .expect("Failed to query documents table");
+
+    let expected_json = json!([
+        {
+            "id": "doc1",
+            "source_url": "http://example.com",
+            "title": "Updated Title",
+            "content": "Updated Content"
+        }
+    ])
+    .to_string();
+
+    assert_eq!(
+        result_json, expected_json,
+        "The document should have been updated."
+    );
+
+    // Also assert that the count is still 1.
+    let count_json = provider
+        .execute_query("SELECT COUNT(*) as count FROM documents")
+        .await
+        .expect("Failed to count documents");
+
+    let expected_count_json = json!([{"count": 1}]).to_string();
+    assert_eq!(
+        count_json, expected_count_json,
+        "There should be only one document in the table."
+    );
+}

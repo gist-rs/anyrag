@@ -16,7 +16,7 @@ env_logger = "0.11.8"
 async-trait = "0.1.89"
 dyn-clone = "1.0.20"
 rss = "2.0.12"
-turso = { git = "https://github.com/tursodatabase/turso.git", rev = "494ce41", features = [
+turso = { git = "https://github.com/tursodatabase/turso.git", rev = "e04938e", features = [
     "experimental_indexes",
 ] }
 chrono = "0.4"
