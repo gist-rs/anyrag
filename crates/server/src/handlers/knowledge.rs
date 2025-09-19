@@ -189,6 +189,7 @@ pub async fn knowledge_search_handler(
         let db_path = format!("{}/{}.db", constants::DB_DIR, db_name);
         info!("Connecting to dynamic database: {}", db_path);
         let provider = SqliteProvider::new(&db_path).await?;
+        provider.initialize_schema().await?;
         Arc::new(provider)
     } else {
         app_state.sqlite_provider.clone()

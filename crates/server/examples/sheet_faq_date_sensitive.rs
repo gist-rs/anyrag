@@ -107,9 +107,9 @@ async fn main() -> Result<()> {
         Ok(Json(response)) => {
             info!(
                 "Ingestion successful. Stored {} new FAQs.",
-                response.result.ingested_documents
+                response.result.ingested_chunks
             );
-            if response.result.ingested_documents == 0 {
+            if response.result.ingested_chunks == 0 {
                 bail!("No FAQs were ingested. The sheet might be empty or already processed.");
             }
         }
@@ -136,8 +136,12 @@ async fn main() -> Result<()> {
     // --- 4. Ask a Question using RAG ---
     info!("--- Asking Date-Sensitive Question against Sheet Knowledge ---");
     let question = "What is the current hobby?";
+    let db_name = std::path::Path::new(&db_path)
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(String::from);
     let search_payload = SearchRequest {
-        db: Some("sheet-faq-test".to_string()),
+        db: db_name,
         query: question.to_string(),
         model: None,
         limit: Some(5),
