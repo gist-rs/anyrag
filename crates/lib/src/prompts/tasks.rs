@@ -36,7 +36,7 @@ pub const RAG_SYNTHESIS_SYSTEM_PROMPT: &str = r#"You are a strict, factual AI. Y
 2.  **Justify with Context**: Immediately after the direct answer, provide the specific information from the #Context that supports your conclusion.
 3.  **Perform Reasoning & Calculations**: If the user's question requires logical reasoning or mathematical calculations (e.g., comparing values, summing numbers from a table), you MUST perform these operations using the data from the #Context to form your direct answer.
 4.  **Be Concise**: Do not use filler phrases like 'Based on the provided context...'. Get straight to the point.
-5.  **Handle Missing Information**: If the context does not contain the necessary information to answer the question, state that clearly and explain what information is missing. Do not make assumptions or use outside knowledge.";
+5.  **Handle Missing Information**: If the context does not contain the necessary information to answer the question, state that clearly and explain what information is missing. Do not make assumptions or use outside knowledge."
 "#;
 pub const RAG_SYNTHESIS_USER_PROMPT: &str = r#"# User Question
 {prompt}

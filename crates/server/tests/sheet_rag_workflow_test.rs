@@ -131,11 +131,19 @@ sections:
         then.status(200).json_body(mock_embeddings);
     });
 
-    // This mock uses `body_contains` because the user prompt includes dynamic context (the retrieved docs).
+    // This mock uses a partial matcher to specifically target the RAG synthesis call
+    // while ignoring the dynamic context in the user prompt.
     let rag_answer_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path(chat_completions_path)
-            .body_contains("Answer Directly First");
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": tasks::RAG_SYNTHESIS_SYSTEM_PROMPT},
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(json!({
             "choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]
         }));
@@ -203,7 +211,7 @@ sections:
     restructure_mock.assert();
     metadata_mock.assert();
     query_analysis_mock.assert();
-    embedding_mock.assert();
+    embedding_mock.assert_hits(2);
     rag_answer_mock.assert();
 
     Ok(())

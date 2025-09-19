@@ -108,129 +108,152 @@ async fn test_sheet_ingestion_workflow() -> Result<()> {
 -   **Compilation Error: `private item`**: Your test needs to access an item from another crate that is not `pub`. Go to the source crate and make the item public (e.g., change `mod sql;` to `pub mod sql;`).
 -   **Test Failure: `MockAiProvider: No response programmed`**: The `ingestor` called the AI provider, but you didn't program a response for the specific `system_prompt` it used. Ensure the key in `ai_provider.add_response("key", ...)` is a unique substring of the system prompt being sent.
 
-### Advanced Troubleshooting: Common Test Failures
+---
 
-This section covers complex issues that often arise in integration tests.
+## Common Test Failures and Solutions
 
-#### Problem: `database is locked` in Parallel Tests
+This section covers common errors encountered during testing and provides step-by-step solutions based on real-world examples.
 
--   **Symptom**: Tests pass when run individually but fail when run as a suite (`cargo test`) with errors like `database is locked` or `SQL execution failure`.
--   **Cause**: Multiple tests are trying to write to the same hardcoded database file simultaneously. The `TestApp` or test setup is creating a database with a predictable, non-unique name.
--   **Solution**: Ensure every test instance gets a completely isolated database. Modify your test harness (e.g., `TestApp::spawn`) to use `tempfile::NamedTempFile` or `tempfile::tempdir` to generate a unique database path for *each* test run. This guarantees that tests cannot interfere with each other's state.
+### Scenario 1: `database is locked` Errors in Server Tests
 
-    ```rust
-    // In your test harness (e.g., crates/server/tests/common/mod.rs)
-    use tempfile::NamedTempFile;
+This is a frequent issue when running multiple tests in parallel (e.g., with `cargo test`).
 
-    pub async fn spawn(test_case_name: &str) -> Result<Self> {
-        // This creates a new, unique temporary file for each call.
-        let db_file = NamedTempFile::new()?;
-        let db_path = db_file.path().to_path_buf();
+-   **Symptom**: The test fails with an error message containing `database is locked`.
+-   **Cause**: Multiple test instances are trying to access and write to the same hardcoded database file simultaneously. This violates the principle of test isolation. The `TestApp` harness, if not configured correctly, might create a database with a static or predictable name, leading to this collision.
+-   **Solution**: Ensure that your `TestApp` harness creates a completely unique and isolated environment for each test run. This typically involves using a temporary directory for all test-generated files, including the main database and any other directories the application might write to (like `github_db_dir`).
 
-        // Pass this unique `db_path` to your AppState and config.
+**Example Fix in `TestApp::spawn`:**
+
+The key is to create a new temporary directory for *each test* and construct all necessary paths within it.
+
+```rust
+// In: crates/server/tests/common/mod.rs
+
+pub async fn spawn(test_case_name: &str) -> Result<Self> {
+    let mock_server = MockServer::start();
+
+    // Create a unique temporary directory for this specific test run.
+    let temp_dir = tempdir()?;
+    
+    // Create all necessary files and subdirectories WITHIN the unique temp directory.
+    let db_file = NamedTempFile::new_in(temp_dir.path())?;
+    let db_path = db_file.path();
+    
+    let github_db_dir = temp_dir.path().join("github_ingest");
+    std::fs::create_dir(&github_db_dir)?;
+
+    // ...
+
+    // Use these unique paths when generating the config for the test server.
+    let config_content = format!(
+        r#"
+        db_url: "{db_path}"
+        github_db_dir: "{github_db_path}"
+        # ... other configs
+        "#,
+        db_path = db_path.to_str().unwrap(),
+        github_db_path = github_db_dir.to_str().unwrap(),
         // ...
-    }
-    ```
+    );
 
-#### Problem: Mock Failures (`Request did not match any route or mock`)
-
--   **Symptom**: The test fails with a message like `AI provider returned an error: {"message":"Request did not match any route or mock"}`.
--   **Cause**: The HTTP request payload sent by your application code does not **exactly** match the payload you defined in your test's mock, even if they look similar. This can also happen if the application makes an unexpected AI call that you haven't mocked at all (e.g., an ingestion test that also requires mocks for a search workflow).
--   **Solution**: Follow this workflow to find the exact payload and create a perfect mock.
-
-##### Step 1: Add Temporary Logging to the Source Code
-
-Modify the application code that makes the HTTP call to print the *exact* request body before it's sent. For example, in the `LocalAiProvider`:
-
-```rust
-// In: crates/lib/src/providers/ai/local.rs
-// Temporarily add `serde_json` to imports if needed.
-
-// ... inside the `generate` function ...
-let request_body = LocalAiRequest { /* ... */ };
-
-// ADD THIS LINE TEMPORARILY
-println!("-- AI Request Body: {}", serde_json::to_string_pretty(&request_body).unwrap());
-
-let response = request_builder.json(&request_body).send().await;
-// ...
+    // ... rest of the setup
+}
 ```
 
-##### Step 2: Run the Failing Test and Capture the Output
+### Scenario 2: `Request did not match any route or mock`
 
-Run the test again. It will still fail, but now the console output will contain the exact, pretty-printed JSON payload that was sent to the mock server.
+This is the most common error when a test's mock setup becomes desynchronized from the application's actual behavior.
 
-```sh
-cargo test -p anyrag-server --test ingest_sheet_test
-```
+-   **Symptom**: A test making a request to a mock server (like `httpmock` or `wiremock`) fails with a 500-level error. The error body contains a message like `Request did not match any route or mock`.
+-   **Cause**: The application code made an HTTP request that the test was not configured to handle. This usually happens for one of two reasons:
+    1.  The request payload (body, headers, path) sent by the application does not *exactly* match what the test's mock is expecting.
+    2.  The application logic changed, and it's now making an entirely new, unexpected HTTP call that you haven't created a mock for yet.
+-   **Solution**: Follow the "Advanced Troubleshooting" workflow outlined in the main guide. The key is to **log the actual request body** from the application code to see what it's sending, and then update your test's mock to match it perfectly.
 
-Look for the `-- AI Request Body:` output in the test logs.
+**Example Walkthrough (`faq_ingestion_test`):**
 
-##### Step 3: Compare the Actual Payload with Your Test's Mock
-
-Carefully compare the logged payload with the one you constructed in your test. You will likely find subtle but critical differences.
-
-**Example Scenario**:
-
--   **Your Test Payload (`restructure_payload`)**:
-    ```json
-    {
-      "model": "mock-local-model",
-      "messages": [
-        { "role": "system", "content": "..." },
-        { "role": "user", "content": "question,answer..." }
-      ]
-    }
-    ```
--   **Actual Logged Payload (from `println!`)**:
-    ```json
-    {
-      "messages": [
-        { "role": "system", "content": "..." },
-        { "role": "user", "content": "# Markdown Content to Process:\nquestion,answer..." }
-      ],
-      "model": "mock-gemini-model",
-      "temperature": 0.0,
-      "max_tokens": 8192,
-      "stream": false
-    }
-    ```
-
-**Discrepancies Found**:
-1.  **`model`**: The app used `"mock-gemini-model"`, not `"mock-local-model"`.
-2.  **`user.content`**: The app added a prefix (`# Markdown Content to Process:\n`).
-3.  **Missing Fields**: The actual payload includes `temperature`, `max_tokens`, and `stream`, which were missing from the test's mock.
-
-##### Step 4: Correct the Mock in Your Test
-
-Update the JSON payload in your test to be an exact match of the logged output. Using a precise matcher like `.json_body()` is now possible and highly recommended for robustness.
+1.  **The Failure**: The `faq_ingestion_test` failed with a mock error during the `POST /ingest/pdf` call.
+2.  **Add Logging**: By adding a `println!` inside the `LocalAiProvider::generate` function, we logged the exact JSON payload being sent.
+3.  **Analyze Log**: The log revealed two things:
+    *   The application was making an AI call to "restructure" the PDF content, which the test was not mocking at all.
+    *   The content being sent was garbled binary data, not clean text.
+4.  **The Fix**:
+    *   **Add Missing Mocks**: We added new mocks to the test for the "restructure" and "metadata extraction" AI calls that happen during ingestion.
+    *   **Correct Assertions**: We updated the test's assertions to reflect the actual pipeline. For example, instead of expecting the raw PDF text in the database, we asserted that the restructured YAML from our new mock was stored correctly. This brought the test in sync with the application's true behavior.
 
 ```rust
-// In: crates/server/tests/ingest_sheet_test.rs
-let restructure_payload = json!({
-    "model": "mock-gemini-model", // Corrected
-    "messages": [
-        {"role": "system", "content": "..."},
-        // Corrected user content
-        {"role": "user", "content": "# Markdown Content to Process:\nquestion,answer..."}
-    ],
-    // Added missing fields
-    "temperature": 0.0,
-    "max_tokens": 8192,
-    "stream": false
-});
+// In: crates/server/tests/faq_ingestion_test.rs
 
+// ... setup ...
+
+// ADDED: Mock for the first AI call (restructuring)
 let restructure_mock = app.mock_server.mock(|when, then| {
     when.method(Method::POST)
-        .path(...)
-        .json_body(restructure_payload); // Use a precise matcher
-    then.status(200).json_body(...);
+        .body_contains("expert document analyst and editor"); // Match on the system prompt
+    then.status(200).json_body(/* ... expected YAML response ... */);
+});
+
+// ADDED: Mock for the second AI call (metadata)
+let metadata_mock = app.mock_server.mock(|when, then| {
+    when.method(Method::POST)
+        .body_contains("You are a document analyst"); // Match on the system prompt
+    then.status(200).json_body(/* ... expected metadata response ... */);
+});
+
+// Mocks for the search part of the workflow remain...
+
+// ... rest of the test ...
+
+// ADDED: Assert that the new mocks were called
+restructure_mock.assert();
+metadata_mock.assert();
+```
+
+### Scenario 3: Mock Assertion Failure (`The number of matching requests was higher than expected`)
+
+This error is a more subtle variation of the "request did not match" problem and indicates an issue with mock ambiguity.
+
+-   **Symptom**: The test panics with an assertion failure from the mock library itself, like `assertion 'left == right' failed: The number of matching requests was higher than expected (expected 1 but was 2)`.
+-   **Cause**: A single mock definition is being matched by multiple, different HTTP requests within the same test. This happens when the matcher is too broad. For example, a test workflow might make four separate calls to the same `/v1/chat/completions` endpoint, and a matcher like `.path("/v1/chat/completions")` would match all of them, violating a `.hits(1)` assertion.
+-   **Solution**: Make your mock matchers more specific. Instead of matching only by path, add criteria that uniquely identify each request. The best way is to match against the request body.
+
+**Example Walkthrough (`sheet_rag_workflow_test`):**
+
+1.  **The Failure**: The test panicked because a mock expecting 1 hit was matched twice.
+2.  **Analysis**: We logged the four distinct AI request bodies made during the test: `restructure`, `metadata`, `query_analysis`, and `rag_synthesis`. The mock for `rag_synthesis` was using a very generic matcher (`.body_contains("Answer Directly First")`), which was likely also matching one of the other three requests.
+3.  **The Fix**: We made the matcher for each mock highly specific.
+    *   For mocks where the entire payload is predictable, use `.json_body()` with the exact expected JSON.
+    *   For mocks where part of the payload is dynamic (like the `context` in a RAG call), use a partial matcher that checks for a unique, static part of the request, like the system prompt.
+
+```rust
+// In: crates/server/tests/sheet_rag_workflow_test.rs
+
+// This mock is now highly specific and will only match the RAG synthesis call.
+let rag_answer_mock = app.mock_server.mock(|when, then| {
+    when.method(Method::POST)
+        .path(chat_completions_path)
+        // Use a partial matcher on the system prompt, which is unique to this call.
+        .json_body_partial(json!({
+            "messages": [
+                {"role": "system", "content": tasks::RAG_SYNTHESIS_SYSTEM_PROMPT},
+            ]
+        }).to_string()); // .to_string() is crucial!
+    then.status(200).json_body(/* ... */);
 });
 ```
 
-##### Step 5: Remove the Temporary Logging
+### Sub-Problem: `trait bound is not satisfied` on `json_body_partial`
 
-Once the test passes, **remove the `println!` statement** from the application code.
+-   **Symptom**: After adding a `.json_body_partial()` matcher, the test fails to compile with `error[E0277]: the trait bound 'String: From<Value>' is not satisfied`.
+-   **Cause**: The `httpmock` library's `json_body_partial` function expects a type that can be converted into a `String` (like `&str` or `String`). The `serde_json::json!` macro, however, produces a `serde_json::Value`. The compiler cannot automatically convert from `Value` to `String`.
+-   **Solution**: Explicitly call `.to_string()` on the JSON value before passing it to the matcher.
+
+```rust
+// Correct usage:
+.json_body_partial(
+    json!({ "key": "value" }).to_string()
+);
+```
 
 ### Compilation Error: Borrow of Moved Value (`E0382`)
 
