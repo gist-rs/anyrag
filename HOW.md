@@ -108,15 +108,37 @@ async fn test_sheet_ingestion_workflow() -> Result<()> {
 -   **Compilation Error: `private item`**: Your test needs to access an item from another crate that is not `pub`. Go to the source crate and make the item public (e.g., change `mod sql;` to `pub mod sql;`).
 -   **Test Failure: `MockAiProvider: No response programmed`**: The `ingestor` called the AI provider, but you didn't program a response for the specific `system_prompt` it used. Ensure the key in `ai_provider.add_response("key", ...)` is a unique substring of the system prompt being sent.
 
-### Advanced Troubleshooting: Debugging Mock Failures
+### Advanced Troubleshooting: Common Test Failures
 
-This is the most common and difficult issue to debug. The test fails with a message like `AI provider returned an error: {"message":"Request did not match any route or mock"}`.
+This section covers complex issues that often arise in integration tests.
 
-**Cause**: The HTTP request payload sent by your application code does not **exactly** match the payload you defined in your test's mock, even if they look similar. Simple matchers like `.body_contains()` can be too lenient and cause ambiguity, while precise matchers like `.json_body()` can fail due to subtle, invisible differences.
+#### Problem: `database is locked` in Parallel Tests
 
-**Solution**: Follow this workflow to find the exact payload and create a perfect mock.
+-   **Symptom**: Tests pass when run individually but fail when run as a suite (`cargo test`) with errors like `database is locked` or `SQL execution failure`.
+-   **Cause**: Multiple tests are trying to write to the same hardcoded database file simultaneously. The `TestApp` or test setup is creating a database with a predictable, non-unique name.
+-   **Solution**: Ensure every test instance gets a completely isolated database. Modify your test harness (e.g., `TestApp::spawn`) to use `tempfile::NamedTempFile` or `tempfile::tempdir` to generate a unique database path for *each* test run. This guarantees that tests cannot interfere with each other's state.
 
-#### Step 1: Add Temporary Logging to the Source Code
+    ```rust
+    // In your test harness (e.g., crates/server/tests/common/mod.rs)
+    use tempfile::NamedTempFile;
+
+    pub async fn spawn(test_case_name: &str) -> Result<Self> {
+        // This creates a new, unique temporary file for each call.
+        let db_file = NamedTempFile::new()?;
+        let db_path = db_file.path().to_path_buf();
+
+        // Pass this unique `db_path` to your AppState and config.
+        // ...
+    }
+    ```
+
+#### Problem: Mock Failures (`Request did not match any route or mock`)
+
+-   **Symptom**: The test fails with a message like `AI provider returned an error: {"message":"Request did not match any route or mock"}`.
+-   **Cause**: The HTTP request payload sent by your application code does not **exactly** match the payload you defined in your test's mock, even if they look similar. This can also happen if the application makes an unexpected AI call that you haven't mocked at all (e.g., an ingestion test that also requires mocks for a search workflow).
+-   **Solution**: Follow this workflow to find the exact payload and create a perfect mock.
+
+##### Step 1: Add Temporary Logging to the Source Code
 
 Modify the application code that makes the HTTP call to print the *exact* request body before it's sent. For example, in the `LocalAiProvider`:
 
@@ -134,7 +156,7 @@ let response = request_builder.json(&request_body).send().await;
 // ...
 ```
 
-#### Step 2: Run the Failing Test and Capture the Output
+##### Step 2: Run the Failing Test and Capture the Output
 
 Run the test again. It will still fail, but now the console output will contain the exact, pretty-printed JSON payload that was sent to the mock server.
 
@@ -144,7 +166,7 @@ cargo test -p anyrag-server --test ingest_sheet_test
 
 Look for the `-- AI Request Body:` output in the test logs.
 
-#### Step 3: Compare the Actual Payload with Your Test's Mock
+##### Step 3: Compare the Actual Payload with Your Test's Mock
 
 Carefully compare the logged payload with the one you constructed in your test. You will likely find subtle but critical differences.
 
@@ -179,7 +201,7 @@ Carefully compare the logged payload with the one you constructed in your test. 
 2.  **`user.content`**: The app added a prefix (`# Markdown Content to Process:\n`).
 3.  **Missing Fields**: The actual payload includes `temperature`, `max_tokens`, and `stream`, which were missing from the test's mock.
 
-#### Step 4: Correct the Mock in Your Test
+##### Step 4: Correct the Mock in Your Test
 
 Update the JSON payload in your test to be an exact match of the logged output. Using a precise matcher like `.json_body()` is now possible and highly recommended for robustness.
 
@@ -206,7 +228,7 @@ let restructure_mock = app.mock_server.mock(|when, then| {
 });
 ```
 
-#### Step 5: Remove the Temporary Logging
+##### Step 5: Remove the Temporary Logging
 
 Once the test passes, **remove the `println!` statement** from the application code.
 
