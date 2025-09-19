@@ -28,10 +28,43 @@ async fn test_unified_pdf_ingestion_and_rag_workflow() -> Result<()> {
     let pdf_data = generate_test_pdf(pdf_content)?;
     let final_rag_answer = "AnyRAG is a powerful framework.";
 
-    // --- 2. Mock External Services for the Search Workflow ---
-    // The ingestion pipeline is now simpler and does not require AI refinement/restructuring mocks.
+    let expected_yaml = r#"
+sections:
+  - title: "Test PDF Content"
+    faqs:
+      - question: "What is the magic word?"
+        answer: "The magic word is AnyRAG. It is a powerful framework."
+"#;
+    let mock_metadata = json!({
+        "metadata": [
+            {"type": "ENTITY", "subtype": "PRODUCT", "value": "AnyRAG"}
+        ]
+    })
+    .to_string();
 
-    // A. Mock the Embedding API (for new doc and for search query)
+    // --- 2. Mock External Services ---
+
+    // A. Mocks for Ingestion Phase
+    let restructure_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path(format!("/{test_name}/v1/chat/completions"))
+            .body_contains("expert document analyst and editor");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
+        );
+    });
+
+    let metadata_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path(format!("/{test_name}/v1/chat/completions"))
+            .body_contains("extract Category, Keyphrases, and Entities");
+        then.status(200).json_body(
+            json!({"choices": [{"message": {"role": "assistant", "content": mock_metadata}}]}),
+        );
+    });
+
+    // B. Mocks for Search/Embedding Phase
+    // Mock the Embedding API (for new doc and for search query)
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path(format!("/{test_name}/v1/embeddings"));
@@ -39,7 +72,7 @@ async fn test_unified_pdf_ingestion_and_rag_workflow() -> Result<()> {
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
 
-    // B. Mock the RAG Query Analysis
+    // Mock the RAG Query Analysis
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path(format!("/{test_name}/v1/chat/completions"))
@@ -51,13 +84,13 @@ async fn test_unified_pdf_ingestion_and_rag_workflow() -> Result<()> {
         );
     });
 
-    // C. Mock the final RAG Synthesis call
-    // It should now receive the raw PDF content as context, not structured YAML.
+    // Mock the final RAG Synthesis call
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path(format!("/{test_name}/v1/chat/completions"))
             .body_contains("strict, factual AI")
-            .body_contains(pdf_content); // Expect the raw content in the context
+            // The context will be the chunk extracted from the YAML, not the raw PDF text.
+            .body_contains("What is the magic word?");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
@@ -98,8 +131,8 @@ async fn test_unified_pdf_ingestion_and_rag_workflow() -> Result<()> {
     };
     assert_eq!(
         stored_content.trim(),
-        pdf_content.trim(),
-        "Stored content should be the raw extracted text"
+        expected_yaml.trim(),
+        "Stored content should be the restructured YAML"
     );
 
     // --- 5. Act: Embed the new document ---
@@ -125,6 +158,8 @@ async fn test_unified_pdf_ingestion_and_rag_workflow() -> Result<()> {
     assert_eq!(search_body.result["text"], final_rag_answer);
 
     // --- 7. Assert All Mocks Were Called ---
+    restructure_mock.assert();
+    metadata_mock.assert();
     embedding_mock.assert_hits(2); // Once for ingestion, once for search
     query_analysis_mock.assert();
     rag_synthesis_mock.assert();
