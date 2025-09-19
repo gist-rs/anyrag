@@ -163,7 +163,11 @@ impl Ingestor for SheetsIngestor<'_> {
                 Uuid::new_v5(&Uuid::NAMESPACE_URL, sheet_source.url.as_bytes()).to_string();
             let title = format!("Data from sheet: {}", sheet_source.url);
             conn.execute(
-                "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO documents (id, owner_id, source_url, title, content)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT(source_url) DO UPDATE SET
+                 title = excluded.title,
+                 content = excluded.content",
                 turso::params![
                     document_id.clone(),
                     owner_id,

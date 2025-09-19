@@ -55,7 +55,9 @@ pub async fn ingest_faq_from_google_sheet(
     conn.execute(
         "INSERT INTO documents (id, owner_id, source_url, title, content)
          VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(source_url) DO NOTHING",
+         ON CONFLICT(source_url) DO UPDATE SET
+         title = excluded.title,
+         content = excluded.content",
         params![
             document_id.clone(),
             owner_id,

@@ -136,8 +136,11 @@ async fn run_pdf_ingestion_pipeline(
     let title: String = refined_markdown.chars().take(80).collect();
 
     conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(source_url) DO UPDATE SET content=excluded.content, title=excluded.title",
+        "INSERT INTO documents (id, owner_id, source_url, title, content)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(source_url) DO UPDATE SET
+         title = excluded.title,
+         content = excluded.content",
         params![
             document_id.clone(),
             owner_id,

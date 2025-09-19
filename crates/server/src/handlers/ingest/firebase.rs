@@ -172,8 +172,18 @@ pub async fn ingest_firebase_handler(
         let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, source_url.as_bytes()).to_string();
 
         conn.execute(
-            "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
-            turso::params![document_id.clone(), owner_id.clone(), source_url, title, document_content.clone()],
+            "INSERT INTO documents (id, owner_id, source_url, title, content)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(source_url) DO UPDATE SET
+             title = excluded.title,
+             content = excluded.content",
+            turso::params![
+                document_id.clone(),
+                owner_id.clone(),
+                source_url,
+                title,
+                document_content.clone()
+            ],
         )
         .await?;
 

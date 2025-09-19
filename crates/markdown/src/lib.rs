@@ -116,7 +116,11 @@ impl Ingestor for MarkdownIngestor {
             let title: String = chunk.chars().take(80).collect();
 
             tx.execute(
-                "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO documents (id, owner_id, source_url, title, content)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON CONFLICT(source_url) DO UPDATE SET
+                 title = excluded.title,
+                 content = excluded.content",
                 params![
                     document_id.clone(),
                     owner_id,
@@ -124,7 +128,8 @@ impl Ingestor for MarkdownIngestor {
                     title,
                     chunk.clone()
                 ],
-            ).await?;
+            )
+            .await?;
             ingested_ids.push(document_id);
         }
         tx.commit().await?;

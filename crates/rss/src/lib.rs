@@ -107,7 +107,9 @@ impl Ingestor for RssIngestor {
                     .prepare(
                         "INSERT INTO documents (id, owner_id, source_url, title, content)
                          VALUES (?, ?, ?, ?, ?)
-                         ON CONFLICT(source_url) DO NOTHING",
+                         ON CONFLICT(source_url) DO UPDATE SET
+                         title = excluded.title,
+                         content = excluded.content",
                     )
                     .await
                     .map_err(RssIngestError::from)?;

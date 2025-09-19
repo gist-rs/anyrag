@@ -144,7 +144,11 @@ pub async fn ingest_chunks_as_documents(
         let title: String = chunk.chars().take(80).collect();
 
         tx.execute(
-            "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO documents (id, owner_id, source_url, title, content)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(source_url) DO UPDATE SET
+             title = excluded.title,
+             content = excluded.content",
             params![
                 document_id.clone(),
                 owner_id,
@@ -152,7 +156,8 @@ pub async fn ingest_chunks_as_documents(
                 title,
                 chunk.clone()
             ],
-        ).await?;
+        )
+        .await?;
         new_document_ids.push(document_id);
     }
 
