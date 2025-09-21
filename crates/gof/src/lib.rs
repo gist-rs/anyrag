@@ -186,19 +186,16 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
                 embedding_api_key: api_key,
             };
 
-            println!("  -> Starting ingestion for {}@{}", url, version);
+            println!("  -> Starting ingestion for {url}@{version}");
             let result = anyrag_github::run_github_ingestion(&storage_manager_clone, task).await;
 
             match result {
                 Ok((count, ingested_version)) => {
-                    println!(
-                        "  ✅ Finished {}@{}: Ingested {} examples.",
-                        url, ingested_version, count
-                    );
+                    println!("  ✅ Finished {url}@{ingested_version}: Ingested {count} examples.");
                     Ok(())
                 }
                 Err(e) => {
-                    eprintln!("  ❌ Error ingesting {}@{}: {:?}", url, version, e);
+                    eprintln!("  ❌ Error ingesting {url}@{version}: {e:?}");
                     Err(anyhow!("Ingestion failed for {}", url))
                 }
             }
@@ -214,9 +211,9 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
     let fail_count = results.len() - success_count;
 
     println!("\n✨ Ingestion complete.");
-    println!("   - {} repositories succeeded.", success_count);
+    println!("   - {success_count} repositories succeeded.");
     if fail_count > 0 {
-        println!("   - {} repositories failed.", fail_count);
+        println!("   - {fail_count} repositories failed.");
     }
 
     Ok(())
@@ -263,7 +260,7 @@ async fn handle_mcp(args: McpArgs) -> Result<()> {
     match result {
         Ok(response_json) => {
             // On success, print JSON to stdout.
-            println!("{}", response_json);
+            println!("{response_json}");
             Ok(())
         }
         Err(e) => {

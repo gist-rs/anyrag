@@ -26,7 +26,7 @@ async fn main() -> Result<()> {
     // 3. Call the library's run function and handle the final result
     if let Err(e) = run(cli).await {
         // Use debug formatting for more detailed error context
-        eprintln!("[gof error] Failed to execute command: {:?}", e);
+        eprintln!("[gof error] Failed to execute command: {e:?}");
         std::process::exit(1);
     }
 

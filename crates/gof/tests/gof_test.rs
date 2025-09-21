@@ -4,7 +4,6 @@ use anyhow::Result;
 use gof::{format_mcp_response, parse_dependencies, McpSearchResult, McpSuccessResponse};
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
 use tempfile::tempdir;
 
 #[test]
@@ -27,7 +26,7 @@ thiserror = { version = "1.0" }
     file.write_all(content.as_bytes())?;
 
     // Act
-    let mut deps = parse_dependencies(&PathBuf::from(file_path))?;
+    let mut deps = parse_dependencies(&file_path)?;
     deps.sort_by(|a, b| a.0.cmp(&b.0)); // Sort for deterministic assertion
 
     // Assert
@@ -53,8 +52,7 @@ fn test_parse_dependencies_file_not_found() {
     let error_message = result.unwrap_err().to_string();
     assert!(
         error_message.contains("Failed to read Cargo.toml"),
-        "Unexpected error message: {}",
-        error_message
+        "Unexpected error message: {error_message}"
     );
 }
 
@@ -75,8 +73,7 @@ fn test_parse_dependencies_malformed_toml() {
     let error_message = result.unwrap_err().to_string();
     assert!(
         error_message.contains("Failed to parse TOML"),
-        "Unexpected error message: {}",
-        error_message
+        "Unexpected error message: {error_message}"
     );
 }
 
