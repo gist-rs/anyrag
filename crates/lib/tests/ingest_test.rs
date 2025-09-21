@@ -3,8 +3,7 @@
 //! This file contains integration tests for the text chunking logic
 //! provided in the `anyrag` library.
 
-// The chunking logic is in a submodule, so we need to specify the path.
-use anyrag::ingest::text::{chunk_text, IngestError};
+use anyrag_text::{chunk_text, TextIngestError};
 
 // It's good practice to define constants used in tests, especially if they
 // mirror constants in the implementation, to catch accidental changes.
@@ -26,7 +25,7 @@ fn test_chunk_text_simple() {
 fn test_chunk_text_empty_input() {
     let text = "";
     let result = chunk_text(text);
-    assert!(matches!(result, Err(IngestError::EmptyContent)));
+    assert!(matches!(result, Err(TextIngestError::EmptyContent)));
 }
 
 /// Verifies that an input string containing only whitespace is correctly identified
@@ -35,7 +34,7 @@ fn test_chunk_text_empty_input() {
 fn test_chunk_text_whitespace_input() {
     let text = "   \t\n  ";
     let result = chunk_text(text);
-    assert!(matches!(result, Err(IngestError::EmptyContent)));
+    assert!(matches!(result, Err(TextIngestError::EmptyContent)));
 }
 
 /// Verifies that a single, very long paragraph that exceeds the `CHUNK_SIZE_LIMIT`

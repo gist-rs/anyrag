@@ -4,7 +4,10 @@
 
 use super::{wrap_response, ApiResponse, AppError, DebugParams};
 use crate::state::AppState;
-use anyrag::providers::db::{sqlite::SqliteProvider, storage::Storage};
+use anyrag::{
+    constants,
+    providers::db::{sqlite::SqliteProvider, storage::Storage},
+};
 use axum::{
     extract::{Query, State},
     Json,
@@ -40,7 +43,7 @@ pub async fn db_query_handler(
     }
 
     // Dynamically create a provider for the requested project's database.
-    let db_path = format!("db/{}.db", payload.db);
+    let db_path = format!("{}/{}.db", constants::DB_DIR, payload.db);
     let sqlite_provider = SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?; // Ensure tables exist
 

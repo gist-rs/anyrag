@@ -7,9 +7,9 @@
 mod common;
 
 use anyhow::Result;
+use anyrag_github::ingest::storage::StorageManager;
 use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
-use github::ingest::storage::StorageManager;
 use httpmock::Method;
 use serde_json::{json, Value};
 use std::fs;
@@ -92,13 +92,14 @@ fn create_mock_git_repo(
 #[tokio::test]
 async fn test_search_across_multiple_repos_e2e() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_search_across_multiple_repos_e2e").await?;
     let user_identifier = "github-search-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
     // A. Mock the embedding API for the ingestion process. It will be called for each repo.
     let mut ingest_embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_search_across_multiple_repos_e2e/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3, 0.4] }] }));
     });
@@ -133,10 +134,14 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
     ingest_embedding_mock.delete();
 
     // D. Manually update embeddings for the ingested examples to have known vectors.
-    let db_a_path = format!("db/github_ingest/{repo_a_name}.db");
-    let db_b_path = format!("db/github_ingest/{repo_b_name}.db");
-    let db_a = Builder::new_local(&db_a_path).build().await?;
-    let db_b = Builder::new_local(&db_b_path).build().await?;
+    let db_a_path = app.github_db_dir.join(format!("{repo_a_name}.db"));
+    let db_b_path = app.github_db_dir.join(format!("{repo_b_name}.db"));
+    let db_a = Builder::new_local(db_a_path.to_str().unwrap())
+        .build()
+        .await?;
+    let db_b = Builder::new_local(db_b_path.to_str().unwrap())
+        .build()
+        .await?;
     let (conn_a, conn_b) = (db_a.connect()?, db_b.connect()?);
 
     let vector_a = [1.0, 0.0, 0.0]; // "database" vector
@@ -162,7 +167,8 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
     // E. Mock the embedding API for the search query.
     let query_vector = vec![0.99, 0.01, 0.0];
     let search_embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_search_across_multiple_repos_e2e/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": query_vector }] }));
     });
@@ -172,7 +178,7 @@ async fn test_search_across_multiple_repos_e2e() -> Result<()> {
     // github::search_examples function uses its own specific system prompt. We must match that one.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_search_across_multiple_repos_e2e/v1/chat/completions")
             // This substring is unique to the GITHUB_EXAMPLE_SEARCH_ANALYSIS_SYSTEM_PROMPT
             .body_contains("expert code search analyst");
         then.status(200).json_body(json!({

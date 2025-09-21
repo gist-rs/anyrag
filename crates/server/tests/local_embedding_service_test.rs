@@ -15,14 +15,14 @@ use serde_json::json;
 #[tokio::test]
 async fn test_app_calls_embedding_service() -> Result<()> {
     // 1. Arrange
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_app_calls_embedding_service").await?;
     let mock_vector = vec![0.1, 0.2, 0.3];
 
     // 2. Mock the embedding service endpoint.
     // This is the service our app will call.
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/embeddings")
+            .path("/test_app_calls_embedding_service/v1/embeddings")
             .body_contains("test query");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": mock_vector }] }));

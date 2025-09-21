@@ -2,7 +2,7 @@
 //!
 //! This file contains tests for the `Extractor` module in the `github_ingest` crate.
 
-use github::ingest::{extractor::Extractor, types::ExampleSourceType};
+use anyrag_github::ingest::{extractor::Extractor, types::ExampleSourceType};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;

@@ -18,6 +18,7 @@
 //! `RUST_LOG=info cargo run -p anyrag-server --example sheet_faq_date_sensitive`
 
 use anyhow::{bail, Result};
+use anyrag::constants;
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
@@ -54,9 +55,9 @@ async fn main() -> Result<()> {
     dotenvy::from_path(".env").ok();
     info!("Environment variables loaded.");
 
-    let db_path = "db/anyrag_sheet_faq_date.db";
-    cleanup_db(db_path).await?;
-    std::env::set_var("DB_URL", db_path);
+    let db_path = format!("{}/anyrag_sheet_faq_date.db", constants::DB_DIR);
+    cleanup_db(&db_path).await?;
+    std::env::set_var("DB_URL", &db_path);
 
     // When running examples from the workspace root, we need to point to the config file.
     let config_path = "crates/server/config.yml";
@@ -106,9 +107,9 @@ async fn main() -> Result<()> {
         Ok(Json(response)) => {
             info!(
                 "Ingestion successful. Stored {} new FAQs.",
-                response.result.ingested_faqs
+                response.result.ingested_chunks
             );
-            if response.result.ingested_faqs == 0 {
+            if response.result.ingested_chunks == 0 {
                 bail!("No FAQs were ingested. The sheet might be empty or already processed.");
             }
         }
@@ -135,10 +136,16 @@ async fn main() -> Result<()> {
     // --- 4. Ask a Question using RAG ---
     info!("--- Asking Date-Sensitive Question against Sheet Knowledge ---");
     let question = "What is the current hobby?";
+    let db_name = std::path::Path::new(&db_path)
+        .file_stem()
+        .and_then(std::ffi::OsStr::to_str)
+        .map(String::from);
     let search_payload = SearchRequest {
+        db: db_name,
         query: question.to_string(),
+        model: None,
+        limit: Some(5),
         instruction: None,
-        limit: Some(3),
         mode: Default::default(),
         use_knowledge_graph: Some(false),
     };

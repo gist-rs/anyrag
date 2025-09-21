@@ -7,10 +7,8 @@
 mod common;
 
 use anyhow::Result;
-use anyrag_server::{
-    config::{get_config, AppConfig},
-    state::build_app_state,
-};
+use anyrag::types::AppConfig;
+use anyrag_server::{config::get_config, state::build_app_state};
 use common::TestApp;
 use httpmock::{Method, MockServer};
 use serde_json::json;
@@ -29,6 +27,7 @@ async fn test_yaml_overrides_default_prompts() -> Result<()> {
     let temp_dir = tempdir()?;
     let config_path = temp_dir.path().join("config.yml");
 
+    let test_name = "test_yaml_overrides_default_prompts";
     let override_system_prompt = "You are a pirate AI. Answer me question, matey!";
     let override_user_prompt =
         "Arr, what be the answer to this riddle: {prompt} from this here map: {context}";
@@ -54,8 +53,8 @@ tasks:
     user_prompt: "{}"
 "#,
         db_path.to_str().unwrap(),
-        mock_server.url("/v1/embeddings"),
-        mock_server.url("/v1/chat/completions"),
+        mock_server.url(format!("/{test_name}/v1/embeddings")),
+        mock_server.url(format!("/{test_name}/v1/chat/completions")),
         override_system_prompt,
         override_user_prompt
     );
@@ -70,7 +69,7 @@ tasks:
     // --- 4. Mock the AI response ---
     let rag_synthesis_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path(format!("/{test_name}/v1/chat/completions"))
             .body_contains("You are a pirate AI.")
             .body_contains("Arr, what be the answer to this riddle:");
         then.status(200).json_body(
@@ -118,13 +117,14 @@ async fn test_default_prompts_are_used_when_no_override() -> Result<()> {
     // --- 1. Arrange ---
     // Spawn a TestApp. It creates an AppState with NO YAML overrides, so it will
     // use the hardcoded defaults from the library.
-    let app = TestApp::spawn().await?;
+    let test_name = "test_default_prompts_are_used_when_no_override";
+    let app = TestApp::spawn(test_name).await?;
 
     // --- 2. Mock the AI response for the default prompt ---
     let default_rag_system_prompt = "You are a strict, factual AI.";
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path(format!("/{test_name}/v1/chat/completions"))
             .body_contains(default_rag_system_prompt);
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": "The data indicates the value is 42."}}]}),

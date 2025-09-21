@@ -7,18 +7,29 @@
 mod common;
 
 use anyhow::Result;
+use anyrag_github::ingest::storage::StorageManager;
 use anyrag_server::types::ApiResponse;
 use common::{generate_jwt, TestApp};
-use github::ingest::storage::StorageManager;
 use httpmock::Method;
 use serde_json::{json, Value};
 use std::fs;
 use std::process::Command;
 use tempfile::tempdir;
+use tracing::info;
 use turso::Builder;
+
+// Helper to initialize the tracing subscriber for debugging.
+fn init_subscriber() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("info,anyrag_server=trace,anyrag_github=trace")
+        .compact()
+        .try_init();
+}
 
 #[tokio::test]
 async fn test_github_ingestion_e2e_workflow() -> Result<()> {
+    init_subscriber();
+    info!("Starting test_github_ingestion_e2e_workflow");
     // --- 1. Arrange & Setup ---
     // Create a temporary directory to act as a bare remote git repository.
     let remote_repo_dir = tempdir()?;
@@ -104,19 +115,22 @@ version = "0.1.0-test"
         .then_some(())
         .ok_or_else(|| anyhow::anyhow!("Failed to push to remote"))?;
 
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_github_ingestion_e2e_workflow").await?;
     let user_identifier = "github-ingest-user@example.com";
     let token = generate_jwt(user_identifier)?;
 
     // --- 2. Mock Services ---
+    info!("Setting up mocks");
     // The ingestion process now automatically creates embeddings. We need to mock this.
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_github_ingestion_e2e_workflow/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
 
     // --- 3. Act ---
+    info!("Sending ingest request");
     // Send a request to the `/ingest/github` endpoint.
     let remote_url_str = remote_repo_path.to_str().unwrap();
     let response = app
@@ -130,8 +144,10 @@ version = "0.1.0-test"
         .send()
         .await?
         .error_for_status()?;
+    info!("Ingest request complete");
 
     // --- 4. Assert API Response ---
+    info!("Asserting API response");
     let body: ApiResponse<Value> = response.json().await?;
     assert_eq!(
         body.result["ingested_examples"], 1,
@@ -142,12 +158,12 @@ version = "0.1.0-test"
         .unwrap()
         .contains("completed successfully"));
     embedding_mock.assert();
+    info!("API response asserted");
 
     // --- 5. Assert Database State ---
     let repo_name = StorageManager::url_to_repo_name(remote_url_str);
-    let db_path = format!("db/github_ingest/{repo_name}.db");
-    let db_dir = "db/github_ingest";
-    fs::create_dir_all(db_dir)?;
+    let github_db_dir = app.app_state.config.github_db_dir.as_ref().unwrap();
+    let db_path = format!("{github_db_dir}/{repo_name}.db");
     let db = Builder::new_local(&db_path).build().await?;
     let conn = db.connect()?;
     let mut stmt = conn
@@ -169,22 +185,19 @@ version = "0.1.0-test"
         "Version should have been parsed from Cargo.toml"
     );
     assert_eq!(source_type, "readme");
+    info!("Database state asserted. Test finished.");
 
     Ok(())
 }
 
 #[tokio::test]
 async fn test_get_examples_endpoint_success() -> Result<()> {
+    init_subscriber();
+    info!("Starting test_get_examples_endpoint_success");
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_get_examples_endpoint_success").await?;
     let user_identifier = "get-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
-
-    let db_dir = "db/github_ingest";
-    if fs::metadata(db_dir).is_ok() {
-        fs::remove_dir_all(db_dir)?;
-    }
-    fs::create_dir_all(db_dir)?;
 
     let remote_repo_dir = tempdir()?;
     let remote_repo_path = remote_repo_dir.path();
@@ -254,8 +267,10 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
     let remote_url_str = remote_repo_path.to_str().unwrap();
 
     // --- 2. Mock and Ingest ---
+    info!("Setting up mocks and ingesting");
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_get_examples_endpoint_success/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
@@ -271,8 +286,10 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
         .await?
         .error_for_status()?;
     embedding_mock.assert();
+    info!("Ingestion complete");
 
     // --- 3. Act: Get the examples ---
+    info!("Getting examples");
     let repo_name = StorageManager::url_to_repo_name(remote_url_str);
     let response = app
         .client
@@ -280,28 +297,27 @@ async fn test_get_examples_endpoint_success() -> Result<()> {
         .send()
         .await?
         .error_for_status()?;
+    info!("Get examples complete");
 
     // --- 4. Assert ---
+    info!("Asserting response");
     let body: ApiResponse<Value> = response.json().await?;
     let content = body.result["content"].as_str().unwrap();
     assert!(content.contains("fn hello() {}"));
     assert!(content.contains("**Source:** `README.md` (`readme`)"));
+    info!("Response asserted. Test finished.");
 
     Ok(())
 }
 
 #[tokio::test]
 async fn test_search_examples_e2e() -> Result<()> {
+    init_subscriber();
+    info!("Starting test_search_examples_e2e");
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_search_examples_e2e").await?;
     let user_identifier = "search-examples-user@example.com";
     let token = generate_jwt(user_identifier)?;
-
-    let db_dir = "db/github_ingest";
-    if fs::metadata(db_dir).is_ok() {
-        fs::remove_dir_all(db_dir)?;
-    }
-    fs::create_dir_all(db_dir)?;
 
     let remote_repo_dir = tempdir()?;
     let remote_repo_path = remote_repo_dir.path();
@@ -367,10 +383,24 @@ async fn test_search_examples_e2e() -> Result<()> {
     let repo_name = StorageManager::url_to_repo_name(remote_url_str);
 
     // --- 2. Mock, Ingest, and Search ---
+    info!("Setting up mocks, ingesting, and searching");
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_search_examples_e2e/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [1.0, 0.0, 0.0] }] }));
+    });
+
+    let query_analysis_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_search_examples_e2e/v1/chat/completions")
+            .body_contains("expert code search analyst");
+        then.status(200).json_body(json!({
+            "choices": [{"message": {"role": "assistant", "content": json!({
+                "entities": ["connect"],
+                "keyphrases": []
+            }).to_string()}}]
+        }));
     });
 
     app.client
@@ -392,9 +422,12 @@ async fn test_search_examples_e2e() -> Result<()> {
         .send()
         .await?
         .error_for_status()?;
+    info!("Ingest and search complete");
 
     // --- 3. Assert ---
+    info!("Asserting response");
     embedding_mock.assert_hits(2); // 1 for ingest, 1 for search
+    query_analysis_mock.assert();
     let body: ApiResponse<Value> = response.json().await?;
     let results = body.result["results"].as_array().unwrap();
     assert_eq!(results.len(), 1, "Expected one search result.");
@@ -402,6 +435,7 @@ async fn test_search_examples_e2e() -> Result<()> {
         .as_str()
         .unwrap()
         .contains("fn connect() {}"));
+    info!("Response asserted. Test finished.");
 
     Ok(())
 }

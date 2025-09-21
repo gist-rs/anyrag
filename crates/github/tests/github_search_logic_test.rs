@@ -6,14 +6,14 @@
 // Make the common module available.
 mod common;
 
-use common::{setup_mock_embedding_server, setup_tracing, MockAiProvider};
-use github::{
+use anyrag_github::{
     ingest::{
         storage::StorageManager,
         types::{ExampleSourceType, GeneratedExample},
     },
     search_examples,
 };
+use common::{setup_mock_embedding_server, setup_tracing, MockAiProvider};
 use serde_json::json;
 use std::sync::Arc;
 use tempfile::{tempdir, TempDir};
@@ -26,7 +26,7 @@ async fn setup_database_with_mock_data() -> (StorageManager, String, TempDir) {
     let db_path_str = db_dir.path().to_str().unwrap();
 
     // 2. Initialize the storage manager.
-    let storage = StorageManager::new(db_path_str)
+    let storage = StorageManager::new(Some(db_path_str))
         .await
         .expect("Failed to create StorageManager");
 

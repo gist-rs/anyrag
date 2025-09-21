@@ -12,7 +12,13 @@ path = "src/main.rs"
 # Internal Crate
 anyrag = { path = "../lib", features = ["core-access", "rss"] }
 core-access = { path = "../core-access" }
-github = { path = "../github" }
+anyrag-github = { path = "../github" }
+anyrag-web = { path = "../web" }
+anyrag-pdf = { path = "../pdf" }
+anyrag-rss = { path = "../rss" }
+anyrag-sheets = { path = "../sheets" }
+anyrag-text = { path = "../text" }
+anyrag-firebase = { path = "../firebase" }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }
@@ -35,15 +41,16 @@ turso = { workspace = true }
 # Other
 dotenvy = { workspace = true }
 anyhow = { workspace = true }
+base64 = { workspace = true }
 reqwest = { workspace = true, features = ["json", "multipart"] }
 chrono.workspace = true
 regex = { workspace = true }
 md5 = { workspace = true }
 
 # Config
-config = { version = "0.15.15", features = ["yaml"] }
+config = { version = "0.15.16", features = ["yaml"] }
 uuid = { workspace = true }
-futures = "0.3.30"
+futures = "0.3.31"
 
 [features]
 default = ["bigquery", "graph_db", "rss", "firebase"]
@@ -53,14 +60,14 @@ rss = ["anyrag/rss"]
 firebase = ["anyrag/firebase"]
 
 [dev-dependencies]
+anyrag-test-utils = { path = "../test-utils", features = ["pdf"] }
 chrono = { workspace = true }
 httpmock = "0.7.0"
 jsonwebtoken = "9.3.1"
-tempfile = "3.21.0"
+tempfile = "3.22.0"
 turso = { workspace = true }
 regex = { workspace = true }
 serial_test = "3.2.0"
-pdf-writer = "0.13.0"
 uuid = { workspace = true }
 
 [[test]]
@@ -74,8 +81,8 @@ path = "tests/server_test.rs"
 harness = true
 
 [[test]]
-name = "ingest_test"
-path = "tests/ingest_test.rs"
+name = "ingest_rss_test"
+path = "tests/ingest_rss_test.rs"
 harness = true
 
 [[test]]
@@ -138,6 +145,7 @@ name = "github_search_test"
 path = "tests/github_search_test.rs"
 harness = true
 
-[[example]]
-name = "backfill_metadata"
-path = "examples/backfill_metadata.rs"
+[[test]]
+name = "ingest_sheet_test"
+path = "tests/ingest_sheet_test.rs"
+harness = true

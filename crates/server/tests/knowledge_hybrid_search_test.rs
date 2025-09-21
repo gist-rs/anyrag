@@ -16,7 +16,7 @@ use serde_json::{json, Value};
 #[tokio::test]
 async fn test_knowledge_hybrid_search_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_knowledge_hybrid_search_workflow").await?;
     let user_identifier = "test-user-khs@example.com";
     let db = &app.app_state.sqlite_provider.db;
     let user = get_or_create_user(db, user_identifier, None).await?;
@@ -92,7 +92,7 @@ sections:
     // --- 4. Mock External Services ---
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_knowledge_hybrid_search_workflow/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{
@@ -109,7 +109,7 @@ sections:
 
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/embeddings")
+            .path("/test_knowledge_hybrid_search_workflow/v1/embeddings")
             .body_contains("complex Quantum Widget");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": vec![0.5, 0.5, 0.0, 0.0] }] }));
@@ -120,7 +120,7 @@ sections:
     // search should retrieve and format.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_knowledge_hybrid_search_workflow/v1/chat/completions")
             .body_contains("strict, factual AI") // From RAG_SYNTHESIS_SYSTEM_PROMPT
             .body_contains("## How does the Quantum Widget work?") // From the first chunk
             .body_contains("## What is the method for advanced data processing?"); // From the second chunk

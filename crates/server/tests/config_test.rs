@@ -8,6 +8,7 @@
 mod config;
 
 use self::config::{get_config, ConfigError};
+use anyrag::constants;
 use serial_test::serial;
 use std::env;
 use std::fs::File;
@@ -121,7 +122,7 @@ tasks:
         get_config(Some(&fixture.config_path)).expect("Configuration should load successfully");
 
     assert_eq!(config.port, 8080);
-    assert_eq!(config.db_url, "db/anyrag.db");
+    assert_eq!(config.db_url, constants::DEFAULT_DB_FILE);
     let provider = config.providers.get("test_provider").unwrap();
     assert_eq!(provider.api_key, Some("my_secret_key".to_string()));
 }

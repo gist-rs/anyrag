@@ -21,10 +21,10 @@ pub enum PromptError {
     StorageOperationFailed(String),
     #[error("The 'bigquery' feature is not enabled.")]
     BigQueryFeatureNotEnabled,
-    #[error("AI provider is missing")]
-    MissingAiProvider,
-    #[error("Storage provider is missing")]
-    MissingStorageProvider,
+    #[error("AI provider is missing: {0}")]
+    MissingAiProvider(String),
+    #[error("Storage provider is missing: {0}")]
+    MissingStorageProvider(String),
     #[error("Regex error: {0}")]
     Regex(#[from] regex::Error),
     #[error("Failed to serialize result to JSON: {0}")]
@@ -42,5 +42,11 @@ impl From<FirestoreError> for PromptError {
 impl From<BQError> for PromptError {
     fn from(err: BQError) -> Self {
         PromptError::StorageOperationFailed(err.to_string())
+    }
+}
+
+impl From<String> for PromptError {
+    fn from(s: String) -> Self {
+        PromptError::StorageOperationFailed(s)
     }
 }

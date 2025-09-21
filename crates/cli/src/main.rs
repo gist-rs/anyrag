@@ -5,8 +5,10 @@
 mod auth;
 mod firebase;
 mod process;
-
 use anyhow::{bail, Result};
+
+use anyrag::constants;
+use anyrag_github::cli::{handle_dump_github, GithubArgs};
 use clap::{Parser, Subcommand};
 use keyring::Entry;
 use std::fs;
@@ -54,7 +56,7 @@ enum DumpCommands {
     Firebase(firebase::FirebaseArgs),
     /// Dump examples from a public GitHub repository
     #[command(disable_version_flag = true)]
-    Github(github::cli::GithubArgs),
+    Github(GithubArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -143,7 +145,7 @@ async fn handle_dump(args: &DumpArgs) -> Result<()> {
             firebase::handle_dump_firebase(firebase_args).await?;
         }
         DumpCommands::Github(github_args) => {
-            github::cli::handle_dump_github(github_args).await?;
+            handle_dump_github(github_args).await?;
         }
     }
     Ok(())
@@ -155,7 +157,7 @@ async fn handle_process(args: &process::ProcessArgs) -> Result<()> {
 
 async fn handle_list(args: &ListArgs) -> Result<()> {
     let project_id = firebase::resolve_project_id(args.project_id.as_deref())?;
-    let db_path = format!("db/{project_id}.db");
+    let db_path = format!("{}/{project_id}.db", constants::DB_DIR);
     if !Path::new(&db_path).exists() {
         bail!("Database file '{db_path}' not found. Run a `dump` command first for project '{project_id}'.");
     }
@@ -215,7 +217,7 @@ async fn handle_list(args: &ListArgs) -> Result<()> {
 
 async fn handle_count(args: &CountArgs) -> Result<()> {
     let project_id = firebase::resolve_project_id(args.project_id.as_deref())?;
-    let db_path = format!("db/{project_id}.db");
+    let db_path = format!("{}/{project_id}.db", constants::DB_DIR);
     if !Path::new(&db_path).exists() {
         bail!("Database file '{db_path}' not found. Run a `dump` command first for project '{project_id}'.");
     }

@@ -19,7 +19,7 @@ use turso::{params, Builder};
 #[cfg(feature = "graph_db")]
 async fn test_knowledge_graph_endpoint_e2e() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_knowledge_graph_endpoint_e2e").await?;
 
     // Define time windows for the facts
     let now = Utc::now();
@@ -80,7 +80,7 @@ async fn test_knowledge_graph_endpoint_e2e() -> Result<()> {
 #[cfg(feature = "graph_db")]
 async fn test_hybrid_search_with_knowledge_graph_context() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_hybrid_search_with_knowledge_graph_context").await?;
     let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
@@ -149,7 +149,7 @@ sections:
     // Mock services
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_hybrid_search_with_knowledge_graph_context/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{
@@ -166,7 +166,7 @@ sections:
 
     let embedding_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/embeddings")
+            .path("/test_hybrid_search_with_knowledge_graph_context/v1/embeddings")
             .body_contains(unique_subject);
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3, 0.0] }] }));
@@ -174,7 +174,7 @@ sections:
 
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_hybrid_search_with_knowledge_graph_context/v1/chat/completions")
             .body_contains("strict, factual AI")
             .body_matches(
                 regex::Regex::new(&format!(
@@ -214,7 +214,7 @@ sections:
 #[cfg(feature = "graph_db")]
 async fn test_kg_provides_more_precise_answer_harry_potter() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_kg_provides_more_precise_answer_harry_potter").await?;
     let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
@@ -306,7 +306,7 @@ sections:
     // --- 4. Mock External Services ---
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_kg_provides_more_precise_answer_harry_potter/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{
@@ -322,14 +322,15 @@ sections:
     });
 
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_kg_provides_more_precise_answer_harry_potter/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.5, 0.5, 0.5, 0.0] }] }));
     });
 
     let rag_without_kg_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_kg_provides_more_precise_answer_harry_potter/v1/chat/completions")
             .body_contains(generic_answer_seed)
             .matches(|req| !String::from_utf8_lossy(req.body.as_deref().unwrap_or_default()).contains("Head of Magical Law Enforcement"));
         then.status(200).json_body(
@@ -339,7 +340,7 @@ sections:
 
     let rag_with_kg_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_kg_provides_more_precise_answer_harry_potter/v1/chat/completions")
             .body_contains(present_role_seed)
             .body_contains(generic_answer_seed);
         then.status(200).json_body(

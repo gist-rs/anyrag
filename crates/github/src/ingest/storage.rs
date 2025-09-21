@@ -4,6 +4,7 @@
 //! repository metadata and extracted code examples, as outlined in `PLAN.md`.
 
 use super::types::{GeneratedExample, GitHubIngestError, TrackedRepository};
+use anyrag::constants;
 use anyrag::providers::db::sqlite::SqliteProvider;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -25,11 +26,20 @@ impl StorageManager {
     /// Creates a new `StorageManager` and initializes the main metadata database.
     ///
     /// # Arguments
-    /// * `base_db_dir`: The directory where all databases (meta and repo-specific) will be stored.
-    pub async fn new(base_db_dir: &str) -> Result<Self, GitHubIngestError> {
-        let db_dir = Path::new(base_db_dir);
+    /// * `base_db_dir`: An optional directory where all databases will be stored.
+    ///   If `None`, defaults to the path specified in `anyrag::constants::GITHUB_DB_DIR`.
+    pub async fn new(base_db_dir: Option<&str>) -> Result<Self, GitHubIngestError> {
+        let db_dir_path = base_db_dir
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(constants::GITHUB_DB_DIR));
+        let db_dir = db_dir_path.as_path();
         fs::create_dir_all(db_dir)?;
-        let meta_db_path = db_dir.join(META_DB_NAME);
+        // If DB_URL is set (e.g., in an example), use it directly. Otherwise, use the default.
+        let meta_db_path = if let Ok(db_url) = std::env::var("DB_URL") {
+            PathBuf::from(db_url)
+        } else {
+            db_dir.join(META_DB_NAME)
+        };
 
         let provider = SqliteProvider::new(meta_db_path.to_str().unwrap()).await?;
         Self::initialize_main_db(&provider).await?;

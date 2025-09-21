@@ -5,9 +5,9 @@
 //! that decides the best method to retrieve context for generation.
 
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptResponse};
-use crate::{auth::middleware::AuthenticatedUser, providers::create_dynamic_provider};
+use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
-    providers::db::sqlite::SqliteProvider,
+    providers::{db::sqlite::SqliteProvider, factory::create_dynamic_provider},
     search::{hybrid_search, HybridSearchOptions, HybridSearchPrompts},
     types::{ExecutePromptOptions as LibExecutePromptOptions, PromptClientBuilder},
 };
@@ -15,51 +15,12 @@ use axum::{
     extract::{Query, State},
     Json,
 };
-use serde::{Deserialize, Serialize};
+
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tracing::{debug, info};
 
-// --- API Payloads for Generation Handlers ---
-
-fn default_true() -> bool {
-    true
-}
-
-#[derive(Deserialize, Debug)]
-pub struct GenTextRequest {
-    #[serde(default)]
-    pub db: Option<String>,
-    pub generation_prompt: String,
-    #[serde(default)]
-    pub context_prompt: Option<String>,
-    #[serde(default)]
-    pub model: Option<String>,
-
-    // New Control Flags
-    #[serde(default)]
-    pub use_sql: bool,
-    #[serde(default)]
-    pub use_knowledge_search: bool,
-    #[serde(default = "default_true")]
-    pub use_keyword_search: bool,
-    #[serde(default = "default_true")]
-    pub use_vector_search: bool,
-    pub rerank_limit: Option<u32>,
-}
-
-#[derive(Deserialize, Serialize, Debug)]
-struct AgentDecision {
-    tool: String,
-    query: String,
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-struct DeconstructedQuery {
-    search_query: String,
-    #[serde(default)]
-    pub generative_intent: String,
-}
+use super::generation_types::{AgentDecision, DeconstructedQuery, GenTextRequest};
 
 // --- Generation Handlers ---
 
@@ -86,7 +47,7 @@ pub async fn gen_text_handler(
             "Request specified db: '{}'. Creating dynamic SQLite provider.",
             db_name_str
         );
-        let db_path = format!("db/{db_name_str}.db");
+        let db_path = format!("{}/{db_name_str}.db", anyrag::constants::DB_DIR);
         let provider = SqliteProvider::new(&db_path).await?;
         provider.initialize_schema().await?;
         (Arc::new(provider), db_name_str)
@@ -304,7 +265,7 @@ pub async fn gen_text_handler(
     // --- Stage 2: Content Generation ---
     let gen_task_config = app_state.tasks.get("direct_generation").unwrap();
     let (generation_provider, model_used_name) = if let Some(model_name) = &payload.model {
-        create_dynamic_provider(&app_state, model_name).await?
+        create_dynamic_provider(&app_state.config.providers, model_name)?
     } else {
         let provider_name = &gen_task_config.provider;
         let provider = app_state.ai_providers.get(provider_name).unwrap().clone();

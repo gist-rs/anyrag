@@ -1,0 +1,17 @@
+[package]
+name = "anyrag-markdown"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyrag = { path = "../lib" }
+anyrag-text = { path = "../text" }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+turso = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }

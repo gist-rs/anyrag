@@ -21,6 +21,7 @@
 //! `RUST_LOG=info cargo run -p anyrag-server --example knowledge_graph_precision`
 
 use anyhow::{bail, Result};
+use anyrag::constants;
 use anyrag_server::{
     auth::middleware::AuthenticatedUser,
     config,
@@ -60,7 +61,9 @@ async fn ask_question(
     );
 
     let payload = SearchRequest {
+        db: None,
         query: query.to_string(),
+        model: None,
         instruction: None,
         limit: Some(5),
         mode: Default::default(),
@@ -90,8 +93,8 @@ async fn main() -> Result<()> {
     dotenvy::from_path(".env").ok();
     info!("Environment variables loaded.");
 
-    let db_path = "db/anyrag_kg_harry_potter.db";
-    cleanup_db(db_path).await?;
+    let db_path = format!("{}/anyrag_kg_harry_potter.db", constants::DB_DIR);
+    cleanup_db(&db_path).await?;
     std::env::set_var("DB_URL", db_path);
 
     let config_path = "crates/server/config.yml";

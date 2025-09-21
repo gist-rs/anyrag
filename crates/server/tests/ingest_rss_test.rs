@@ -16,9 +16,17 @@ use turso::{Builder, Value as TursoValue};
 #[tokio::test]
 async fn test_ingest_endpoint_success() -> Result<()> {
     // --- Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_ingest_endpoint_success").await?;
     let user_identifier = "ingest-test-user@example.com";
     let token = generate_jwt(user_identifier)?;
+
+    // This test doesn't call the AI, but a placeholder mock is needed for stable app startup.
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_ingest_endpoint_success/v1/chat/completions");
+        then.status(200)
+            .json_body(json!({"choices": [{"message": {"role": "assistant", "content": "OK"}}]}));
+    });
 
     // Set up a mock server for the RSS feed.
     let mock_rss_content = r#"

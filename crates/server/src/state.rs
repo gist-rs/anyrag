@@ -5,26 +5,20 @@
 //! as the configuration, database connections, and instantiated AI provider clients,
 //! making them accessible to all request handlers.
 
-use crate::config::AppConfig;
 use anyrag::{
     graph::types::MemoryKnowledgeGraph,
     providers::{
         ai::{gemini::GeminiProvider, local::LocalAiProvider, AiProvider},
         db::sqlite::SqliteProvider,
     },
+    types::{AppConfig, ResolvedTask},
+    AnyragExecutor,
 };
+use anyrag_github::ingest::storage::StorageManager;
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
-
-/// A fully resolved task configuration with non-optional fields.
-#[derive(Clone, Debug)]
-pub struct ResolvedTask {
-    pub provider: String,
-    pub system_prompt: String,
-    pub user_prompt: String,
-}
 
 /// The shared application state, accessible from all request handlers.
 #[derive(Clone)]
@@ -39,6 +33,10 @@ pub struct AppState {
     pub ai_providers: Arc<HashMap<String, Box<dyn AiProvider>>>,
     /// An in-memory knowledge graph for time-sensitive, precise data.
     pub knowledge_graph: Arc<RwLock<MemoryKnowledgeGraph>>,
+    /// The core logic executor, which holds shared dependencies.
+    pub executor: Arc<AnyragExecutor>,
+    /// Manages databases for GitHub example ingestion and search.
+    pub storage_manager: Arc<StorageManager>,
 }
 
 /// Builds the shared application state from the configuration.
@@ -122,11 +120,40 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
     // Ensure the database schema is up-to-date on startup.
     sqlite_provider.initialize_schema().await?;
 
+    // Initialize the GitHub storage manager.
+    // When DB_URL is set (like in examples), prioritize its directory.
+    let db_dir = if let Ok(db_url) = std::env::var("DB_URL") {
+        std::path::Path::new(&db_url)
+            .parent()
+            .and_then(|p| p.to_str())
+            .map(|s| s.to_string())
+    } else {
+        config.github_db_dir.clone()
+    };
+    let storage_manager = StorageManager::new(db_dir.as_deref()).await?;
+    let storage_manager_arc = Arc::new(storage_manager);
+
+    // Wrap dependencies in Arcs for sharing.
+    let sqlite_provider_arc = Arc::new(sqlite_provider);
+    let ai_providers_arc = Arc::new(ai_providers);
+    let tasks_arc = Arc::new(resolved_tasks);
+    let config_arc = Arc::new(config);
+
+    // Create the core logic executor, passing shared dependencies.
+    let executor = AnyragExecutor::new(
+        ai_providers_arc.clone(),
+        sqlite_provider_arc.clone(),
+        config_arc.clone(),
+        tasks_arc.clone(),
+    );
+
     Ok(AppState {
-        config: Arc::new(config),
-        tasks: Arc::new(resolved_tasks),
-        sqlite_provider: Arc::new(sqlite_provider),
-        ai_providers: Arc::new(ai_providers),
+        config: config_arc,
+        tasks: tasks_arc,
+        sqlite_provider: sqlite_provider_arc,
+        ai_providers: ai_providers_arc,
         knowledge_graph: Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory())),
+        executor: Arc::new(executor),
+        storage_manager: storage_manager_arc,
     })
 }

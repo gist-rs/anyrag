@@ -1,16 +1,20 @@
-#[cfg(feature = "rss")]
-use anyrag::ingest::RssIngestError;
 use anyrag::{
-    ingest::{EmbeddingError, IngestSheetFaqError, KnowledgeError, SheetError, TextIngestError},
+    ingest::{EmbeddingError, KnowledgeError},
     search::SearchError,
     PromptError,
 };
+use anyrag_github::types::GitHubIngestError;
+#[cfg(feature = "rss")]
+use anyrag_rss::RssIngestError;
+use anyrag_sheets::SheetError;
+use anyrag_text::TextIngestError;
+#[cfg(feature = "rss")]
+use anyrag_web::WebIngestError;
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use github::types::GitHubIngestError;
 use serde_json::json;
 use tracing::error;
 use turso::Error as TursoError;
@@ -28,13 +32,13 @@ pub enum AppError {
     /// Errors from the RSS ingestion process.
     #[cfg(feature = "rss")]
     RssIngest(RssIngestError),
-    /// Errors from the sheet faq ingestion process.
-    SheetFaqIngest(IngestSheetFaqError),
+
     /// Errors from the sheet ingestion process.
     Sheet(SheetError),
     /// Errors from the GitHub ingestion process.
     GitHubIngest(GitHubIngestError),
-
+    /// Errors from the web ingestion process.
+    WebIngest(WebIngestError),
     /// Errors from the embedding process.
     Embedding(EmbeddingError),
     /// Errors from the knowledge base pipeline.
@@ -71,13 +75,6 @@ impl From<RssIngestError> for AppError {
     }
 }
 
-/// Conversion from `IngestSheetFaqError` to `AppError`.
-impl From<IngestSheetFaqError> for AppError {
-    fn from(err: IngestSheetFaqError) -> Self {
-        AppError::SheetFaqIngest(err)
-    }
-}
-
 /// Conversion from `SheetError` to `AppError`.
 impl From<SheetError> for AppError {
     fn from(err: SheetError) -> Self {
@@ -110,6 +107,13 @@ impl From<SearchError> for AppError {
 impl From<GitHubIngestError> for AppError {
     fn from(err: GitHubIngestError) -> Self {
         AppError::GitHubIngest(err)
+    }
+}
+
+/// Conversion from `WebIngestError` to `AppError`.
+impl From<WebIngestError> for AppError {
+    fn from(err: WebIngestError) -> Self {
+        AppError::WebIngest(err)
     }
 }
 
@@ -152,13 +156,7 @@ impl IntoResponse for AppError {
                     format!("Failed to ingest RSS feed: {err}"),
                 )
             }
-            AppError::SheetFaqIngest(err) => {
-                error!("IngestSheetFaqError: {:?}", err);
-                (
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    format!("Failed to ingest Sheet FAQ: {err}"),
-                )
-            }
+
             AppError::Sheet(err) => {
                 error!("SheetError: {:?}", err);
                 (
@@ -166,19 +164,19 @@ impl IntoResponse for AppError {
                     format!("Failed to process sheet: {err}"),
                 )
             }
+            AppError::WebIngest(err) => {
+                error!("WebIngestError: {:?}", err);
+                (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    format!("Failed to ingest from web: {err}"),
+                )
+            }
             AppError::Knowledge(err) => {
                 error!("KnowledgeError: {:?}", err);
                 let (status, msg) = match &err {
-                    KnowledgeError::JinaReaderFailed { status, body } => (
-                        StatusCode::BAD_GATEWAY,
-                        format!("Upstream fetch failed (status: {status}): {body}"),
-                    ),
-                    KnowledgeError::Llm(e) => {
-                        (StatusCode::BAD_GATEWAY, format!("AI provider error: {e}"))
-                    }
                     KnowledgeError::Parse(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to parse LLM response: {e}"),
+                        format!("Failed to parse data: {e}"),
                     ),
                     _ => (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -230,9 +228,9 @@ impl IntoResponse for AppError {
                 // Log the original error for debugging purposes
                 error!("PromptError: {:?}", err);
                 match err {
-                    PromptError::MissingAiProvider | PromptError::MissingStorageProvider => (
+                    PromptError::MissingAiProvider(e) | PromptError::MissingStorageProvider(e) => (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        "Server is not configured correctly.".to_string(),
+                        format!("Server configuration error: {e}"),
                     ),
                     PromptError::AiRequest(e) => (
                         StatusCode::BAD_GATEWAY,

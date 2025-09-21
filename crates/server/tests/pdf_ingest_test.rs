@@ -1,80 +1,31 @@
-//! # PDF Ingestion and RAG E2E Test (YAML Pipeline)
+//! # PDF Ingestion and RAG E2E Test
 //!
-//! This test verifies the entire `POST /ingest/pdf` workflow based on the new,
-//! structured YAML pipeline. It ensures that:
-//! 1. A PDF is generated, and its raw text is extracted.
-//! 2. The raw text is sent to a mock LLM for refinement into Markdown.
-//! 3. The refined Markdown is sent to a mock LLM for restructuring into YAML.
-//! 4. The final YAML content is stored as a single document in the database.
-//! 5. The new document is embedded via a mock embedding API.
-//! 6. A final RAG query (`/search/knowledge`) correctly chunks the YAML,
-//!    retrieves the relevant context, and synthesizes the correct answer.
+//! This test verifies the entire end-to-end workflow for PDF ingestion and search:
+//! 1. A PDF is generated and uploaded to `/ingest/pdf`.
+//! 2. The server extracts the text, uses an LLM to restructure it into YAML, and extracts metadata.
+//! 3. The final YAML content is stored in the database.
+//! 4. The new document is embedded via a mock embedding API.
+//! 5. A RAG query is performed via `/search/knowledge`, which retrieves the YAML,
+//!    chunks it by section, and uses an LLM to synthesize the final answer.
 
 mod common;
 
 use anyhow::Result;
-use anyrag_server::{config, state::build_app_state, types::ApiResponse};
-use common::{generate_jwt, pdf_helper::generate_test_pdf, TestApp};
-use httpmock::{Method, MockServer};
+use anyrag_server::types::ApiResponse;
+use anyrag_test_utils::helpers::generate_test_pdf;
+use common::{generate_jwt, TestApp};
+use httpmock::Method;
 use serde_json::{json, Value};
-use std::fs::File;
-use std::io::Write;
-use tempfile::{tempdir, NamedTempFile};
 use turso::{Builder, Value as TursoValue};
 
 #[tokio::test]
-async fn test_pdf_ingestion_and_rag_workflow_yaml() -> Result<()> {
+async fn test_pdf_ingestion_and_rag_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let mock_server = MockServer::start();
-    let db_file = NamedTempFile::new()?;
-    let db_path = db_file.path();
+    let test_name = "test_pdf_ingestion_and_rag_workflow";
+    let app = TestApp::spawn(test_name).await?;
+    let token = generate_jwt("pdf-ingest-user@example.com")?;
 
-    let config_dir = tempdir()?;
-    let config_path = config_dir.path().join("config.yml");
-
-    // Create a minimal config that points to our mock server and temp DB,
-    // and ensures the correct providers are configured for the tasks this test uses.
-    let config_content = format!(
-        r#"
-port: 0
-db_url: "{}"
-embedding:
-  api_url: "{}"
-  model_name: "mock-embedding-model"
-providers:
-  local_default:
-    provider: "local"
-    api_url: "{}"
-    api_key: null
-    model_name: "mock-chat-model"
-tasks:
-  knowledge_distillation:
-    provider: "local_default"
-  knowledge_metadata_extraction:
-    provider: "local_default"
-  query_analysis:
-    provider: "local_default"
-  rag_synthesis:
-    provider: "local_default"
-"#,
-        db_path.to_str().unwrap(),
-        mock_server.url("/v1/embeddings"),
-        mock_server.url("/v1/chat/completions")
-    );
-
-    let mut file = File::create(&config_path)?;
-    file.write_all(config_content.as_bytes())?;
-
-    let config = config::get_config(Some(config_path.to_str().unwrap()))?;
-    let app_state = build_app_state(config).await?;
-
-    let app = TestApp::spawn_with_state(app_state, mock_server).await?;
-
-    let messy_sentence =
-        "ThisIsA   messy    sentence. It needs refinement. The magic number is 3.14159.";
-    // The refined markdown is what the *first* LLM call should return
-    let refined_markdown =
-        "- This is a messy sentence.\n- It needs refinement.\n- The magic number is 3.14159.";
+    let pdf_content = "The magic number is 3.14159.";
     let expected_yaml = r#"
 sections:
   - title: "General Information"
@@ -83,39 +34,26 @@ sections:
         answer: "The magic number is 3.14159."
 "#;
     let final_rag_answer = "Based on the document, the magic number is 3.14159.";
-
-    let pdf_data = generate_test_pdf(messy_sentence)?;
+    let pdf_data = generate_test_pdf(pdf_content)?;
 
     // --- 2. Mock External Services ---
-    // The PDF pipeline now has multiple distinct AI calls. We need to mock each one
-    // with a specific body matcher to ensure the correct mock responds.
+    // This test requires mocking every external HTTP call the server makes.
 
-    // A. Mock LLM Refinement (raw text -> clean markdown)
-    // THIS MOCK WAS MISSING. The pipeline first extracts raw text and asks an LLM to clean it.
-    let refinement_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("You are an expert technical analyst"); // Matches TEXT_REFINEMENT_SYSTEM_PROMPT
-        then.status(200).json_body(
-            json!({"choices": [{"message": {"role": "assistant", "content": refined_markdown}}]}),
-        );
-    });
-
-    // B. Mock LLM Restructuring (clean markdown -> structured YAML)
+    // A. Mock the AI call for restructuring the PDF content into YAML.
     let restructuring_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("expert document analyst and editor"); // Matches KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT
+            .path(format!("/{test_name}/v1/chat/completions"))
+            .body_contains("expert document analyst and editor"); // Unique to this prompt
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
         );
     });
 
-    // C. Mock Metadata Extraction (structured YAML -> metadata JSON)
-    let metadata_extraction_mock = app.mock_server.mock(|when, then| {
+    // B. Mock the AI call for extracting metadata from the YAML.
+    let metadata_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("extract Category, Keyphrases, and Entities"); // Matches KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT
+            .path(format!("/{test_name}/v1/chat/completions"))
+            .body_contains("You are a document analyst."); // Unique to this prompt
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!([
                 {"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "magic number"}
@@ -123,51 +61,48 @@ sections:
         );
     });
 
-    // D. Mock Embedding API
+    // C. Mock the Embedding API (for new doc and for search query).
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path(format!("/{test_name}/v1/embeddings"));
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.1, 0.2, 0.3] }] }));
     });
 
-    // E. Mock RAG Query Analysis
+    // D. Mock the RAG Query Analysis call.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("expert query analyst"); // Matches QUERY_ANALYSIS_SYSTEM_PROMPT
+            .path(format!("/{test_name}/v1/chat/completions"))
+            .body_contains("expert query analyst");
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
-                "entities": [],
-                "keyphrases": ["magic number"]
+                "entities": [], "keyphrases": ["magic number"]
             }).to_string()}}]}),
         );
     });
 
-    // F. Mock final RAG synthesis call
+    // E. Mock the final RAG Synthesis call.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
-            .body_contains("strict, factual AI") // Matches RAG_SYNTHESIS_SYSTEM_PROMPT
+            .path(format!("/{test_name}/v1/chat/completions"))
+            .body_contains("strict, factual AI")
             .body_contains("## General Information"); // Verify it receives the context chunked from the YAML
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
     });
 
-    // --- 3. Execute Ingestion ---
-    let user_identifier = "pdf-ingest-user@example.com";
-    let token = generate_jwt(user_identifier)?;
-
+    // --- 3. Act: Ingest the PDF ---
     let form = reqwest::multipart::Form::new()
         .part(
             "file",
             reqwest::multipart::Part::bytes(pdf_data).file_name("test.pdf"),
         )
-        .part("extractor", reqwest::multipart::Part::text("local"));
+        .part("extractor", reqwest::multipart::Part::text("local")); // Use the local PDF parser
 
     let ingest_res = app
         .client
-        .post(format!("{}/ingest/pdf", app.address))
+        .post(app.url("/ingest/pdf"))
         .bearer_auth(token.clone())
         .multipart(form)
         .send()
@@ -175,12 +110,30 @@ sections:
         .error_for_status()?;
 
     let ingest_body: ApiResponse<Value> = ingest_res.json().await?;
-    assert_eq!(
-        ingest_body.result["ingested_faqs"], 1,
-        "Expected 1 document to be processed."
-    );
+    assert_eq!(ingest_body.result["ingested_documents"], 1);
 
-    // --- 4. Verify Database State ---
+    // --- 4. Act: Embed the new document ---
+    app.client
+        .post(app.url("/embed/new"))
+        .json(&json!({ "limit": 10 }))
+        .send()
+        .await?
+        .error_for_status()?;
+
+    // --- 5. Act: Perform a RAG search ---
+    let search_res = app
+        .client
+        .post(app.url("/search/knowledge"))
+        .bearer_auth(token)
+        .json(&json!({ "query": "what is the magic number?" }))
+        .send()
+        .await?
+        .error_for_status()?;
+
+    // --- 6. Assert API and DB State ---
+    let search_body: ApiResponse<Value> = search_res.json().await?;
+    assert_eq!(search_body.result["text"], final_rag_answer);
+
     let db = Builder::new_local(app.db_path.to_str().unwrap())
         .build()
         .await?;
@@ -189,47 +142,18 @@ sections:
         .prepare("SELECT content FROM documents WHERE source_url = 'test.pdf'")
         .await?;
     let mut rows = stmt.query(()).await?;
-    let row = rows
-        .next()
-        .await?
-        .expect("Expected to find the ingested PDF document");
-    let content: String = match row.get_value(0)? {
+    let row = rows.next().await?.expect("Document not found in DB");
+    let stored_content: String = match row.get_value(0)? {
         TursoValue::Text(s) => s,
         _ => panic!("Content was not a string"),
     };
-    assert_eq!(
-        content.trim(),
-        expected_yaml.trim(),
-        "The stored content should be the structured YAML."
-    );
+    assert_eq!(stored_content.trim(), expected_yaml.trim());
 
-    // --- 5. Execute Embedding ---
-    app.client
-        .post(format!("{}/embed/new", app.address))
-        .json(&json!({ "limit": 10 }))
-        .send()
-        .await?
-        .error_for_status()?;
-
-    // --- 6. Execute RAG Search ---
-    let search_res = app
-        .client
-        .post(format!("{}/search/knowledge", app.address))
-        .bearer_auth(token)
-        .json(&json!({ "query": "what is the magic number?" }))
-        .send()
-        .await?
-        .error_for_status()?;
-
-    let search_body: ApiResponse<Value> = search_res.json().await?;
-    assert_eq!(search_body.result["text"], final_rag_answer);
-
-    // --- 7. Assert Mock Calls ---
-    refinement_mock.assert();
+    // --- 7. Assert All Mocks Were Called Correctly ---
     restructuring_mock.assert();
-    metadata_extraction_mock.assert();
-    query_analysis_mock.assert();
+    metadata_mock.assert();
     embedding_mock.assert_hits(2); // Once for new doc, once for search query
+    query_analysis_mock.assert();
     rag_synthesis_mock.assert();
 
     Ok(())

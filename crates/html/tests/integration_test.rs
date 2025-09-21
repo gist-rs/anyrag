@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use html::{clean_html, html_to_clean_markdown, url_to_md};
+    use anyrag_html::{clean_html, html_to_clean_markdown, url_to_md};
 
     #[test]
     fn test_clean_html() {
@@ -45,6 +45,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore]
     async fn test_url_to_md() {
         // This is a simple integration test to ensure the full flow works.
         let url = "https://www.gpf.or.th/thai2019/10contact/main.php?page=7&menu=askfreq&lang=th&size=n&pattern=n";
@@ -61,7 +62,7 @@ mod tests {
         assert!(!content.is_empty());
 
         // cleanup
-        // std::fs::remove_file(&file_name).unwrap();
+        std::fs::remove_file(&file_name).unwrap();
     }
     #[test]
     fn test_html_to_markdown_with_title() {

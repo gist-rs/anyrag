@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::providers::db::storage::TemporalSearch;
 
-mod sql;
+pub mod sql;
 
 /// Represents a search result from the `faq_kb` table, used for RAG context.
 #[derive(Debug)]

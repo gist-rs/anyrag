@@ -1,14 +1,18 @@
 use crate::ingest::{run_github_ingestion, storage::StorageManager, types::IngestionTask};
 use anyhow::Result;
-use anyrag::ingest::markdown::EmbeddingConfig;
+use anyrag::{constants, ingest::Ingestor};
+use anyrag_markdown::{
+    EmbeddingConfig as MarkdownEmbeddingConfig, MarkdownIngestor, MarkdownSource,
+};
 use clap::Parser;
+use serde_json;
 use std::fs;
 use tracing::info;
 
 #[derive(Parser, Debug)]
 pub struct GithubArgs {
     /// The URL of the public GitHub repository to ingest
-    #[arg(required = true)]
+    #[arg(long, required = true)]
     pub url: String,
     /// An optional git version (tag, branch, commit hash) to ingest. Defaults to the latest release tag.
     #[arg(long)]
@@ -39,7 +43,7 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         embedding_api_key: std::env::var("AI_API_KEY").ok(),
     };
 
-    let storage_manager = StorageManager::new("db/github_ingest").await?;
+    let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
     let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task).await?;
     println!(
         "✅ Successfully ingested {} unique examples from '{}' (version: {}).",
@@ -98,31 +102,34 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     // Automatically process the generated file into chunks unless disabled.
     if !args.no_process {
         println!("🚀 Automatically processing generated file into chunks...");
-        let chunk_db_dir = "db/github_chunks";
+        let chunk_db_dir = constants::GITHUB_CHUNKS_DB_DIR;
         fs::create_dir_all(chunk_db_dir)?;
         let chunk_db_path = format!("{chunk_db_dir}/{repo_name}.db");
 
         let api_key = std::env::var("AI_API_KEY").ok();
 
-        let url_opt = args.embedding_api_url.as_deref();
-        let model_opt = args.embedding_model.as_deref();
-        let embedding_config = if let (Some(url), Some(model)) = (url_opt, model_opt) {
-            Some(EmbeddingConfig {
-                api_url: url,
-                model,
-                api_key: api_key.as_deref(),
-            })
-        } else {
-            None
+        let embedding_config =
+            if let (Some(url), Some(model)) = (&args.embedding_api_url, &args.embedding_model) {
+                Some(MarkdownEmbeddingConfig {
+                    api_url: url.clone(),
+                    model: model.clone(),
+                    api_key: api_key.clone(),
+                })
+            } else {
+                None
+            };
+
+        let markdown_source = MarkdownSource {
+            db_path: chunk_db_path.clone(),
+            file_path: output_filename.clone(),
+            separator: "---\n".to_string(),
+            embedding_config,
         };
 
-        let count = anyrag::ingest::markdown::ingest_markdown_file(
-            &chunk_db_path,
-            &output_filename,
-            "---\n", // The separator used for joining examples
-            embedding_config,
-        )
-        .await?;
+        let source_json = serde_json::to_string(&markdown_source)?;
+        let ingestor = MarkdownIngestor;
+        let result = ingestor.ingest(&source_json, None).await?;
+        let count = result.documents_added;
 
         if count > 0 {
             println!(

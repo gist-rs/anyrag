@@ -17,7 +17,7 @@ use crate::common::{generate_jwt, TestApp, TestDataBuilder};
 #[tokio::test]
 async fn test_gen_text_with_explicit_knowledge_search() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_gen_text_with_explicit_knowledge_search").await?;
     let user_identifier = "agent-test-user@example.com";
     let db = &app.app_state.sqlite_provider.db;
     let user = get_or_create_user(db, user_identifier, None).await?;
@@ -51,7 +51,8 @@ sections:
     // --- 2. Mock External Services ---
     // A. Mock the embedding for the knowledge search.
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_gen_text_with_explicit_knowledge_search/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": [0.9, 0.1, 0.0] }] }));
     });
@@ -59,7 +60,7 @@ sections:
     // B. Mock the query analysis required by the hybrid search pipeline.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_gen_text_with_explicit_knowledge_search/v1/chat/completions")
             .body_contains("expert query analyst"); // Unique to QUERY_ANALYSIS_SYSTEM_PROMPT
         then.status(200).json_body(json!({
             "choices": [{"message": {"role": "assistant", "content": json!({
@@ -75,7 +76,7 @@ sections:
     // using the correct chained syntax for the httpmock version in use.
     let final_generation_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_gen_text_with_explicit_knowledge_search/v1/chat/completions")
             .body_contains("Write a Pantip-style post about a heartwarming romance.") // From generation_prompt
             .body_contains("## The Story of Love"); // From the YAML chunk in the context
         then.status(200).json_body(json!({

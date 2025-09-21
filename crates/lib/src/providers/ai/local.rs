@@ -2,6 +2,7 @@ use crate::{errors::PromptError, providers::ai::AiProvider};
 use async_trait::async_trait;
 use reqwest::Client as ReqwestClient;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::fmt::Debug;
 use tracing::{debug, info};
 
@@ -90,6 +91,11 @@ impl AiProvider for LocalAiProvider {
             stream: false,
         };
 
+        debug!(payload = ?request_body, "--> Sending request to Local AI");
+        println!(
+            "-- AI Request Body: {}",
+            serde_json::to_string_pretty(&request_body).unwrap()
+        );
         debug!(payload = ?request_body, "--> Sending request to Local AI");
         info!("--> Local AI Provider using API URL: {}", self.api_url);
         let mut request_builder = self.client.post(&self.api_url);

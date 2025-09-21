@@ -1,0 +1,27 @@
+[package]
+name = "anyrag-sheets"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyrag = { path = "../lib" }
+
+core-access = { path = "../core-access", optional = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+turso = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+regex = { workspace = true }
+csv = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+httpmock = "0.7.0"
+dyn-clone = "1.0.20"
+anyrag-test-utils = { path = "../test-utils" }

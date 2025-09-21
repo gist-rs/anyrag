@@ -19,7 +19,7 @@ use serde_json::{json, Value};
 #[tokio::test]
 async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_e2e_multi_stage_hybrid_search").await?;
     let user_identifier = "test-user@example.com";
     let db = &app.app_state.sqlite_provider.db;
     let user = get_or_create_user(db, user_identifier, None).await?;
@@ -76,7 +76,7 @@ async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
     // --- 2. Mock External Services ---
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_e2e_multi_stage_hybrid_search/v1/chat/completions")
             .body_contains("expert query analyst");
         then.status(200).json_body(json!({
             "choices": [{
@@ -93,14 +93,15 @@ async fn test_e2e_multi_stage_hybrid_search() -> Result<()> {
 
     let query_vector = vec![1.0, 0.0, 0.0, 0.0];
     let embedding_mock = app.mock_server.mock(|when, then| {
-        when.method(Method::POST).path("/v1/embeddings");
+        when.method(Method::POST)
+            .path("/test_e2e_multi_stage_hybrid_search/v1/embeddings");
         then.status(200)
             .json_body(json!({ "data": [{ "embedding": query_vector }] }));
     });
 
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path("/v1/chat/completions")
+            .path("/test_e2e_multi_stage_hybrid_search/v1/chat/completions")
             .body_contains("strict, factual AI")
             .body_contains(user_query)
             .body_contains("The grand prize for the campaign is a Tesla Model 3.")

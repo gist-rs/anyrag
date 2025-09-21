@@ -10,12 +10,25 @@ use anyrag_server::types::ApiResponse;
 use axum::http::StatusCode;
 use common::{generate_jwt, TestApp};
 use core_access::get_or_create_user;
-use serde_json::Value;
+use httpmock::Method;
+use serde_json::{json, Value};
 
 #[tokio::test]
 async fn test_get_users_as_root_succeeds() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_get_users_as_root_succeeds").await?;
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_get_users_as_root_succeeds/v1/chat/completions");
+        then.status(200).json_body(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Mock admin response."
+                }
+            }]
+        }));
+    });
     let root_user_identifier = "root@example.com";
 
     // Manually create a root user in the database, using the app's connection pool.
@@ -50,7 +63,19 @@ async fn test_get_users_as_root_succeeds() -> Result<()> {
 #[tokio::test]
 async fn test_get_users_as_regular_user_fails() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_get_users_as_regular_user_fails").await?;
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_get_users_as_regular_user_fails/v1/chat/completions");
+        then.status(200).json_body(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Mock admin response."
+                }
+            }]
+        }));
+    });
     let regular_user_identifier = "user@example.com";
     let token = generate_jwt(regular_user_identifier)?;
 
@@ -75,7 +100,19 @@ async fn test_get_users_as_regular_user_fails() -> Result<()> {
 #[tokio::test]
 async fn test_get_users_as_guest_fails() -> Result<()> {
     // --- 1. Arrange ---
-    let app = TestApp::spawn().await?;
+    let app = TestApp::spawn("test_get_users_as_guest_fails").await?;
+    app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_get_users_as_guest_fails/v1/chat/completions");
+        then.status(200).json_body(json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "Mock admin response."
+                }
+            }]
+        }));
+    });
 
     // --- 2. Act ---
     // Make the request without an Authorization header to simulate a guest user.

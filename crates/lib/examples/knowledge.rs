@@ -24,10 +24,8 @@
 
 use anyhow::Result;
 use anyrag::{
-    ingest::{
-        knowledge::{IngestionPrompts, WebIngestStrategy},
-        run_ingestion_pipeline, KnowledgeError,
-    },
+    constants,
+    ingest::{IngestionPrompts, Ingestor},
     prompts::knowledge::{
         KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, METADATA_EXTRACTION_SYSTEM_PROMPT,
         QUERY_ANALYSIS_SYSTEM_PROMPT, QUERY_ANALYSIS_USER_PROMPT,
@@ -42,8 +40,10 @@ use anyrag::{
     types::{ContentType, ExecutePromptOptions},
     PromptClientBuilder,
 };
+use anyrag_web::{WebIngestStrategy, WebIngestor};
 use core_access::get_or_create_user;
 use dotenvy::dotenv;
+use serde_json::json;
 use std::{env, fs, sync::Arc};
 use tokio::time::{sleep, Duration};
 use tracing::info;
@@ -71,8 +71,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Environment variables loaded.");
 
     // Use a dedicated, temporary DB for this example run.
-    let db_path = "db/anyrag_lib_example.db";
-    cleanup_db(db_path).await?;
+    let db_path = format!("{}/anyrag_lib_example.db", constants::DB_DIR);
+    cleanup_db(&db_path).await?;
 
     // --- Configuration from environment variables ---
     let ai_provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "gemini".to_string());
@@ -121,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ai_provider: Arc<dyn AiProvider> = Arc::from(ai_provider);
 
     // --- Build Storage Provider ---
-    let sqlite_provider = SqliteProvider::new(db_path).await?;
+    let sqlite_provider = SqliteProvider::new(&db_path).await?;
     sqlite_provider.initialize_schema().await?;
     info!("SQLite provider initialized and schema is ready.");
 
@@ -138,24 +138,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         restructuring_system_prompt: KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT,
         metadata_extraction_system_prompt: METADATA_EXTRACTION_SYSTEM_PROMPT,
     };
-    match run_ingestion_pipeline(
-        &sqlite_provider.db,
-        ai_provider.as_ref(),
-        ingest_url,
-        Some(&user.id),
-        prompts,
-        web_ingest_strategy,
-    )
-    .await
-    {
-        Ok(count) => {
-            info!("Ingestion successful. Stored {} new FAQs.", count);
+
+    // Instantiate the ingestor plugin.
+    let ingestor = WebIngestor::new(&sqlite_provider.db, ai_provider.as_ref(), prompts);
+
+    // Serialize the source information into the JSON format expected by the ingestor.
+    let source_json = json!({
+        "url": ingest_url,
+        "strategy": web_ingest_strategy
+    })
+    .to_string();
+
+    // Call the generic ingest method.
+    match ingestor.ingest(&source_json, Some(&user.id)).await {
+        Ok(ingest_result) => {
+            let count = ingest_result.documents_added;
+            info!(
+                "Ingestion successful. Stored {} new document chunks.",
+                count
+            );
             if count == 0 {
-                info!("Content may be unchanged from a previous run. Continuing...");
+                info!("Content may be unchanged or no new chunks were generated. Continuing...");
             }
-        }
-        Err(KnowledgeError::ContentUnchanged(_)) => {
-            info!("Content is unchanged. Skipping ingestion.");
         }
         Err(e) => {
             return Err(format!(

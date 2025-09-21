@@ -1,24 +1,20 @@
 use crate::auth::middleware::AuthenticatedUser;
 use crate::handlers::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
-use anyrag::ingest::{run_pdf_ingestion_pipeline, PdfSyncExtractor};
+use anyrag::ingest::IngestionPrompts;
+use anyrag::ingest::Ingestor;
+use anyrag_pdf::{PdfExtractor, PdfIngestor};
 use axum::{
     extract::{Query, State},
     Json,
 };
 use axum_extra::extract::Multipart;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{info, warn};
 
-use super::web::IngestWebResponse;
+use base64::{engine::general_purpose, Engine as _};
+use serde_json::Value;
 
-#[derive(Debug, Deserialize, Serialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ExtractorChoice {
-    #[default]
-    Local,
-    Gemini,
-}
+// The ExtractorChoice is now defined in the `anyrag-pdf` crate as `PdfExtractor`.
 
 /// Consolidated handler for ingesting a PDF from an upload or a URL.
 pub async fn ingest_pdf_handler(
@@ -26,11 +22,11 @@ pub async fn ingest_pdf_handler(
     user: AuthenticatedUser,
     debug_params: Query<DebugParams>,
     mut multipart: Multipart,
-) -> Result<Json<ApiResponse<IngestWebResponse>>, AppError> {
+) -> Result<Json<ApiResponse<Value>>, AppError> {
     let owner_id = Some(user.0.id);
     let mut pdf_data: Option<Vec<u8>> = None;
     let mut source_identifier: Option<String> = None;
-    let mut extractor_choice = ExtractorChoice::default();
+    let mut extractor_choice = PdfExtractor::default();
 
     info!("PDF ingest request received.");
 
@@ -99,6 +95,7 @@ pub async fn ingest_pdf_handler(
         ))
     })?;
 
+    // --- 2. Get dependencies from app state ---
     let task_name = "knowledge_distillation";
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
@@ -109,9 +106,8 @@ pub async fn ingest_pdf_handler(
     let provider_name = &task_config.provider;
     let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
-            "Provider '{}' for task '{}' not found in providers map.",
-            provider_name,
-            task_name
+            "Provider '{}' not found in providers map.",
+            provider_name
         ))
     })?;
 
@@ -124,31 +120,32 @@ pub async fn ingest_pdf_handler(
             ))
         })?;
 
-    let extractor_strategy = match extractor_choice {
-        ExtractorChoice::Local => PdfSyncExtractor::Local,
-        ExtractorChoice::Gemini => PdfSyncExtractor::Gemini,
-    };
-
-    let prompts = anyrag::ingest::pdf::PdfIngestionPrompts {
+    let prompts = IngestionPrompts {
         restructuring_system_prompt: &task_config.system_prompt,
         metadata_extraction_system_prompt: &metadata_task_config.system_prompt,
     };
 
-    let ingested_count = run_pdf_ingestion_pipeline(
-        &app_state.sqlite_provider.db,
-        ai_provider.as_ref(),
-        pdf_data.clone(),
-        &source_identifier,
-        owner_id.as_deref(),
-        extractor_strategy,
-        prompts,
-    )
-    .await?;
+    // --- 3. Instantiate and call the ingestor plugin ---
+    let ingestor = PdfIngestor::new(&app_state.sqlite_provider.db, ai_provider.as_ref(), prompts);
+    let pdf_data_base64 = general_purpose::STANDARD.encode(&pdf_data);
 
-    let response = IngestWebResponse {
-        message: "PDF ingestion pipeline completed successfully.".to_string(),
-        ingested_faqs: ingested_count,
-    };
+    let source_json = json!({
+        "source_identifier": source_identifier,
+        "pdf_data_base64": pdf_data_base64,
+        "extractor": extractor_choice,
+    })
+    .to_string();
+
+    let ingest_result = ingestor
+        .ingest(&source_json, owner_id.as_deref())
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("PDF ingestion failed: {e}")))?;
+
+    // --- 4. Construct the response ---
+    let response = json!({
+        "message": "PDF ingestion pipeline completed successfully.".to_string(),
+        "ingested_documents": ingest_result.documents_added,
+    });
 
     let debug_info = json!({
         "source": source_identifier,

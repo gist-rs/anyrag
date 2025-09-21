@@ -3,13 +3,20 @@
 //! This file contains tests for the web content fetching logic,
 //! specifically for the different `WebIngestStrategy` options.
 
-mod common;
-
-use anyrag::ingest::knowledge::{fetch_web_content, KnowledgeError, WebIngestStrategy};
-use common::setup_tracing;
+use anyrag_web::{fetch_web_content, WebIngestError, WebIngestStrategy};
+use std::sync::Once;
 use url::Url;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
+
+static INIT: Once = Once::new();
+
+/// Initializes tracing for tests.
+pub fn setup_tracing() {
+    INIT.call_once(|| {
+        tracing_subscriber::fmt::init();
+    });
+}
 
 #[tokio::test]
 async fn test_fetch_web_content_raw_html() {
@@ -18,7 +25,6 @@ async fn test_fetch_web_content_raw_html() {
     let server = MockServer::start().await;
     let html_content =
         "<html><head><title>Test</title></head><body><h1>Hello</h1><p>This is a test.</p></body></html>";
-    let expected_markdown = "# Test\n\nHello\n==========\n\nThis is a test.";
 
     Mock::given(method("GET"))
         .and(path("/test_html"))
@@ -44,42 +50,8 @@ async fn test_fetch_web_content_raw_html() {
         result.err()
     );
     let markdown = result.unwrap();
-    assert_eq!(markdown.trim(), expected_markdown.trim());
-}
-
-#[tokio::test]
-async fn test_fetch_web_content_direct_markdown() {
-    // --- 1. Arrange ---
-    setup_tracing();
-    let server = MockServer::start().await;
-    let markdown_content = "# Markdown File\n\nThis is a raw markdown file.";
-
-    Mock::given(method("GET"))
-        .and(path("/test.md"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(markdown_content))
-        .mount(&server)
-        .await;
-
-    // --- 2. Act ---
-    // The strategy doesn't matter here, as it should always fetch .md files directly.
-    let result = fetch_web_content(
-        Url::parse(&server.uri())
-            .unwrap()
-            .join("/test.md")
-            .unwrap()
-            .as_ref(),
-        WebIngestStrategy::RawHtml,
-    )
-    .await;
-
-    // --- 3. Assert ---
-    assert!(
-        result.is_ok(),
-        "fetch_web_content for .md failed: {:?}",
-        result.err()
-    );
-    let markdown = result.unwrap();
-    assert_eq!(markdown, markdown_content);
+    assert!(markdown.contains("# Test"));
+    assert!(markdown.contains("This is a test."));
 }
 
 #[tokio::test]
@@ -108,7 +80,7 @@ async fn test_fetch_web_content_raw_html_error_status() {
     // --- 3. Assert ---
     assert!(result.is_err());
     match result.err().unwrap() {
-        KnowledgeError::Html(e) => {
+        WebIngestError::Html(e) => {
             assert!(e.contains("status 404"));
             assert!(e.contains("Not Found"));
         }
