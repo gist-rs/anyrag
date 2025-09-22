@@ -341,6 +341,7 @@ dependencies = [
  "chrono",
  "dyn-clone",
  "httpmock",
+ "lazy_static",
  "md5 0.7.0",
  "reqwest",
  "serde",

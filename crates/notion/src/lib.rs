@@ -240,6 +240,10 @@ async fn fetch_database_info(
 ) -> Result<DatabaseResponse, NotionError> {
     let base_url = get_base_url();
     let url = format!("{base_url}/v1/databases/{db_id}");
+    info!(
+        "[Notion Ingestor] [fetch_database_info] Requesting database info from URL: {}",
+        url
+    );
     let response = client.get(&url).headers(headers.clone()).send().await?;
 
     if !response.status().is_success() {
@@ -263,6 +267,10 @@ async fn query_all_pages(
     let mut next_cursor: Option<String> = None;
     let base_url = get_base_url();
     let url = format!("{base_url}/v1/data_sources/{data_source_id}/query");
+    info!(
+        "[Notion Ingestor] [query_all_pages] Querying data source from URL: {}",
+        url
+    );
 
     loop {
         let body = json!({ "start_cursor": next_cursor });
@@ -412,7 +420,7 @@ async fn process_and_store_pages(
                     }
                     tx.execute(&insert_sql, params::Params::Positional(row_params))
                         .await?;
-                    current_dt += Duration::days(1);
+                    current_dt += Duration::hours(1);
                 }
             }
         } else {
