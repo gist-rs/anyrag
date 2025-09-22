@@ -7,7 +7,6 @@ use anyrag_test_utils::TestSetup;
 use httpmock::{Method, MockServer};
 use lazy_static::lazy_static;
 use std::sync::Mutex;
-use tracing::info;
 
 use serde_json::json;
 use std::env;
@@ -258,18 +257,12 @@ async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
     let source = json!({ "database_id": db_id }).to_string();
     let result = ingestor.ingest(&source, Some(owner_id)).await?;
 
-    info!(
-        "Hourly Expansion Result: documents_added={}, source='{}', document_ids='{:?}'",
-        result.documents_added, result.source, result.document_ids
-    );
-
     // --- 4. Assert ---
     assert_eq!(
         result.documents_added, 4,
         "Expected 4 rows for 4 hours (9, 10, 11, 12)"
     );
     let table_name = &result.document_ids[0];
-    info!(?table_name, "Table name for hourly expansion");
 
     let conn = setup.db.connect()?;
     let mut stmt = conn
@@ -282,26 +275,22 @@ async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
 
     // Assert row for 09:00
     let row1 = rows.next().await?.expect("Expected row for 09:00");
-    info!(?row1, "Row 1");
     assert_eq!(row1.get::<String>(0)?, "Morning Session");
     assert_eq!(row1.get::<String>(1)?, "2025-08-01");
     assert_eq!(row1.get::<String>(2)?, "09:00:00");
 
     // Assert row for 10:00
     let row2 = rows.next().await?.expect("Expected row for 10:00");
-    info!(?row2, "Row 2");
     assert_eq!(row2.get::<String>(0)?, "Morning Session");
     assert_eq!(row2.get::<String>(2)?, "10:00:00");
 
     // Assert row for 11:00
     let row3 = rows.next().await?.expect("Expected row for 11:00");
-    info!(?row3, "Row 3");
     assert_eq!(row3.get::<String>(0)?, "Morning Session");
     assert_eq!(row3.get::<String>(2)?, "11:00:00");
 
     // Assert row for 12:00
     let row4 = rows.next().await?.expect("Expected row for 12:00");
-    info!(?row4, "Row 4");
     assert_eq!(row4.get::<String>(0)?, "Morning Session");
     assert_eq!(row4.get::<String>(2)?, "12:00:00");
 
