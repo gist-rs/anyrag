@@ -5,20 +5,15 @@ use anyrag::ingest::Ingestor;
 use anyrag_notion::NotionIngestor;
 use anyrag_test_utils::TestSetup;
 use httpmock::{Method, MockServer};
-use lazy_static::lazy_static;
-use std::sync::Mutex;
+use serial_test::serial;
 
 use serde_json::json;
 use std::env;
 use turso::{params, Value as TursoValue};
 
-lazy_static! {
-    static ref TEST_MUTEX: Mutex<()> = Mutex::new(());
-}
-
 #[tokio::test]
+#[serial]
 async fn test_notion_ingestion_workflow() -> Result<()> {
-    let _guard = TEST_MUTEX.lock().unwrap();
     // --- 1. Arrange & Setup ---
     let setup = TestSetup::new().await?;
     let mock_server = MockServer::start();
@@ -45,7 +40,7 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
 
     let db_details_mock = mock_server.mock(|when, then| {
         when.method(Method::GET)
-            .path(format!("/v1/databases/{}", db_id));
+            .path(format!("/v1/databases/{db_id}"));
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(db_details_response);
@@ -107,7 +102,7 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
 
     let query_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path(format!("/v1/data_sources/{}/query", data_source_id));
+            .path(format!("/v1/data_sources/{data_source_id}/query"));
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(query_response);
@@ -127,7 +122,7 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
     let table_name = &result.document_ids[0];
     let expected_table_name = format!(
         "notion_{:x}",
-        md5::compute(format!("{}::{}", db_id, data_source_id))
+        md5::compute(format!("{db_id}::{data_source_id}"))
     );
     assert_eq!(table_name, &expected_table_name);
 
@@ -135,8 +130,7 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
 
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT `Task`, `Status`, `busy_date`, `busy_time` FROM `{}` ORDER BY `Task`, `busy_time`",
-            table_name
+            "SELECT `Task`, `Status`, `busy_date`, `busy_time` FROM `{table_name}` ORDER BY `Task`, `busy_time`"
         ))
         .await?;
     let mut rows = stmt.query(params![]).await?;
@@ -185,8 +179,8 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
-    let _guard = TEST_MUTEX.lock().unwrap();
     // --- 1. Arrange & Setup ---
     let setup = TestSetup::new().await?;
     let mock_server = MockServer::start();
@@ -211,7 +205,7 @@ async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
 
     let db_details_mock = mock_server.mock(|when, then| {
         when.method(Method::GET)
-            .path(format!("/v1/databases/{}", db_id));
+            .path(format!("/v1/databases/{db_id}"));
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(db_details_response);

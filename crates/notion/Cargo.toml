@@ -23,4 +23,5 @@ chrono = { workspace = true }
 httpmock = "0.7.0"
 dyn-clone = "1.0.20"
 anyrag-test-utils = { path = "../test-utils" }
-lazy_static = "1.4.0"
+serial_test = "3.0.0"
+dotenvy = "0.15.7"

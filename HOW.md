@@ -328,41 +328,30 @@ let ingest_res = app
 
 -   **Symptom**: Tests fail intermittently, often with mock-related errors like `Request did not match any route or mock`, but only when run in parallel (`cargo test`). Running a single test file or a specific test function individually succeeds.
 -   **Cause**: A race condition. Two or more tests are modifying a shared, global resource simultaneously. The most common culprit is setting environment variables (`std::env::set_var`). If one test sets an environment variable that another test depends on (e.g., a mock server URL), and they run at the same time, one test can overwrite the variable before the other is finished with it.
--   **Solution**: Serialize the execution of the conflicting tests to ensure they don't run at the same time. The simplest way to achieve this is by using a global `Mutex`. Each test must acquire a lock on the mutex before it starts and release it when it's done. This guarantees that only one of these tests can be executing at any given time.
+-   **Solution**: Serialize the execution of the conflicting tests using the `serial_test` crate. This is the cleanest, most declarative way to ensure that specific tests do not run at the same time. It provides an attribute macro that handles all the locking behind the scenes.
 
 **Example Walkthrough (`notion_ingest_test`):**
 
 1.  **The Failure**: The `test_notion_ingestion_hourly_expansion` test failed with a mock error, but only when run alongside `test_notion_ingestion_workflow`. Both tests set the `NOTION_API_BASE_URL_OVERRIDE_FOR_TESTING` environment variable to a unique `MockServer` URL.
 2.  **Analysis**: The parallel test runner started both tests at roughly the same time. Test A set the environment variable to its mock server URL. Immediately after, Test B overwrote it with *its* mock server URL. When Test A's application code tried to make an HTTP request, it used the URL from Test B, causing the request to hit the wrong mock server and fail.
 3.  **The Fix**:
-    *   Add the `lazy_static` crate to your `[dev-dependencies]`.
-    *   Define a single, static `Mutex` that all conflicting tests will share.
-    *   In each test function, acquire the mutex lock at the very beginning. The lock will be automatically released when the test function ends.
+    *   Add the `serial_test` crate to your `[dev-dependencies]`.
+    *   Add the `#[serial]` attribute to each test function that needs to be run sequentially.
 
 ```rust
 // In: crates/notion/tests/notion_ingest_test.rs
-use lazy_static::lazy_static;
-use std::sync::Mutex;
-
-// 1. Define a static mutex to be shared across tests in this file.
-lazy_static! {
-    static ref TEST_MUTEX: Mutrix<()> = Mutex::new(());
-}
+use serial_test::serial;
 
 #[tokio::test]
+#[serial] // This test will not run in parallel with other `#[serial]` tests
 async fn test_notion_ingestion_workflow() -> Result<()> {
-    // 2. Acquire the lock. This test will wait if another test holds the lock.
-    let _guard = TEST_MUTEX.lock().unwrap();
-
     // ... rest of the test setup, including env::set_var ...
     Ok(())
 }
 
 #[tokio::test]
+#[serial] // This test will also be serialized
 async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
-    // 2. Acquire the lock.
-    let _guard = TEST_MUTEX.lock().unwrap();
-
     // ... rest of the test setup, including env::set_var ...
     Ok(())
 }
