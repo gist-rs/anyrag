@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cli", "crates/core-access", "crates/github", "crates/lib", "crates/server", "crates/html", "crates/web", "crates/pdf", "crates/rss", "crates/sheets", "crates/text", "crates/firebase", "crates/markdown", "crates/gof", "crates/notion"]
+members = ["crates/cli", "crates/core-access", "crates/github", "crates/lib", "crates/server", "crates/html", "crates/web", "crates/pdf", "crates/rss", "crates/sheets", "crates/text", "crates/firebase", "crates/markdown", "crates/gof", "crates/notion", "crates/test-utils"]
 resolver = "2"
 
 [workspace.dependencies]
