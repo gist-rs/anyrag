@@ -115,8 +115,8 @@ async fn main() -> Result<()> {
             // --- Prompt Execution ---
             let question = "Who is available today?";
             let today = Utc::now().to_rfc3339();
-            println!("# CONTEXT\n- # TODAY: {}", today);
-            println!("# QUERY\n- {}", question);
+            println!("# CONTEXT\n- # TODAY: {today}");
+            println!("# QUERY\n- {question}");
 
             let client = PromptClientBuilder::new()
                 .ai_provider(ai_provider)
@@ -139,7 +139,7 @@ async fn main() -> Result<()> {
             println!("\n# RESPONSE");
             println!("- AI Generated Answer:\n{}", final_result.text);
             if let Some(sql) = final_result.generated_sql {
-                println!("\n- Generated SQL:\n{}", sql);
+                println!("\n- Generated SQL:\n{sql}");
             }
         }
     } else {
