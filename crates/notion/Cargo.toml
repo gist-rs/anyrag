@@ -16,17 +16,17 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 anyhow = { workspace = true }
-md5 = "0.7.0"
+md5 = "0.8.0"
 chrono = { workspace = true }
 
 [dev-dependencies]
 httpmock = "0.7.0"
 dyn-clone = "1.0.20"
 anyrag-test-utils = { path = "../test-utils" }
-serial_test = "3.0.0"
+serial_test = "3.2.0"
 dotenvy = "0.15.7"
 log = { workspace = true }
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 anyrag = { path = "../lib", features = ["core-access"] }
 chrono = { workspace = true }
 serde_json = { workspace = true }

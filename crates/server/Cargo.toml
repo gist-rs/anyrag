@@ -64,8 +64,9 @@ anyrag-test-utils = { path = "../test-utils", features = ["pdf"] }
 chrono = { workspace = true }
 httpmock = "0.7.0"
 jsonwebtoken = "9.3.1"
-tempfile = "3.22.0"
+tempfile = "3.23.0"
 turso = { workspace = true }
+serde_yaml = { workspace = true }
 regex = { workspace = true }
 serial_test = "3.2.0"
 uuid = { workspace = true }

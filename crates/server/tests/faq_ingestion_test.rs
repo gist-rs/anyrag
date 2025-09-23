@@ -2,20 +2,21 @@
 //!
 //! This test verifies the entire end-to-end workflow for PDF ingestion and search:
 //! 1. A PDF is uploaded to `/ingest/pdf`.
-//! 2. The raw text is extracted and stored directly in the database.
-//! 3. The new document is embedded via `/embed/new`.
-//! 4. A RAG query is performed via `/search/knowledge`, which should retrieve
+//! 2. The new document is embedded via `/embed/new`.
+//! 3. A RAG query is performed via `/search/knowledge`, which should retrieve
 //!    the raw text as context and synthesize the final answer.
 
 mod common;
 
 use anyhow::Result;
+use anyrag::prompts::{knowledge, tasks};
 use anyrag_server::types::ApiResponse;
 use anyrag_test_utils::helpers::generate_test_pdf;
 use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use serde_json::{json, Value};
-use turso::{params, Builder, Value as TursoValue};
+
+use turso::{params, Builder};
 
 #[tokio::test]
 async fn test_unified_pdf_ingestion_and_rag_workflow() -> Result<()> {
@@ -48,7 +49,14 @@ sections:
     let restructure_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path(format!("/{test_name}/v1/chat/completions"))
-            .body_contains("expert document analyst and editor");
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": knowledge::KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
         );
@@ -57,7 +65,14 @@ sections:
     let metadata_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path(format!("/{test_name}/v1/chat/completions"))
-            .body_contains("extract Category, Keyphrases, and Entities");
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": tasks::KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": mock_metadata}}]}),
         );
@@ -76,7 +91,14 @@ sections:
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path(format!("/{test_name}/v1/chat/completions"))
-            .body_contains("expert query analyst");
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": tasks::QUERY_ANALYSIS_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
                 "entities": ["AnyRAG"], "keyphrases": []
@@ -88,9 +110,14 @@ sections:
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path(format!("/{test_name}/v1/chat/completions"))
-            .body_contains("strict, factual AI")
-            // The context will be the chunk extracted from the YAML, not the raw PDF text.
-            .body_contains("What is the magic word?");
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": tasks::RAG_SYNTHESIS_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
@@ -121,18 +148,17 @@ sections:
         .await?;
     let conn = db.connect()?;
     let mut stmt = conn
-        .prepare("SELECT content FROM documents WHERE source_url = ?")
+        .prepare("SELECT content FROM documents WHERE source_url LIKE ?")
         .await?;
-    let mut rows = stmt.query(params!["test.pdf"]).await?;
-    let row = rows.next().await?.expect("Document not found in DB");
-    let stored_content: String = match row.get_value(0)? {
-        TursoValue::Text(s) => s,
-        _ => panic!("Content was not a string"),
-    };
+    let mut rows = stmt.query(params!["test.pdf#%"]).await?;
+    let row = rows.next().await?.expect("Document chunk not found in DB");
+    let stored_content: String = row.get(0)?;
+
+    // Deserialize and check the title to ensure the correct chunk was stored.
+    let parsed_chunk: Value = serde_yaml::from_str(&stored_content)?;
     assert_eq!(
-        stored_content.trim(),
-        expected_yaml.trim(),
-        "Stored content should be the restructured YAML"
+        parsed_chunk["sections"][0]["title"], "Test PDF Content",
+        "The title of the stored chunk is incorrect."
     );
 
     // --- 5. Act: Embed the new document ---

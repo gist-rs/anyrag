@@ -7,7 +7,7 @@ edition = "2021"
 # Moved from anyrag-lib
 git2 = "0.20.2"
 htmd = "0.3.0"
-tempfile = "3.22.0"
+tempfile = "3.23.0"
 semver = "1.0.27"
 kuchikiki = "0.8.2"
 html5ever = "0.35.0"
