@@ -134,11 +134,11 @@ pub async fn spawn(test_case_name: &str) -> Result<Self> {
 
     // Create a unique temporary directory for this specific test run.
     let temp_dir = tempdir()?;
-    
+
     // Create all necessary files and subdirectories WITHIN the unique temp directory.
     let db_file = NamedTempFile::new_in(temp_dir.path())?;
     let db_path = db_file.path();
-    
+
     let github_db_dir = temp_dir.path().join("github_ingest");
     std::fs::create_dir(&github_db_dir)?;
 

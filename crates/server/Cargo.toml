@@ -92,8 +92,8 @@ path = "tests/embedding_test.rs"
 harness = true
 
 [[test]]
-name = "ingest_text_test"
-path = "tests/ingest_text_test.rs"
+name = "text_ingest_test"
+path = "tests/text_ingest_test.rs"
 harness = true
 
 [[test]]
@@ -147,6 +147,6 @@ path = "tests/github_search_test.rs"
 harness = true
 
 [[test]]
-name = "ingest_sheet_test"
-path = "tests/ingest_sheet_test.rs"
+name = "sheet_ingest_test"
+path = "tests/sheet_ingest_test.rs"
 harness = true
