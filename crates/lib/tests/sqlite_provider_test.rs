@@ -152,9 +152,10 @@ async fn test_sqlite_provider_shared_db_and_datetime_query() {
     assert_eq!(result_json, expected_json);
 }
 
-/// Verifies that `INSERT ... ON CONFLICT DO UPDATE` (UPSERT) works correctly.
+/// Verifies that inserting a document with a duplicate `source_url` creates a new row,
+/// which is the expected behavior for a versioned system.
 #[tokio::test]
-async fn test_sqlite_provider_upsert_logic() {
+async fn test_sqlite_provider_versioning_logic() {
     setup_tracing();
 
     // 1. Arrange: Create a provider and use the real application schema.
@@ -171,28 +172,31 @@ async fn test_sqlite_provider_upsert_logic() {
         .await
         .expect("Failed to insert initial data");
 
-    // 2. Act: Execute an INSERT with a conflicting source_url.
-    let upsert_sql = "
+    // 2. Act: Execute another INSERT with the same source_url but a different ID.
+    let second_insert_sql = "
         INSERT INTO documents (id, source_url, title, content)
-        VALUES ('doc1_ignored', 'http://example.com', 'Updated Title', 'Updated Content')
-        ON CONFLICT(source_url) DO UPDATE SET
-        title = excluded.title,
-        content = excluded.content;
+        VALUES ('doc2', 'http://example.com', 'Updated Title', 'Updated Content');
     ";
     provider
-        .initialize_with_data(upsert_sql)
+        .initialize_with_data(second_insert_sql)
         .await
-        .expect("UPSERT operation failed");
+        .expect("Second insert operation failed");
 
-    // 3. Assert: Verify that the original row was updated and no new row was added.
+    // 3. Assert: Verify that a new row was added.
     let result_json = provider
-        .execute_query("SELECT id, source_url, title, content FROM documents")
+        .execute_query("SELECT id, source_url, title, content FROM documents ORDER BY id")
         .await
         .expect("Failed to query documents table");
 
     let expected_json = json!([
         {
             "id": "doc1",
+            "source_url": "http://example.com",
+            "title": "Original Title",
+            "content": "Original Content"
+        },
+        {
+            "id": "doc2",
             "source_url": "http://example.com",
             "title": "Updated Title",
             "content": "Updated Content"
@@ -202,18 +206,18 @@ async fn test_sqlite_provider_upsert_logic() {
 
     assert_eq!(
         result_json, expected_json,
-        "The document should have been updated."
+        "A new document version should have been created."
     );
 
-    // Also assert that the count is still 1.
+    // Also assert that the count is now 2.
     let count_json = provider
         .execute_query("SELECT COUNT(*) as count FROM documents")
         .await
         .expect("Failed to count documents");
 
-    let expected_count_json = json!([{"count": 1}]).to_string();
+    let expected_count_json = json!([{"count": 2}]).to_string();
     assert_eq!(
         count_json, expected_count_json,
-        "There should be only one document in the table."
+        "There should be two documents in the table."
     );
 }

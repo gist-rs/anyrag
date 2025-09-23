@@ -118,7 +118,7 @@ async fn run_web_ingestion_pipeline(
     owner_id: Option<&str>,
     prompts: IngestionPrompts<'_>,
     web_ingest_strategy: WebIngestStrategy<'_>,
-) -> Result<usize, WebIngestError> {
+) -> Result<Vec<String>, WebIngestError> {
     // 1. Fetch and restructure content first.
     let markdown_content = fetch_web_content(url, web_ingest_strategy).await?;
 
@@ -135,7 +135,7 @@ async fn run_web_ingestion_pipeline(
             "LLM restructuring resulted in empty content for source: {}",
             url
         );
-        return Ok(0);
+        return Ok(vec![]);
     }
 
     let yaml_content: YamlContent = match serde_yaml::from_str(&structured_yaml) {
@@ -146,60 +146,51 @@ async fn run_web_ingestion_pipeline(
                 url, e
             );
             // Even if parsing fails, we should store the raw structured YAML as a fallback.
-            let fallback_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, url.as_bytes()).to_string();
+            let fallback_id = Uuid::new_v4().to_string();
             let conn = db.connect()?;
             conn.execute(
-                "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)
-                 ON CONFLICT(source_url) DO UPDATE SET title=excluded.title, content=excluded.content",
-                params![fallback_id, owner_id, url, "Unparsed Content", structured_yaml],
+                "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+                params![fallback_id.clone(), owner_id, url, "Unparsed Content", structured_yaml],
             ).await?;
-            return Ok(1); // Return 1 as the parent doc was created/updated.
+            return Ok(vec![fallback_id]);
         }
     };
 
-    // 2. Atomically upsert all chunks.
+    // 2. Insert the entire structured content as a single document to enable versioning.
     let conn = db.connect()?;
-    let mut chunks_created = 0;
+    let doc_id = Uuid::new_v4().to_string();
+    // Use the title from the first section as the document title, or a fallback.
+    let title = yaml_content
+        .sections
+        .first()
+        .map(|s| s.title.clone())
+        .unwrap_or_else(|| url.to_string());
 
-    for (i, section) in yaml_content.sections.into_iter().enumerate() {
-        let chunk_content = YamlContent {
-            sections: vec![section.clone()],
-        };
-        let yaml_chunk = match serde_yaml::to_string(&chunk_content) {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        let source_url_with_chunk = format!("{url}#section_{i}");
-        let chunk_id =
-            Uuid::new_v5(&Uuid::NAMESPACE_URL, source_url_with_chunk.as_bytes()).to_string();
-
-        conn.execute(
-            "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)
-             ON CONFLICT(source_url) DO UPDATE SET title=excluded.title, content=excluded.content",
-            params![
-                chunk_id.clone(),
-                owner_id,
-                source_url_with_chunk,
-                section.title.clone(),
-                yaml_chunk.clone()
-            ],
-        ).await?;
-
-        chunks_created += 1;
-        extract_and_store_metadata(
-            &conn,
-            ai_provider,
-            &chunk_id,
+    conn.execute(
+        "INSERT INTO documents (id, owner_id, source_url, title, content) VALUES (?, ?, ?, ?, ?)",
+        params![
+            doc_id.clone(),
             owner_id,
-            &yaml_chunk,
-            prompts.metadata_extraction_system_prompt,
-        )
-        .await
-        .map_err(|e| WebIngestError::Internal(anyhow::anyhow!(e)))?;
-    }
+            url,
+            title,
+            structured_yaml.clone(),
+        ],
+    )
+    .await?;
 
-    Ok(chunks_created)
+    // 3. Extract and store metadata for the new document.
+    extract_and_store_metadata(
+        &conn,
+        ai_provider,
+        &doc_id,
+        owner_id,
+        &structured_yaml,
+        prompts.metadata_extraction_system_prompt,
+    )
+    .await
+    .map_err(|e| WebIngestError::Internal(anyhow::anyhow!(e)))?;
+
+    Ok(vec![doc_id])
 }
 
 // --- Ingestor Implementation ---
@@ -235,7 +226,7 @@ impl<'a> Ingestor for WebIngestor<'a> {
         let ingest_source: IngestSource = serde_json::from_str(source)
             .map_err(|e| IngestError::Parse(format!("Invalid source JSON for web ingest: {e}")))?;
 
-        let documents_added = run_web_ingestion_pipeline(
+        let document_ids = run_web_ingestion_pipeline(
             self.db,
             self.ai_provider,
             ingest_source.url,
@@ -247,8 +238,8 @@ impl<'a> Ingestor for WebIngestor<'a> {
 
         Ok(IngestionResult {
             source: ingest_source.url.to_string(),
-            documents_added,
-            document_ids: vec![],
+            documents_added: document_ids.len(),
+            document_ids,
             metadata: None,
         })
     }

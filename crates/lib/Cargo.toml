@@ -75,6 +75,15 @@ name = "knowledge_search_logic_test"
 path = "tests/knowledge_search_logic_test.rs"
 required-features = ["core-access"]
 
+[[test]]
+name = "memorag_test"
+path = "tests/memorag_test.rs"
+required-features = ["core-access"]
+
+[[test]]
+name = "rerank_test"
+path = "tests/rerank_test.rs"
+
 [[example]]
 name = "knowledge"
 path = "examples/knowledge.rs"

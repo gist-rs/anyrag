@@ -405,23 +405,25 @@ impl MockAiProvider {
         self.responses.lock().unwrap().push(response.to_string());
     }
 }
-
-// In the `generate` method, we remove the first item from the queue.
-// ...
-// Ok(responses.remove(0))
-// ...
 ```
+### Scenario 7: Hybrid Search Returns Fewer Results Than Expected
 
-With the corrected mock provider, the test can now program the responses in the exact order of execution, guaranteeing the right response is returned for each sequential call.
+-   **Symptom**: In a test where multiple versions of a document are ingested (e.g., from the same URL but with different content), `hybrid_search` returns only one result instead of all the ingested versions.
+-   **Root Cause**: The de-duplication logic in the `reciprocal_rank_fusion` function in `rerank.rs` may be too aggressive. If it uses only the document's `link` (URL) as a unique key, it will incorrectly treat all versions of a document as duplicates and discard all but one.
+-   **Solution**: Modify the `reciprocal_rank_fusion` function to use a more specific unique key. Instead of just the `link`, use a combination of the `link` and the `description` (which contains the actual content). This ensures that documents with the same source URL but different content are treated as unique.
 
-```rust
-// In: crates/pdf/tests/pdf_ingest_test.rs
+    **Example fix in `anyrag/crates/lib/src/rerank.rs`:**
 
-// Program the mock AI provider with expected responses in FIFO order.
-// Call 1: Restructure
-ai_provider.add_response("ignored_key", expected_yaml);
-// Call 2: Metadata for chunk 1
-ai_provider.add_response("ignored_key", &mock_metadata_1);
-// Call 3: Metadata for chunk 2
-ai_provider.add_response("ignored_key", &mock_metadata_2);
-```
+    ```rust
+    // A document is unique by its link *and* its content. This prevents
+    // different versions of the same document (same link) from being de-duplicated.
+    let unique_key = format!("{}::{}", result.link, result.description);
+
+    // ...
+
+    *rrf_scores.entry(unique_key.clone()).or_insert(0.0) += score;
+
+    all_unique_results
+        .entry(unique_key)
+        .or_insert_with(|| result.clone());
+    ```

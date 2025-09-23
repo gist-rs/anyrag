@@ -10,6 +10,7 @@ pub mod errors;
 pub mod executor;
 
 pub mod constants;
+pub mod curator;
 pub mod ingest;
 pub mod prompts;
 pub mod providers;

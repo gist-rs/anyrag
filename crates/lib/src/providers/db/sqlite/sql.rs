@@ -19,7 +19,7 @@ pub const CREATE_DOCUMENTS_TABLE_SQL: &str = "
     CREATE TABLE IF NOT EXISTS documents (
         id TEXT PRIMARY KEY,
         owner_id TEXT, -- Nullable for public content
-        source_url TEXT UNIQUE,
+        source_url TEXT,
         title TEXT,
         content TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

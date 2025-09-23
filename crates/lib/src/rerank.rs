@@ -120,6 +120,10 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
 
     for (set_index, results) in result_sets.iter().enumerate() {
         for (rank, result) in results.iter().enumerate() {
+            // A document is unique by its link *and* its content. This prevents
+            // different versions of the same document (same link) from being de-duplicated.
+            let unique_key = format!("{}::{}", result.link, result.description);
+
             // Give a significantly higher weight to the first result set (metadata),
             // treating it as a high-precision signal.
             let score = if set_index == 0 {
@@ -131,11 +135,11 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
                 "RRF score for '{}' (set: {}, rank: {}): {}",
                 result.title, set_index, rank, score
             );
-            *rrf_scores.entry(result.link.clone()).or_insert(0.0) += score;
+            *rrf_scores.entry(unique_key.clone()).or_insert(0.0) += score;
 
             // Collect unique results by link
             all_unique_results
-                .entry(result.link.clone())
+                .entry(unique_key)
                 .or_insert_with(|| result.clone());
         }
     }
@@ -147,8 +151,10 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
     let mut combined_results: Vec<SearchResult> = all_unique_results.into_values().collect();
 
     combined_results.sort_by(|a, b| {
-        let score_a = rrf_scores.get(&a.link).unwrap_or(&0.0);
-        let score_b = rrf_scores.get(&b.link).unwrap_or(&0.0);
+        let key_a = format!("{}::{}", a.link, a.description);
+        let score_a = rrf_scores.get(&key_a).unwrap_or(&0.0);
+        let key_b = format!("{}::{}", b.link, b.description);
+        let score_b = rrf_scores.get(&key_b).unwrap_or(&0.0);
         score_b
             .partial_cmp(score_a)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -156,7 +162,8 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
 
     // Update the final score in each result for debugging/transparency
     for result in &mut combined_results {
-        result.score = *rrf_scores.get(&result.link).unwrap_or(&0.0);
+        let key = format!("{}::{}", result.link, result.description);
+        result.score = *rrf_scores.get(&key).unwrap_or(&0.0);
     }
 
     debug!("Final RRF scores: {:?}", rrf_scores);
