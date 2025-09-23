@@ -5,6 +5,7 @@
 mod common;
 
 use anyhow::Result;
+use anyrag::prompts::tasks;
 use common::TestApp;
 use httpmock::Method;
 use serde_json::json;
@@ -55,8 +56,14 @@ async fn test_e2e_prompt_execution() -> Result<()> {
     let format_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/test_e2e_prompt_execution/v1/chat/completions")
-            .body_contains("strict data processor") // Differentiate from query gen
-            .body_contains("27894"); // Check for the key part of the DB result
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": tasks::RESPONSE_FORMATTING_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": "27,894"}}]}),
         );
