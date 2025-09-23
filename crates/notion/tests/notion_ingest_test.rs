@@ -3,7 +3,6 @@
 use anyhow::Result;
 use anyrag::ingest::Ingestor;
 use anyrag_notion::NotionIngestor;
-use anyrag_test_utils::TestSetup;
 use httpmock::{Method, MockServer};
 use serial_test::serial;
 
@@ -15,7 +14,6 @@ use turso::{params, Value as TursoValue};
 #[serial]
 async fn test_notion_ingestion_workflow() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let setup = TestSetup::new().await?;
     let mock_server = MockServer::start();
     let owner_id = "notion-ingest-user-001";
 
@@ -109,7 +107,7 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
     });
 
     // --- 3. Act: Ingest the Notion Database ---
-    let ingestor = NotionIngestor::new(&setup.db);
+    let ingestor = NotionIngestor::new();
     let source = json!({ "database_id": db_id }).to_string();
 
     let result = ingestor.ingest(&source, Some(owner_id)).await?;
@@ -126,11 +124,18 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
     );
     assert_eq!(table_name, &expected_table_name);
 
-    let conn = setup.db.connect()?;
+    let metadata: serde_json::Value =
+        serde_json::from_str(result.metadata.as_ref().expect("metadata should exist"))?;
+    let db_file = metadata["db_file"]
+        .as_str()
+        .expect("db_file should be in metadata");
+
+    let db = turso::Builder::new_local(db_file).build().await?;
+    let conn = db.connect()?;
 
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT `Task`, `Status`, `busy_date`, `busy_time` FROM `{table_name}` ORDER BY `Task`, `busy_time`"
+            "SELECT `Task`, `Status`, `busy_date`, `busy_hour` FROM `{table_name}` ORDER BY `Task`, `busy_hour`"
         ))
         .await?;
     let mut rows = stmt.query(params![]).await?;
@@ -140,28 +145,28 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
     assert_eq!(row1.get::<String>(0)?, "Review PR");
     assert_eq!(row1.get::<String>(1)?, "Done");
     assert_eq!(row1.get_value(2)?, TursoValue::Null); // busy_date
-    assert_eq!(row1.get_value(3)?, TursoValue::Null); // busy_time
+    assert_eq!(row1.get_value(3)?, TursoValue::Null); // busy_hour
 
     // Second result: "Write integration test" (Hour 1 of expansion)
     let row2 = rows.next().await?.expect("Expected row 2");
     assert_eq!(row2.get::<String>(0)?, "Write integration test");
     assert_eq!(row2.get::<String>(1)?, "In Progress");
     assert_eq!(row2.get::<String>(2)?, "2024-08-01"); // busy_date
-    assert_eq!(row2.get::<String>(3)?, "10:00:00"); // busy_time
+    assert_eq!(row2.get::<String>(3)?, "10:00:00"); // busy_hour
 
     // Third result: "Write integration test" (Hour 2 of expansion)
     let row3 = rows.next().await?.expect("Expected row 3");
     assert_eq!(row3.get::<String>(0)?, "Write integration test");
     assert_eq!(row3.get::<String>(1)?, "In Progress");
     assert_eq!(row3.get::<String>(2)?, "2024-08-01"); // busy_date
-    assert_eq!(row3.get::<String>(3)?, "11:00:00"); // busy_time
+    assert_eq!(row3.get::<String>(3)?, "11:00:00"); // busy_hour
 
     // Fourth result: "Write integration test" (Hour 3 of expansion)
     let row4 = rows.next().await?.expect("Expected row 4");
     assert_eq!(row4.get::<String>(0)?, "Write integration test");
     assert_eq!(row4.get::<String>(1)?, "In Progress");
     assert_eq!(row4.get::<String>(2)?, "2024-08-01"); // busy_date
-    assert_eq!(row4.get::<String>(3)?, "12:00:00"); // busy_time
+    assert_eq!(row4.get::<String>(3)?, "12:00:00"); // busy_hour
 
     assert!(
         rows.next().await?.is_none(),
@@ -172,8 +177,11 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
     db_details_mock.assert();
     query_mock.assert();
 
-    // Cleanup env var
+    // --- 6. Cleanup ---
     env::remove_var("NOTION_API_BASE_URL_OVERRIDE_FOR_TESTING");
+    std::fs::remove_file(db_file)?;
+    // Attempt to remove the db directory; ignore error if not empty or other issues.
+    let _ = std::fs::remove_dir("db");
 
     Ok(())
 }
@@ -182,7 +190,6 @@ async fn test_notion_ingestion_workflow() -> Result<()> {
 #[serial]
 async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
     // --- 1. Arrange & Setup ---
-    let setup = TestSetup::new().await?;
     let mock_server = MockServer::start();
 
     // Set env vars immediately after server starts to ensure the http client uses the mock URL.
@@ -240,14 +247,14 @@ async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
 
     let query_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path(format!("/v1/data_sources/{}/query", data_source_id));
+            .path(format!("/v1/data_sources/{data_source_id}/query"));
         then.status(200)
             .header("Content-Type", "application/json")
             .json_body(query_response);
     });
 
     // --- 3. Act ---
-    let ingestor = NotionIngestor::new(&setup.db);
+    let ingestor = NotionIngestor::new();
     let source = json!({ "database_id": db_id }).to_string();
     let result = ingestor.ingest(&source, Some(owner_id)).await?;
 
@@ -258,11 +265,18 @@ async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
     );
     let table_name = &result.document_ids[0];
 
-    let conn = setup.db.connect()?;
+    let metadata: serde_json::Value =
+        serde_json::from_str(result.metadata.as_ref().expect("metadata should exist"))?;
+    let db_file = metadata["db_file"]
+        .as_str()
+        .expect("db_file should be in metadata");
+
+    let db = turso::Builder::new_local(db_file).build().await?;
+    let conn = db.connect()?;
+
     let mut stmt = conn
         .prepare(&format!(
-            "SELECT `Event`, `busy_date`, `busy_time` FROM `{}` ORDER BY `busy_time`",
-            table_name
+            "SELECT `Event`, `busy_date`, `busy_hour` FROM `{table_name}` ORDER BY `busy_hour`"
         ))
         .await?;
     let mut rows = stmt.query(params![]).await?;
@@ -294,6 +308,9 @@ async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
     db_details_mock.assert();
     query_mock.assert();
     env::remove_var("NOTION_API_BASE_URL_OVERRIDE_FOR_TESTING");
+    std::fs::remove_file(db_file)?;
+    // Attempt to remove the db directory; ignore error if not empty or other issues.
+    let _ = std::fs::remove_dir("db");
 
     Ok(())
 }

@@ -89,6 +89,7 @@ impl Ingestor for RssIngestor {
             info!("RSS feed has no items to ingest.");
             return Ok(IngestionResult {
                 source: feed_url.to_string(),
+                metadata: None,
                 ..Default::default()
             });
         }
@@ -142,6 +143,7 @@ impl Ingestor for RssIngestor {
             documents_added: new_document_ids.len(),
             source: feed_url.to_string(),
             document_ids: new_document_ids,
+            metadata: None,
         })
     }
 }

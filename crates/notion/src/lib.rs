@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::env;
 use thiserror::Error;
 use tracing::{info, warn};
-use turso::{params, Connection, Database, Value};
+use turso::{params, Connection, Value};
 
 // --- Error Definitions ---
 
@@ -88,6 +88,7 @@ enum PropertyValue {
 
 #[derive(Deserialize, Debug)]
 struct Page {
+    #[allow(unused)]
     id: String,
     properties: HashMap<String, PropertyValue>,
 }
@@ -106,6 +107,7 @@ struct DataSource {
 
 #[derive(Deserialize, Debug)]
 struct DatabaseResponse {
+    #[allow(unused)]
     id: String,
     data_sources: Vec<DataSource>,
 }
@@ -119,19 +121,23 @@ struct NotionSource {
 }
 
 /// The `Ingestor` implementation for Notion.
-pub struct NotionIngestor<'a> {
-    db: &'a Database,
+pub struct NotionIngestor;
+
+impl NotionIngestor {
+    /// Creates a new `NotionIngestor`.
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
-impl<'a> NotionIngestor<'a> {
-    /// Creates a new `NotionIngestor`.
-    pub fn new(db: &'a Database) -> Self {
-        Self { db }
+impl Default for NotionIngestor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[async_trait]
-impl Ingestor for NotionIngestor<'_> {
+impl Ingestor for NotionIngestor {
     /// Ingests a Notion Database.
     ///
     /// The `source` argument is expected to be a JSON string with a `database_id` key,
@@ -177,6 +183,7 @@ impl Ingestor for NotionIngestor<'_> {
                 documents_added: 0,
                 source: db_id,
                 document_ids: vec![],
+                metadata: None,
             });
         }
 
@@ -186,8 +193,16 @@ impl Ingestor for NotionIngestor<'_> {
             md5::compute(format!("{db_id}::{data_source_id}"))
         );
 
-        // 4. Process pages and store in the database.
-        let mut conn = self.db.connect()?;
+        // 4. Create a unique database file and process pages.
+        let db_dir = "db";
+        std::fs::create_dir_all(db_dir).map_err(|e| IngestError::Internal(anyhow!(e)))?;
+        let db_file_name = format!(
+            "{}/notion_{:x}.db",
+            db_dir,
+            md5::compute(format!("{db_id}::{data_source_id}"))
+        );
+        let db = turso::Builder::new_local(&db_file_name).build().await?;
+        let mut conn = db.connect()?;
         process_and_store_pages(&mut conn, &table_name, pages).await?;
 
         let total_rows: usize = conn
@@ -205,7 +220,15 @@ impl Ingestor for NotionIngestor<'_> {
         Ok(IngestionResult {
             documents_added: total_rows,
             source: db_id,
-            document_ids: vec![table_name], // Use table name as the identifier.
+            document_ids: vec![table_name.clone()], // Use table name as the identifier.
+            metadata: Some(
+                json!({
+                    "table_name": table_name,
+                    "data_source_id": data_source_id,
+                    "db_file": db_file_name,
+                })
+                .to_string(),
+            ),
         })
     }
 }
@@ -273,7 +296,11 @@ async fn query_all_pages(
     );
 
     loop {
-        let body = json!({ "start_cursor": next_cursor });
+        let body = if let Some(cursor) = &next_cursor {
+            json!({ "start_cursor": cursor })
+        } else {
+            json!({})
+        };
         let response = client
             .post(&url)
             .headers(headers.clone())
@@ -348,7 +375,7 @@ async fn process_and_store_pages(
 
     if date_range_col.is_some() {
         columns.push("`busy_date`".to_string());
-        columns.push("`busy_time`".to_string());
+        columns.push("`busy_hour`".to_string());
     }
 
     // Create table
@@ -412,7 +439,7 @@ async fn process_and_store_pages(
                     for col in &columns {
                         if col == "`busy_date`" {
                             row_params.push(current_dt.format("%Y-%m-%d").to_string().into());
-                        } else if col == "`busy_time`" {
+                        } else if col == "`busy_hour`" {
                             row_params.push(current_dt.format("%H:%M:%S").to_string().into());
                         } else {
                             row_params.push(base_row_data.get(col).cloned().unwrap_or(Value::Null));

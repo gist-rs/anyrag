@@ -98,6 +98,7 @@ impl Ingestor for GithubIngestor {
             source: format!("{}#{}", ingest_source.url, ingested_version),
             documents_added: ingested_count,
             document_ids: vec![], // The current function doesn't return IDs. This can be added later.
+            metadata: None,
         })
     }
 }

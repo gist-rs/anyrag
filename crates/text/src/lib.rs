@@ -87,6 +87,7 @@ impl Ingestor for TextIngestor<'_> {
             documents_added: document_ids.len(),
             source: text_source.source,
             document_ids,
+            metadata: None,
         })
     }
 }

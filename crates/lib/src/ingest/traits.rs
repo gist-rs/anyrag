@@ -36,6 +36,10 @@ pub struct IngestionResult {
     pub documents_added: usize,
     /// A list of the unique IDs of the newly created documents.
     pub document_ids: Vec<String>,
+    /// Optional field for returning extra context about the ingestion.
+    /// This can be used for logging or for returning additional information to the user.
+    /// It is a JSON string to allow for flexibility in the data that can be returned.
+    pub metadata: Option<String>,
 }
 
 /// A generic trait that defines the contract for an ingestion plugin.

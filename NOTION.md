@@ -94,7 +94,7 @@ The core of the ingestion logic will involve processing the `results` array from
     ```
     This will be expanded into multiple rows in the target SQLite table. Each day within the range will generate a new row. The other property values from the original Notion row will be duplicated for each generated row.
     -   A `busy_date` column will store the date (e.g., `2025-09-18`).
-    -   A `busy_time` column will store the start time (e.g., `10:00:00`).
+    -   A `busy_hour` column will store the specific hour of the day (e.g., `10:00:00`).
 
 ## 3. Database Schema and Naming
 

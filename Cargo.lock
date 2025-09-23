@@ -342,6 +342,7 @@ dependencies = [
  "dotenvy",
  "dyn-clone",
  "httpmock",
+ "log",
  "md5 0.7.0",
  "reqwest",
  "serde",
@@ -350,6 +351,7 @@ dependencies = [
  "thiserror 2.0.16",
  "tokio",
  "tracing",
+ "tracing-subscriber",
  "turso",
  "uuid",
 ]

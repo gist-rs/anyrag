@@ -249,6 +249,7 @@ impl<'a> Ingestor for WebIngestor<'a> {
             source: ingest_source.url.to_string(),
             documents_added,
             document_ids: vec![],
+            metadata: None,
         })
     }
 }
