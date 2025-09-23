@@ -8,6 +8,7 @@ mod common;
 
 use crate::common::TestSetup;
 use anyrag::{
+    prompts::tasks::{QUERY_GENERATION_SYSTEM_PROMPT, RESPONSE_FORMATTING_SYSTEM_PROMPT},
     providers::ai::local::LocalAiProvider,
     types::{ExecutePromptOptions, PromptClientBuilder},
 };
@@ -27,7 +28,14 @@ async fn test_prompt_execution_with_sqlite() {
     let query_gen_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("intelligent data assistant"); // The prompt for SQLite uses "SQL"
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": QUERY_GENERATION_SYSTEM_PROMPT.replace("{db_name}", "SQLite").replace("{language}", "SQL")}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             // The AI's "response" is the generated SQL query.
             json!({"choices": [{"message": {"role": "assistant", "content": "SELECT name FROM test_table WHERE id = 1;"}}]}),
@@ -38,7 +46,14 @@ async fn test_prompt_execution_with_sqlite() {
     let format_mock = mock_server.mock(|when, then| {
         when.method(Method::POST)
             .path("/v1/chat/completions")
-            .body_contains("strict data processor");
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": RESPONSE_FORMATTING_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             // The AI's "response" is the final, user-facing text.
             json!({"choices": [{"message": {"role": "assistant", "content": "The name for ID 1 is 'test'."}}]}),

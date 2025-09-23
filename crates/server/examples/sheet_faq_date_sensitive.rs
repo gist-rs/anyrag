@@ -114,7 +114,7 @@ async fn main() -> Result<()> {
             }
         }
         Err(e) => {
-            bail!("Sheet FAQ ingestion failed: {:?}", e);
+            bail!("Sheet FAQ ingestion failed: {e:?}");
         }
     }
 
@@ -130,7 +130,7 @@ async fn main() -> Result<()> {
     .await
     {
         Ok(_) => info!("Embedding request completed successfully."),
-        Err(e) => bail!("Document embedding failed: {:?}", e),
+        Err(e) => bail!("Document embedding failed: {e:?}"),
     }
 
     // --- 4. Ask a Question using RAG ---
@@ -159,7 +159,7 @@ async fn main() -> Result<()> {
     .await
     {
         Ok(Json(response)) => response.result.text.to_string(),
-        Err(e) => bail!("Error occurred while asking question: {:?}", e),
+        Err(e) => bail!("Error occurred while asking question: {e:?}"),
     };
 
     // --- 5. Print Final Results ---

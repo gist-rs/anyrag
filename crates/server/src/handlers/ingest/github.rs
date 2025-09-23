@@ -77,7 +77,7 @@ pub async fn get_versioned_examples_handler(
     let examples = storage_manager
         .get_examples(&path.repo_name, &path.version)
         .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to retrieve examples: {}", e)))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to retrieve examples: {e}")))?;
 
     if examples.is_empty() {
         let response = GetExamplesResponse {
@@ -139,7 +139,7 @@ pub async fn get_latest_examples_handler(
     let examples = storage_manager
         .get_examples(&path.repo_name, &latest_version)
         .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to retrieve examples: {}", e)))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to retrieve examples: {e}")))?;
 
     if examples.is_empty() {
         let response = GetExamplesResponse {
@@ -185,8 +185,7 @@ pub async fn search_examples_handler(
     let task_name = "query_analysis";
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
-            "Configuration for task '{}' not found.",
-            task_name
+            "Configuration for task '{task_name}' not found."
         ))
     })?;
     let provider_name = &task_config.provider;
@@ -195,8 +194,7 @@ pub async fn search_examples_handler(
         .get(provider_name)
         .ok_or_else(|| {
             AppError::Internal(anyhow::anyhow!(
-                "Provider '{}' not found in providers map.",
-                provider_name
+                "Provider '{provider_name}' not found in providers map."
             ))
         })?
         .clone();
@@ -216,7 +214,7 @@ pub async fn search_examples_handler(
         embedding_api_key,
     )
     .await
-    .map_err(|e| AppError::Internal(anyhow::anyhow!("Example search failed: {}", e)))?;
+    .map_err(|e| AppError::Internal(anyhow::anyhow!("Example search failed: {e}")))?;
 
     let response = SearchExamplesResponse {
         results: search_results,

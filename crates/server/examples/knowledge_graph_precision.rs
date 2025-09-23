@@ -80,7 +80,7 @@ async fn ask_question(
 
     match result {
         Ok(Json(response)) => Ok(response.result.text.to_string()),
-        Err(e) => anyhow::bail!("Error occurred while asking question: {:?}", e),
+        Err(e) => anyhow::bail!("Error occurred while asking question: {e:?}"),
     }
 }
 

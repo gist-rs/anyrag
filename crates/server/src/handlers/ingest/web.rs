@@ -37,18 +37,17 @@ pub async fn ingest_web_handler(
     // 1. Get necessary providers and prompts from app state
     let task_name = "knowledge_distillation";
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!("Task '{}' not found in config", task_name))
+        AppError::Internal(anyhow::anyhow!("Task '{task_name}' not found in config"))
     })?;
     let provider_name = &task_config.provider;
     let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
-        AppError::Internal(anyhow::anyhow!("Provider '{}' not found", provider_name))
+        AppError::Internal(anyhow::anyhow!("Provider '{provider_name}' not found"))
     })?;
 
     let meta_task_name = "knowledge_metadata_extraction";
     let meta_task_config = app_state.tasks.get(meta_task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
-            "Task '{}' not found in config",
-            meta_task_name
+            "Task '{meta_task_name}' not found in config"
         ))
     })?;
 

@@ -122,8 +122,7 @@ pub async fn graph_build_handler(
         (Some(s), Some(p), Some(o)) if !s.is_empty() && !p.is_empty() && !o.is_empty() => (s, p, o),
         _ => {
             return Err(AppError::Internal(anyhow::anyhow!(
-                    "AI could not determine a valid subject-predicate-object mapping from the table schema. Raw AI response: {}",
-                    cleaned_response
+                    "AI could not determine a valid subject-predicate-object mapping from the table schema. Raw AI response: {cleaned_response}"
                 )));
         }
     };

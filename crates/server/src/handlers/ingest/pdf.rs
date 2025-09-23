@@ -76,7 +76,7 @@ pub async fn ingest_pdf_handler(
                 let extractor_str = field.text().await.map_err(anyhow::Error::from)?;
                 extractor_choice =
                     serde_json::from_str(&format!("\"{extractor_str}\"")).map_err(|e| {
-                        AppError::Internal(anyhow::anyhow!("Invalid extractor choice: {}", e))
+                        AppError::Internal(anyhow::anyhow!("Invalid extractor choice: {e}"))
                     })?;
                 info!("Extractor choice set to: {:?}", extractor_choice);
             }
@@ -99,15 +99,13 @@ pub async fn ingest_pdf_handler(
     let task_name = "knowledge_distillation";
     let task_config = app_state.tasks.get(task_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
-            "Configuration for task '{}' not found.",
-            task_name
+            "Configuration for task '{task_name}' not found."
         ))
     })?;
     let provider_name = &task_config.provider;
     let ai_provider = app_state.ai_providers.get(provider_name).ok_or_else(|| {
         AppError::Internal(anyhow::anyhow!(
-            "Provider '{}' not found in providers map.",
-            provider_name
+            "Provider '{provider_name}' not found in providers map."
         ))
     })?;
 

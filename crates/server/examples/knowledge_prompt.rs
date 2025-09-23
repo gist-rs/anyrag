@@ -74,7 +74,7 @@ async fn ask_question(
 
     match result {
         Ok(Json(response)) => Ok(response.result.text.to_string()),
-        Err(e) => anyhow::bail!("Error occurred while asking question: {:?}", e),
+        Err(e) => anyhow::bail!("Error occurred while asking question: {e:?}"),
     }
 }
 
@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
             }
         }
         Err(e) => {
-            anyhow::bail!("Knowledge ingestion failed: {:?}. Please ensure your AI provider is running and configured in .env", e);
+            anyhow::bail!("Knowledge ingestion failed: {e:?}. Please ensure your AI provider is running and configured in .env");
         }
     }
 
@@ -170,7 +170,7 @@ async fn main() -> Result<()> {
             info!("Embedding request completed successfully.");
         }
         Err(e) => {
-            anyhow::bail!("Document embedding failed: {:?}", e);
+            anyhow::bail!("Document embedding failed: {e:?}");
         }
     }
 

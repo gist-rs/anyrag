@@ -48,7 +48,7 @@ impl From<NotionError> for IngestError {
             NotionError::Fetch(msg) => IngestError::Fetch(msg),
             NotionError::ApiError(msg) => IngestError::Internal(anyhow!(msg)),
             NotionError::MissingEnvVar(msg) => {
-                IngestError::Internal(anyhow!("Missing environment variable: {}", msg))
+                IngestError::Internal(anyhow!("Missing environment variable: {msg}"))
             }
             NotionError::NoDataSource => {
                 IngestError::SourceNotFound("No data sources found for database".into())

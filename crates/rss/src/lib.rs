@@ -35,7 +35,7 @@ impl From<RssIngestError> for IngestError {
             RssIngestError::Fetch(e) => IngestError::Fetch(e.to_string()),
             RssIngestError::Parse(e) => IngestError::Parse(e.to_string()),
             RssIngestError::SourceDeserialization(e) => {
-                IngestError::Internal(anyhow!("Failed to deserialize source JSON: {}", e))
+                IngestError::Internal(anyhow!("Failed to deserialize source JSON: {e}"))
             }
         }
     }

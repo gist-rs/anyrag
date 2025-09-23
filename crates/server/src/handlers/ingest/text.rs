@@ -54,7 +54,7 @@ pub async fn ingest_text_handler(
     let result = ingestor
         .ingest(&source_json, owner_id.as_deref())
         .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("Text ingestion failed: {}", e)))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Text ingestion failed: {e}")))?;
 
     // 4. Construct the final HTTP response.
     let message = if result.documents_added > 0 {

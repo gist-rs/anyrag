@@ -39,7 +39,7 @@ impl From<TextIngestError> for AnyragIngestError {
                 AnyragIngestError::Parse("Text content is empty or only whitespace".to_string())
             }
             TextIngestError::SourceDeserialization(e) => {
-                AnyragIngestError::Internal(anyhow!("Failed to deserialize source JSON: {}", e))
+                AnyragIngestError::Internal(anyhow!("Failed to deserialize source JSON: {e}"))
             }
         }
     }

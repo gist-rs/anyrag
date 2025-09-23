@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
             );
             response.result.text
         }
-        Err(e) => anyhow::bail!("Error occurred while asking question: {:?}", e),
+        Err(e) => anyhow::bail!("Error occurred while asking question: {e:?}"),
     };
 
     // --- 5. Print Final Results ---

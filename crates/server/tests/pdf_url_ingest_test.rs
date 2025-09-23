@@ -18,7 +18,6 @@ use anyrag_test_utils::helpers::generate_test_pdf;
 use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use serde_json::{json, Value};
-use serde_yaml;
 use turso::{params, Builder};
 
 #[tokio::test]

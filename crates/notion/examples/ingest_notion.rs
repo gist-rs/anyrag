@@ -103,7 +103,7 @@ async fn main() -> Result<()> {
                     ai_api_key,
                     ai_model,
                 )?),
-                _ => return Err(anyhow!("Unsupported AI provider: {}", ai_provider_name)),
+                _ => return Err(anyhow!("Unsupported AI provider: {ai_provider_name}")),
             };
 
             // --- Storage Provider Setup ---

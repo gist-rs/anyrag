@@ -43,8 +43,7 @@ async fn auth_service(
             if let Some(tx) = tx_lock.take() {
                 if let Some(err_msg) = params.error {
                     let _ = tx.send(Err(anyhow::anyhow!(
-                        "Authentication server returned an error: {}",
-                        err_msg
+                        "Authentication server returned an error: {err_msg}"
                     )));
                     let mut response = Response::new("Login failed. Please try again.".to_string());
                     *response.status_mut() = StatusCode::UNAUTHORIZED;
@@ -134,7 +133,7 @@ pub async fn login() -> Result<String> {
 
     // 5. Wait for the token or a timeout.
     let token_result = tokio::select! {
-        res = token_rx => res.map_err(|e| anyhow::anyhow!("Token channel closed unexpectedly: {}", e)),
+        res = token_rx => res.map_err(|e| anyhow::anyhow!("Token channel closed unexpectedly: {e}")),
         _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => {
             server_handle.abort();
             bail!("Authentication flow timed out after 2 minutes.")

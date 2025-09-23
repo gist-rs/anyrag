@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
     .await
     {
         Ok(Json(response)) => response.result.text,
-        Err(e) => anyhow::bail!("Error occurred while asking question: {:?}", e),
+        Err(e) => anyhow::bail!("Error occurred while asking question: {e:?}"),
     };
 
     // --- 4. Print Final Results ---

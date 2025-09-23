@@ -44,7 +44,7 @@ pub async fn ingest_rss_handler(
     let result = ingestor
         .ingest(&source_json, owner_id.as_deref())
         .await
-        .map_err(|e| AppError::Internal(anyhow::anyhow!("RSS ingestion failed: {}", e)))?;
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("RSS ingestion failed: {e}")))?;
 
     // 4. Construct the final HTTP response.
     let response = IngestRssResponse {

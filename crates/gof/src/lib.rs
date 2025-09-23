@@ -196,7 +196,7 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
                 }
                 Err(e) => {
                     eprintln!("  ❌ Error ingesting {url}@{version}: {e:?}");
-                    Err(anyhow!("Ingestion failed for {}", url))
+                    Err(anyhow!("Ingestion failed for {url}"))
                 }
             }
         });
