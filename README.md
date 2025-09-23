@@ -11,7 +11,7 @@ This project is a comprehensive Rust-based platform for building a self-improvin
 
 -   **Comprehensive Knowledge Base Pipeline:**
     -   **Multi-Source Ingestion:** Builds a knowledge base from various sources:
-        -   Web URLs, PDFs, Google Sheets, RSS Feeds, and Raw Text.
+        -   Web URLs, PDFs, Google Sheets, RSS Feeds, Notion Databases, and Raw Text.
     -   **AI-Powered Distillation:** Uses an LLM to automatically extract explicit Q&A pairs and generate new ones from unstructured text.
     -   **Vector Embeddings:** Generates embeddings for semantic search.
 

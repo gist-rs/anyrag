@@ -323,3 +323,36 @@ let ingest_res = app
     .send()
     .await?;
 ```
+
+### Scenario 5: Intermittent Failures or Mock Errors in Parallel Tests
+
+-   **Symptom**: Tests fail intermittently, often with mock-related errors like `Request did not match any route or mock`, but only when run in parallel (`cargo test`). Running a single test file or a specific test function individually succeeds.
+-   **Cause**: A race condition. Two or more tests are modifying a shared, global resource simultaneously. The most common culprit is setting environment variables (`std::env::set_var`). If one test sets an environment variable that another test depends on (e.g., a mock server URL), and they run at the same time, one test can overwrite the variable before the other is finished with it.
+-   **Solution**: Serialize the execution of the conflicting tests using the `serial_test` crate. This is the cleanest, most declarative way to ensure that specific tests do not run at the same time. It provides an attribute macro that handles all the locking behind the scenes.
+
+**Example Walkthrough (`notion_ingest_test`):**
+
+1.  **The Failure**: The `test_notion_ingestion_hourly_expansion` test failed with a mock error, but only when run alongside `test_notion_ingestion_workflow`. Both tests set the `NOTION_API_BASE_URL_OVERRIDE_FOR_TESTING` environment variable to a unique `MockServer` URL.
+2.  **Analysis**: The parallel test runner started both tests at roughly the same time. Test A set the environment variable to its mock server URL. Immediately after, Test B overwrote it with *its* mock server URL. When Test A's application code tried to make an HTTP request, it used the URL from Test B, causing the request to hit the wrong mock server and fail.
+3.  **The Fix**:
+    *   Add the `serial_test` crate to your `[dev-dependencies]`.
+    *   Add the `#[serial]` attribute to each test function that needs to be run sequentially.
+
+```rust
+// In: crates/notion/tests/notion_ingest_test.rs
+use serial_test::serial;
+
+#[tokio::test]
+#[serial] // This test will not run in parallel with other `#[serial]` tests
+async fn test_notion_ingestion_workflow() -> Result<()> {
+    // ... rest of the test setup, including env::set_var ...
+    Ok(())
+}
+
+#[tokio::test]
+#[serial] // This test will also be serialized
+async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
+    // ... rest of the test setup, including env::set_var ...
+    Ok(())
+}
+```

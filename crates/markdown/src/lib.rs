@@ -180,6 +180,7 @@ impl Ingestor for MarkdownIngestor {
             documents_added,
             source: file_path.to_string(),
             document_ids: ingested_ids,
+            metadata: None,
         })
     }
 }

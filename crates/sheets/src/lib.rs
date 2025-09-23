@@ -215,6 +215,7 @@ impl Ingestor for SheetsIngestor<'_> {
             documents_added: 1, // The entire sheet is treated as one document.
             source: sheet_source.url,
             document_ids: vec![document_id],
+            metadata: None,
         })
     }
 }
