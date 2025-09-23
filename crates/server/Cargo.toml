@@ -82,8 +82,8 @@ path = "tests/server_test.rs"
 harness = true
 
 [[test]]
-name = "ingest_rss_test"
-path = "tests/ingest_rss_test.rs"
+name = "rss_ingest_test"
+path = "tests/rss_ingest_test.rs"
 harness = true
 
 [[test]]
