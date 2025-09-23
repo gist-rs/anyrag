@@ -25,47 +25,9 @@ pub const QUERY_CONSTRUCTION_RULES: &str = r#"# Query Construction Rules
 8. For keyword searches (e.g., 'Rust') where no specific column is mentioned, it is vital to search across multiple fields. Your `WHERE` clause must use `LIKE` and `OR` to check for the keyword in all plausible text columns based on the schema. For example, you should check fields like `subject_name`, `class_name`, and `memo`.
 9. **Crucially, do not format data in the query** (e.g., using `TO_CHAR` or `FORMAT`). Return raw numbers and dates. Formatting is handled separately.
 10. **Compatibility Constraint**: You MUST NOT use subqueries (e.g., `SELECT ... FROM (SELECT ...)` or `WHERE col IN (SELECT ...)`). Use `JOIN`s or simplified `WHERE` clauses instead.
-11. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names."#;
-
-/// The default user prompt for the query generation stage (for BigQuery).
-///
-/// This template defines how the user's specific question and any table schema
-/// context are presented to the AI.
-///
-/// Placeholders: `{language}`, `{context}`, `{prompt}`, `{alias_instruction}`
-pub const DEFAULT_QUERY_USER_PROMPT: &str = r#"Your task is to write a single, read-only {language} query based on the provided schema and question.
-
-# Primary Goal
-{select_instruction}
-{alias_instruction}
-
-# User Question
-{prompt}
-
-# Context
-{context}
-
-{query_construction_rules}
-"#;
-
-/// A SQLite-specific user prompt for query generation.
-///
-/// This is similar to the default prompt but provides rules tailored to SQLite's SQL dialect,
-/// especially concerning date functions.
-pub const SQLITE_QUERY_USER_PROMPT: &str = r#"Your task is to write a single, read-only SQLite query based on the provided schema and question.
-
-# Primary Goal
-{select_instruction}
-{alias_instruction}
-
-# User Question
-{prompt}
-
-# Context
-{context}
-
-{query_construction_rules}
-"#;
+11. Use the provided table schema to ensure the query is correct. Do not use placeholders for table or column names.
+12. **SQLite Compatibility Error**: The database will fail if you use `ORDER BY` on a compound `SELECT` (like `UNION` or `EXCEPT`). You MUST write a query that avoids this pattern. For example, do not combine `EXCEPT` and `ORDER BY`.
+13. **Exclusion Logic (Availability)**: For questions about "who is available" or "who is not busy", you MUST use the `EXCEPT` clause to find the correct set of results. First, select all unique names/items. Then, `EXCEPT` the names/items that match the exclusion criteria. For example: `SELECT DISTINCT name FROM your_table EXCEPT SELECT name FROM your_table WHERE busy_date = 'YYYY-MM-DD'`."#;
 
 /// Generates the instruction for aliasing a result column in a query.
 ///

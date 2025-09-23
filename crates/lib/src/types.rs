@@ -6,8 +6,9 @@ use crate::{
     constants,
     errors::PromptError,
     prompts::{
-        core::{DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT},
+        core::DEFAULT_QUERY_SYSTEM_PROMPT,
         knowledge::{KNOWLEDGE_RAG_SYSTEM_PROMPT, KNOWLEDGE_RAG_USER_PROMPT},
+        tasks::QUERY_GENERATION_USER_PROMPT,
     },
     providers::{ai::AiProvider, db::storage::Storage},
     rerank::Rerankable,
@@ -59,7 +60,7 @@ impl ContentType {
             ContentType::Knowledge => (KNOWLEDGE_RAG_SYSTEM_PROMPT, KNOWLEDGE_RAG_USER_PROMPT),
             // Default to standard SQL prompts for other types for now.
             ContentType::Sql | ContentType::Json | ContentType::Text => {
-                (DEFAULT_QUERY_SYSTEM_PROMPT, DEFAULT_QUERY_USER_PROMPT)
+                (DEFAULT_QUERY_SYSTEM_PROMPT, QUERY_GENERATION_USER_PROMPT)
             }
         }
     }

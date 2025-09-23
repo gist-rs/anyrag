@@ -27,10 +27,7 @@ pub use types::{
 };
 
 use crate::prompts::{
-    core::{
-        get_alias_instruction, get_select_instruction, QUERY_CONSTRUCTION_RULES,
-        SQLITE_QUERY_USER_PROMPT,
-    },
+    core::{get_alias_instruction, get_select_instruction, QUERY_CONSTRUCTION_RULES},
     tasks::{
         QUERY_GENERATION_SYSTEM_PROMPT, QUERY_GENERATION_USER_PROMPT,
         RESPONSE_FORMATTING_SYSTEM_PROMPT, RESPONSE_FORMATTING_USER_PROMPT,
@@ -283,16 +280,6 @@ impl PromptClient {
                     .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
                     .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES)
-            } else if self.storage_provider.name() == "SQLite" {
-                // If the storage provider is SQLite, use the specialized user prompt.
-                SQLITE_QUERY_USER_PROMPT
-                    .replace("{language}", language)
-                    .replace("{context}", &context)
-                    .replace("{prompt}", &options.prompt)
-                    .replace("{select_instruction}", &select_instruction)
-                    .replace("{alias_instruction}", &alias_instruction)
-                    .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES)
-                    .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES)
             } else {
                 QUERY_GENERATION_USER_PROMPT
                     .replace("{language}", language)
@@ -300,6 +287,7 @@ impl PromptClient {
                     .replace("{prompt}", &options.prompt)
                     .replace("{select_instruction}", &select_instruction)
                     .replace("{alias_instruction}", &alias_instruction)
+                    .replace("{query_construction_rules}", QUERY_CONSTRUCTION_RULES)
             };
             (system_prompt, user_prompt)
         } else {
@@ -388,15 +376,22 @@ impl PromptClient {
 
     /// Formats a `TableSchema` into a markdown-like string for the AI prompt.
     fn format_schema_for_prompt(schema: &TableSchema) -> String {
+        // This regex is static and simple, so unwrap is safe.
+        let simple_identifier_re = regex::Regex::new(r"^[a-zA-Z0-9_]+$").unwrap();
         schema
             .fields
             .iter()
             .map(|field| {
-                let mut field_str = format!(
-                    "- {field_name}: {field_type:?}",
-                    field_name = field.name,
-                    field_type = field.r#type
-                );
+                // If a column name contains special characters (like spaces, parens, or CJK chars),
+                // wrap it in backticks to teach the AI the correct quoting syntax.
+                let field_name = if simple_identifier_re.is_match(&field.name) {
+                    field.name.clone()
+                } else {
+                    format!("`{}`", field.name)
+                };
+
+                let mut field_str =
+                    format!("- {field_name}: {field_type:?}", field_type = field.r#type);
                 if let Some(desc) = &field.description {
                     if !desc.is_empty() {
                         field_str.push_str(&format!(" ({desc})"));

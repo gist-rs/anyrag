@@ -27,3 +27,7 @@ serial_test = "3.0.0"
 dotenvy = "0.15.7"
 log = { workspace = true }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+anyrag = { path = "../lib", features = ["core-access"] }
+chrono = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

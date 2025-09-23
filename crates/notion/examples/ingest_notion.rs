@@ -22,13 +22,20 @@
 //! cargo run -p anyrag-notion --example ingest_notion
 //! ```
 
-use anyhow::Result;
-use anyrag::ingest::Ingestor;
+use anyhow::{anyhow, Result};
+use anyrag::{
+    ingest::Ingestor,
+    providers::{
+        ai::{gemini::GeminiProvider, local::LocalAiProvider, AiProvider},
+        db::sqlite::SqliteProvider,
+    },
+    ExecutePromptOptions, PromptClientBuilder,
+};
 use anyrag_notion::NotionIngestor;
+use chrono::Utc;
 use dotenvy::dotenv;
 use serde_json::json;
 use std::env;
-use turso::params;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -73,26 +80,70 @@ async fn main() -> Result<()> {
     }
     println!("Documents (rows) added: {}", result.documents_added);
 
-    // --- 3. Verification ---
+    // --- 3. NL-to-SQL Search ---
     if result.documents_added > 0 {
         if let Some(metadata_str) = &result.metadata {
-            println!("\n--- Verifying ingested data ---");
+            println!("\n--- Verifying with NL-to-SQL Search ---");
+
+            // --- AI Provider Setup ---
+            let ai_provider_name = env::var("AI_PROVIDER").unwrap_or_else(|_| "local".to_string());
+            let local_ai_api_url =
+                env::var("LOCAL_AI_API_URL").expect("LOCAL_AI_API_URL must be set");
+            let ai_api_key = env::var("AI_API_KEY").ok();
+            let ai_model = env::var("AI_MODEL").ok();
+
+            let ai_provider: Box<dyn AiProvider> = match ai_provider_name.as_str() {
+                "gemini" => {
+                    let key = ai_api_key.expect("AI_API_KEY is required for gemini provider");
+                    let gemini_url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent";
+                    Box::new(GeminiProvider::new(gemini_url.to_string(), key)?)
+                }
+                "local" => Box::new(LocalAiProvider::new(
+                    local_ai_api_url,
+                    ai_api_key,
+                    ai_model,
+                )?),
+                _ => return Err(anyhow!("Unsupported AI provider: {}", ai_provider_name)),
+            };
+
+            // --- Storage Provider Setup ---
             let metadata: serde_json::Value = serde_json::from_str(metadata_str)?;
             let db_file = metadata["db_file"].as_str().unwrap_or("N/A");
             let table_name = &result.document_ids[0];
+            let sqlite_provider = SqliteProvider::new(db_file).await?;
 
-            let db = turso::Builder::new_local(db_file).build().await?;
-            let conn = db.connect()?;
-            let mut stmt = conn
-                .prepare(&format!("SELECT COUNT(*) FROM `{table_name}`"))
-                .await?;
-            let count: i64 = stmt.query_row(params![]).await?.get(0)?;
+            // --- Prompt Execution ---
+            let question = "Who is available today?";
+            let today = Utc::now().to_rfc3339();
+            println!("# CONTEXT\n- # TODAY: {}", today);
+            println!("# QUERY\n- {}", question);
 
-            println!("Verification successful: Found {count} rows in table '{table_name}'.");
-            assert_eq!(count as usize, result.documents_added);
+            let client = PromptClientBuilder::new()
+                .ai_provider(ai_provider)
+                .storage_provider(Box::new(sqlite_provider))
+                .build()?;
+
+            let options = ExecutePromptOptions {
+                prompt: question.to_string(),
+                table_name: Some(table_name.clone()),
+                // Provide an instruction for a more direct answer
+                instruction: Some(
+                    "List the names of the available people. If no one is available, say so."
+                        .to_string(),
+                ),
+                ..Default::default()
+            };
+
+            let final_result = client.execute_prompt_with_options(options).await?;
+
+            println!("\n# RESPONSE");
+            println!("- AI Generated Answer:\n{}", final_result.text);
+            if let Some(sql) = final_result.generated_sql {
+                println!("\n- Generated SQL:\n{}", sql);
+            }
         }
     } else {
-        println!("\n--- Verification Skipped (no documents were added) ---");
+        println!("\n--- Search Skipped (no documents were added) ---");
     }
 
     Ok(())
