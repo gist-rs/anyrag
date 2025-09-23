@@ -12,12 +12,14 @@
 mod common;
 
 use anyhow::Result;
+use anyrag::prompts::{knowledge, tasks};
 use anyrag_server::types::ApiResponse;
 use anyrag_test_utils::helpers::generate_test_pdf;
 use common::{generate_jwt, TestApp};
 use httpmock::Method;
 use serde_json::{json, Value};
-use turso::{Builder, Value as TursoValue};
+use serde_yaml;
+use turso::{params, Builder};
 
 #[tokio::test]
 async fn test_pdf_url_ingestion_and_rag_workflow() -> Result<()> {
@@ -46,11 +48,20 @@ sections:
             .body(&pdf_data);
     });
 
+    let chat_completions_path = format!("/{test_name}/v1/chat/completions");
+
     // B. Mock the AI call for restructuring the PDF content into YAML.
     let restructuring_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path(format!("/{test_name}/v1/chat/completions"))
-            .body_contains("expert document analyst and editor"); // Unique prompt
+            .path(&chat_completions_path)
+            .json_body_partial(
+            json!({
+                "messages": [
+                    {"role": "system", "content": knowledge::KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT}
+                ]
+            })
+            .to_string(),
+        );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": expected_yaml}}]}),
         );
@@ -59,8 +70,15 @@ sections:
     // C. Mock the AI call for extracting metadata from the YAML.
     let metadata_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path(format!("/{test_name}/v1/chat/completions"))
-            .body_contains("You are a document analyst."); // Unique prompt
+            .path(&chat_completions_path)
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": tasks::KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!([
                 {"type": "KEYPHRASE", "subtype": "CONCEPT", "value": "magic number"}
@@ -79,8 +97,15 @@ sections:
     // E. Mock the RAG Query Analysis call.
     let query_analysis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path(format!("/{test_name}/v1/chat/completions"))
-            .body_contains("expert query analyst");
+            .path(&chat_completions_path)
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": tasks::QUERY_ANALYSIS_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": json!({
                 "entities": [], "keyphrases": ["magic number"]
@@ -91,9 +116,15 @@ sections:
     // F. Mock the final RAG Synthesis call.
     let rag_synthesis_mock = app.mock_server.mock(|when, then| {
         when.method(Method::POST)
-            .path(format!("/{test_name}/v1/chat/completions"))
-            .body_contains("strict, factual AI")
-            .body_contains("## General Information");
+            .path(&chat_completions_path)
+            .json_body_partial(
+                json!({
+                    "messages": [
+                        {"role": "system", "content": tasks::RAG_SYNTHESIS_SYSTEM_PROMPT}
+                    ]
+                })
+                .to_string(),
+            );
         then.status(200).json_body(
             json!({"choices": [{"message": {"role": "assistant", "content": final_rag_answer}}]}),
         );
@@ -144,15 +175,18 @@ sections:
         .await?;
     let conn = db.connect()?;
     let mut stmt = conn
-        .prepare("SELECT content FROM documents WHERE source_url = 'test.pdf'")
+        .prepare("SELECT content FROM documents WHERE source_url LIKE ?")
         .await?;
-    let mut rows = stmt.query(()).await?;
-    let row = rows.next().await?.expect("Document not found in DB");
-    let stored_content: String = match row.get_value(0)? {
-        TursoValue::Text(s) => s,
-        _ => panic!("Content was not a string"),
-    };
-    assert_eq!(stored_content.trim(), expected_yaml.trim());
+    let mut rows = stmt.query(params!["test.pdf#%"]).await?;
+    let row = rows.next().await?.expect("Document chunk not found in DB");
+    let stored_content: String = row.get(0)?;
+
+    // Deserialize and check the title to ensure the correct chunk was stored.
+    let parsed_chunk: Value = serde_yaml::from_str(&stored_content)?;
+    assert_eq!(
+        parsed_chunk["sections"][0]["title"], "General Information",
+        "The title of the stored chunk is incorrect."
+    );
 
     // --- 7. Assert All Mocks Were Called Correctly ---
     pdf_download_mock.assert();
