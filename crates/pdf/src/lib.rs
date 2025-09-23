@@ -5,7 +5,7 @@
 
 use anyrag::{
     ingest::{
-        knowledge::{extract_and_store_metadata, restructure_with_llm},
+        knowledge::{extract_and_store_metadata, restructure_with_llm, YamlContent},
         IngestError, IngestionPrompts, IngestionResult, Ingestor,
     },
     providers::ai::AiProvider,
@@ -110,12 +110,7 @@ async fn run_pdf_ingestion_pipeline(
     );
 
     let refined_markdown = match extractor {
-        PdfExtractor::Local => {
-            extract_text_from_pdf(&pdf_data)?
-            // For now, we don't have a separate PDF refinement prompt.
-            // We will just use the raw text and let the restructuring handle it.
-            // In the future, a refinement step could be added here.
-        }
+        PdfExtractor::Local => extract_text_from_pdf(&pdf_data)?,
         PdfExtractor::Gemini => {
             return Err(PdfIngestError::Internal(anyhow::anyhow!(
                 "Gemini PDF extractor is not yet implemented."
@@ -130,26 +125,6 @@ async fn run_pdf_ingestion_pipeline(
         );
         return Ok(0);
     }
-
-    let conn = db.connect()?;
-    let document_id = Uuid::new_v5(&Uuid::NAMESPACE_URL, source_identifier.as_bytes()).to_string();
-    let title: String = refined_markdown.chars().take(80).collect();
-
-    conn.execute(
-        "INSERT INTO documents (id, owner_id, source_url, title, content)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(source_url) DO UPDATE SET
-         title = excluded.title,
-         content = excluded.content",
-        params![
-            document_id.clone(),
-            owner_id,
-            source_identifier,
-            title,
-            refined_markdown.clone()
-        ],
-    )
-    .await?;
 
     let structured_yaml = restructure_with_llm(
         ai_provider,
@@ -166,23 +141,88 @@ async fn run_pdf_ingestion_pipeline(
         return Ok(0);
     }
 
+    let parsed_yaml: YamlContent = match serde_yaml::from_str(&structured_yaml) {
+        Ok(data) => data,
+        Err(e) => {
+            warn!(
+                "Failed to parse YAML from LLM for '{}', aborting. Error: {}",
+                source_identifier, e
+            );
+            return Ok(0);
+        }
+    };
+
+    let conn = db.connect()?;
+    let mut documents_added = 0;
+
+    // Before creating new chunks, delete any existing chunks for this source.
+    // This ensures that if the PDF is re-ingested with fewer sections, the old,
+    // orphaned sections are removed.
+    let delete_pattern = format!("{source_identifier}#%");
     conn.execute(
-        "UPDATE documents SET content = ? WHERE id = ?",
-        params![structured_yaml.clone(), document_id.clone()],
+        "DELETE FROM documents WHERE source_url LIKE ?",
+        params![delete_pattern],
+    )
+    .await?;
+    // Also delete the "base" document if it exists from a previous ingestion.
+    conn.execute(
+        "DELETE FROM documents WHERE source_url = ?",
+        params![source_identifier],
     )
     .await?;
 
-    extract_and_store_metadata(
-        &conn,
-        ai_provider,
-        &document_id,
-        owner_id,
-        &structured_yaml,
-        prompts.metadata_extraction_system_prompt,
-    )
-    .await?;
+    for (index, section) in parsed_yaml.sections.iter().enumerate() {
+        let chunk_source_url = format!("{source_identifier}#section_{index}");
+        let chunk_document_id =
+            Uuid::new_v5(&Uuid::NAMESPACE_URL, chunk_source_url.as_bytes()).to_string();
 
-    Ok(1)
+        let chunk_yaml_content = YamlContent {
+            sections: vec![section.clone()],
+        };
+
+        let chunk_yaml_string = match serde_yaml::to_string(&chunk_yaml_content) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to serialize chunk to YAML, skipping section {index}. Error: {e}");
+                continue;
+            }
+        };
+
+        conn.execute(
+            "INSERT INTO documents (id, owner_id, source_url, title, content)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(source_url) DO UPDATE SET
+             title = excluded.title,
+             content = excluded.content",
+            params![
+                chunk_document_id.clone(),
+                owner_id,
+                chunk_source_url,
+                section.title.clone(),
+                chunk_yaml_string.clone()
+            ],
+        )
+        .await?;
+
+        extract_and_store_metadata(
+            &conn,
+            ai_provider,
+            &chunk_document_id,
+            owner_id,
+            &chunk_yaml_string,
+            prompts.metadata_extraction_system_prompt,
+        )
+        .await?;
+
+        documents_added += 1;
+    }
+
+    info!(
+        "PDF ingestion for '{}' complete. Added {} document chunks.",
+        source_identifier, documents_added
+    );
+
+    Ok(documents_added)
 }
 
 // --- Ingestor Implementation ---

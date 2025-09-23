@@ -2,7 +2,6 @@ use anyhow::Result;
 use anyrag::errors::PromptError;
 use anyrag::providers::ai::AiProvider;
 use async_trait::async_trait;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::{Arc, Mutex};
 use turso::Database;
@@ -33,23 +32,22 @@ impl TestSetup {
 
 #[derive(Clone, Debug)]
 pub struct MockAiProvider {
-    responses: Arc<Mutex<HashMap<String, String>>>,
+    responses: Arc<Mutex<Vec<String>>>,
     calls: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl MockAiProvider {
     pub fn new() -> Self {
         Self {
-            responses: Arc::new(Mutex::new(HashMap::new())),
+            responses: Arc::new(Mutex::new(Vec::new())),
             calls: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    /// Pre-programs a response for a specific prompt.
-    /// The key should be a unique substring of the system prompt.
-    pub fn add_response(&self, key: &str, response: &str) {
+    /// Adds a response to the FIFO queue. The key is ignored and kept for compatibility.
+    pub fn add_response(&self, _key: &str, response: &str) {
         let mut responses = self.responses.lock().unwrap();
-        responses.insert(key.to_string(), response.to_string());
+        responses.push(response.to_string());
     }
 
     /// Retrieves the recorded calls for assertion.
@@ -74,16 +72,15 @@ impl AiProvider for MockAiProvider {
         let mut calls = self.calls.lock().unwrap();
         calls.push((system_prompt.to_string(), user_prompt.to_string()));
 
-        let responses = self.responses.lock().unwrap();
-        for (key, response) in responses.iter() {
-            if system_prompt.contains(key) {
-                return Ok(response.clone());
-            }
+        let mut responses = self.responses.lock().unwrap();
+        if !responses.is_empty() {
+            // FIFO queue: remove the first element
+            Ok(responses.remove(0))
+        } else {
+            Err(PromptError::AiApi(
+                "MockAiProvider: No more responses programmed in the queue.".to_string(),
+            ))
         }
-
-        Err(PromptError::AiApi(format!(
-            "MockAiProvider: No response programmed for system prompt. Got: '{system_prompt}'"
-        )))
     }
 }
 

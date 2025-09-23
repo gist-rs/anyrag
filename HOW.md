@@ -356,3 +356,72 @@ async fn test_notion_ingestion_hourly_expansion() -> Result<()> {
     Ok(())
 }
 ```
+
+### Scenario 6: Mock Returns Wrong Response for Sequential, Identical Calls
+
+This issue occurs when a workflow makes multiple, identical back-to-back calls to a dependency (like an AI model), but the test requires a different response for each call.
+
+-   **Symptom**: A test fails on an assertion because a mock returned the wrong data. For example, a metadata check for "Chunk 1" fails because it received the metadata intended for "Chunk 2".
+-   **Cause**: The mock provider uses a key-based lookup (like a `HashMap`) where the key is derived from the request (e.g., a substring of a system prompt). If a workflow makes two calls with the *exact same* system prompt, both calls will match the same key. This leads to two problems:
+    1.  When programming the mock, the second `add_response("key", ...)` call overwrites the first one.
+    2.  During the test, the mock will return the same (last-programmed) response for both calls, causing the test to fail.
+-   **Solution**: Refactor the mock provider to use a sequence-based approach, typically a FIFO (First-In, First-Out) queue. This ensures that responses are returned in the exact order they were added, regardless of the request content. This makes the mock's behavior predictable for serial operations.
+
+**Example Walkthrough (`pdf_ingest_test`):**
+
+1.  **The Failure**: The PDF ingestion test failed an assertion. The test was checking the metadata for the first document chunk ("magic number") but found the metadata for the second chunk ("everything").
+2.  **Analysis**: The `pdf_ingestion_pipeline` makes one call to restructure the document, then loops through the resulting sections, making a metadata extraction call for each one. Both metadata calls used the *exact same* system prompt. The `MockAiProvider` was using a `HashMap` keyed on the system prompt, so the second `add_response` call for the metadata prompt overwrote the first.
+3.  **The Fix**: The `MockAiProvider` in `anyrag-test-utils` was refactored from a `HashMap` to a `Vec` acting as a FIFO queue.
+
+**Before (Incorrect `HashMap` approach):**
+```rust
+// In: crates/test-utils/src/lib.rs
+pub struct MockAiProvider {
+    // Using a HashMap causes problems for identical sequential calls
+    responses: Arc<Mutex<HashMap<String, String>>>,
+    // ...
+}
+
+impl MockAiProvider {
+    // This overwrites the previous value if the key is the same
+    pub fn add_response(&self, key: &str, response: &str) {
+        self.responses.lock().unwrap().insert(key.to_string(), response.to_string());
+    }
+}
+```
+
+**After (Correct FIFO Queue approach):**
+```rust
+// In: crates/test-utils/src/lib.rs
+pub struct MockAiProvider {
+    // A Vec acts as a simple FIFO queue
+    responses: Arc<Mutex<Vec<String>>>,
+    // ...
+}
+
+impl MockAiProvider {
+    // The key is now ignored; we just push the response onto the queue.
+    pub fn add_response(&self, _key: &str, response: &str) {
+        self.responses.lock().unwrap().push(response.to_string());
+    }
+}
+
+// In the `generate` method, we remove the first item from the queue.
+// ...
+// Ok(responses.remove(0))
+// ...
+```
+
+With the corrected mock provider, the test can now program the responses in the exact order of execution, guaranteeing the right response is returned for each sequential call.
+
+```rust
+// In: crates/pdf/tests/pdf_ingest_test.rs
+
+// Program the mock AI provider with expected responses in FIFO order.
+// Call 1: Restructure
+ai_provider.add_response("ignored_key", expected_yaml);
+// Call 2: Metadata for chunk 1
+ai_provider.add_response("ignored_key", &mock_metadata_1);
+// Call 3: Metadata for chunk 2
+ai_provider.add_response("ignored_key", &mock_metadata_2);
+```
