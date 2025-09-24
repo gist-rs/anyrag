@@ -52,7 +52,11 @@ pub async fn run_github_ingestion(
     // For now, the version returned by crawl() is used.
 
     // 3. Extract
-    let examples = Extractor::extract(&crawl_result.path, &crawl_result.version)?;
+    let examples = Extractor::extract(
+        &crawl_result.path,
+        &crawl_result.version,
+        task.extract_included_files,
+    )?;
 
     // 4. Store
     let count = storage_manager

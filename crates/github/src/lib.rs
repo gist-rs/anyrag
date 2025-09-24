@@ -31,6 +31,8 @@ impl From<GitHubIngestError> for IngestError {
 struct IngestSource {
     url: String,
     version: Option<String>,
+    #[serde(default)]
+    extract_included_files: bool,
 }
 
 use std::sync::Arc;
@@ -87,6 +89,7 @@ impl Ingestor for GithubIngestor {
             embedding_api_url: self.embedding_api_url.clone(),
             embedding_model: self.embedding_model.clone(),
             embedding_api_key: self.embedding_api_key.clone(),
+            extract_included_files: ingest_source.extract_included_files,
         };
 
         // 3. Run the ingestion pipeline.

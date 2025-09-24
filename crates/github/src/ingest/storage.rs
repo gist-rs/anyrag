@@ -275,12 +275,9 @@ impl StorageManager {
         let mut examples = Vec::new();
         while let Some(row) = example_rows.next().await? {
             let source_type_str: String = row.get(3)?;
-            let source_type = match source_type_str.as_str() {
-                "readme" => super::types::ExampleSourceType::Readme,
-                "example_file" => super::types::ExampleSourceType::ExampleFile,
-                "doc_comment" => super::types::ExampleSourceType::DocComment,
-                "test" => super::types::ExampleSourceType::Test,
-                _ => {
+            let source_type: super::types::ExampleSourceType = match source_type_str.parse() {
+                Ok(st) => st,
+                Err(_) => {
                     info!(
                         "Skipping example with unknown source type: {}",
                         source_type_str

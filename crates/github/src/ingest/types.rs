@@ -32,6 +32,10 @@ pub enum GitHubIngestError {
 pub enum ExampleSourceType {
     /// Lowest priority: README.md files.
     Readme,
+    /// Files included via `include_bytes!`
+    IncludedFile,
+    /// Generic text files (e.g. json, toml, txt)
+    TextFile,
     /// Dedicated example files (e.g., in an `/examples` directory).
     ExampleFile,
     /// Doc comments within the source code.
@@ -44,6 +48,8 @@ impl std::fmt::Display for ExampleSourceType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExampleSourceType::Readme => write!(f, "readme"),
+            ExampleSourceType::IncludedFile => write!(f, "included_file"),
+            ExampleSourceType::TextFile => write!(f, "text_file"),
             ExampleSourceType::ExampleFile => write!(f, "example_file"),
             ExampleSourceType::DocComment => write!(f, "doc_comment"),
             ExampleSourceType::Test => write!(f, "test"),
@@ -57,6 +63,8 @@ impl FromStr for ExampleSourceType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "readme" => Ok(ExampleSourceType::Readme),
+            "included_file" => Ok(ExampleSourceType::IncludedFile),
+            "text_file" => Ok(ExampleSourceType::TextFile),
             "example_file" => Ok(ExampleSourceType::ExampleFile),
             "doc_comment" => Ok(ExampleSourceType::DocComment),
             "test" => Ok(ExampleSourceType::Test),
@@ -106,4 +114,6 @@ pub struct IngestionTask {
     pub embedding_model: Option<String>,
     /// The API key for the embedding model.
     pub embedding_api_key: Option<String>,
+    /// Whether to extract files referenced by `include_bytes!`.
+    pub extract_included_files: bool,
 }

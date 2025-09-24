@@ -59,7 +59,7 @@ async fn test_extractor_and_storage_integration() {
 
     // --- 2. Act ---
     // Run the extraction process. This includes conflict resolution.
-    let final_examples = Extractor::extract(repo_path, version).unwrap();
+    let final_examples = Extractor::extract(repo_path, version, false).unwrap();
 
     // Initialize the storage manager and create the repository database.
     let storage = StorageManager::new(Some(db_path_str)).await.unwrap();

@@ -102,6 +102,14 @@ cargo run -p cli dump github \
   --embedding-model "text-embedding-qwen3-embedding-8b"
 ```
 
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/txtx/surfpool \
+  --version v0.10.8 \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
 ### `process file`
 
 Ingests a local Markdown file by splitting it into chunks and storing them in a dedicated SQLite database. This is the same logic that `dump github` uses automatically on its generated context file, but it can be used on any Markdown file.

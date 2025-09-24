@@ -15,6 +15,7 @@ use tracing::info;
 #[derive(Default)]
 struct DiscoveredSources {
     readmes: Vec<PathBuf>,
+    text_files: Vec<PathBuf>,
     example_files: Vec<PathBuf>,
     tests: Vec<PathBuf>,
     doc_comments: Vec<PathBuf>,
@@ -28,6 +29,7 @@ impl Extractor {
     pub fn extract(
         repo_path: &Path,
         version: &str,
+        extract_included_files: bool,
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         info!(
             "Starting example extraction from path: {}",
@@ -38,8 +40,9 @@ impl Extractor {
         Self::discover_files_recursive(repo_path, &mut sources)?;
 
         info!(
-            "Discovered {} READMEs, {} example files, {} tests, and {} source files for doc comments.",
+            "Discovered {} READMEs, {} text files, {} example files, {} tests, and {} source files for doc comments.",
             sources.readmes.len(),
+            sources.text_files.len(),
             sources.example_files.len(),
             sources.tests.len(),
             sources.doc_comments.len()
@@ -47,23 +50,36 @@ impl Extractor {
 
         let mut all_examples = Vec::new();
 
-        // The extraction will happen in order of priority (lowest to highest).
+        // The extraction will happen in order of priority (lowest to highest),
+        // matching the Ord derive on ExampleSourceType.
         all_examples.extend(Self::parse_readme_files(
             repo_path,
             &sources.readmes,
+            version,
+        )?);
+        all_examples.extend(Self::parse_text_files(
+            repo_path,
+            &sources.text_files,
             version,
         )?);
         all_examples.extend(Self::parse_example_files(
             repo_path,
             &sources.example_files,
             version,
+            extract_included_files,
         )?);
         all_examples.extend(Self::parse_doc_comments(
             repo_path,
             &sources.doc_comments,
             version,
+            extract_included_files,
         )?);
-        all_examples.extend(Self::parse_test_files(repo_path, &sources.tests, version)?);
+        all_examples.extend(Self::parse_test_files(
+            repo_path,
+            &sources.tests,
+            version,
+            extract_included_files,
+        )?);
 
         info!(
             "Resolving conflicts for {} discovered examples.",
@@ -111,6 +127,13 @@ impl Extractor {
                     sources.tests.push(path.clone());
                 } else if path_str.contains("/examples/") && file_name.ends_with(".rs") {
                     sources.example_files.push(path.clone());
+                } else if file_name == "cargo.toml"
+                    || file_name.ends_with(".txt")
+                    || file_name.ends_with(".json")
+                    || file_name.ends_with(".yaml")
+                    || file_name.ends_with(".yml")
+                {
+                    sources.text_files.push(path.clone());
                 } else if file_name.ends_with(".rs") {
                     // This is the fallback for any other Rust file (e.g., in src/)
                     sources.doc_comments.push(path.clone());
@@ -167,8 +190,8 @@ impl Extractor {
         Ok(examples)
     }
 
-    /// Parses files from `/examples` directories, treating each file as a single example.
-    fn parse_example_files(
+    /// Parses generic text files (`.txt`, `.json`, etc.), treating each file as a single example.
+    fn parse_text_files(
         repo_path: &Path,
         files: &[PathBuf],
         version: &str,
@@ -187,12 +210,54 @@ impl Extractor {
             }
 
             examples.push(GeneratedExample {
-                example_handle: format!("{}:{}", ExampleSourceType::ExampleFile, relative_path),
+                example_handle: format!("{}:{}", ExampleSourceType::TextFile, relative_path),
                 content,
+                source_file: relative_path,
+                source_type: ExampleSourceType::TextFile,
+                version: version.to_string(),
+            });
+        }
+        Ok(examples)
+    }
+
+    /// Parses files from `/examples` directories, treating each file as a single example.
+    fn parse_example_files(
+        repo_path: &Path,
+        files: &[PathBuf],
+        version: &str,
+        extract_included_files: bool,
+    ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
+        let mut examples = Vec::new();
+        for file_path in files {
+            let relative_path = file_path
+                .strip_prefix(repo_path)
+                .unwrap_or(file_path)
+                .to_string_lossy()
+                .to_string();
+
+            let content = fs::read_to_string(file_path)?;
+            if content.trim().is_empty() {
+                continue;
+            }
+
+            examples.push(GeneratedExample {
+                example_handle: format!("{}:{}", ExampleSourceType::ExampleFile, relative_path),
+                content: content.clone(),
                 source_file: relative_path,
                 source_type: ExampleSourceType::ExampleFile,
                 version: version.to_string(),
             });
+
+            if extract_included_files {
+                // Also check for `include_bytes!` macros in the file content.
+                Self::add_included_bytes_examples(
+                    repo_path,
+                    file_path,
+                    &content,
+                    version,
+                    &mut examples,
+                )?;
+            }
         }
         Ok(examples)
     }
@@ -202,6 +267,7 @@ impl Extractor {
         repo_path: &Path,
         files: &[PathBuf],
         version: &str,
+        extract_included_files: bool,
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         let mut examples = Vec::new();
         // This regex finds blocks of `///` or `//!` lines.
@@ -254,11 +320,22 @@ impl Extractor {
                                     line_number,
                                     i
                                 ),
-                                content: code_block,
+                                content: code_block.clone(),
                                 source_file: relative_path.clone(),
                                 source_type: ExampleSourceType::DocComment,
                                 version: version.to_string(),
                             });
+
+                            if extract_included_files {
+                                // Also check for `include_bytes!` macros in this code block.
+                                Self::add_included_bytes_examples(
+                                    repo_path,
+                                    file_path,
+                                    &code_block,
+                                    version,
+                                    &mut examples,
+                                )?;
+                            }
                         }
                     }
                 }
@@ -272,11 +349,12 @@ impl Extractor {
         repo_path: &Path,
         files: &[PathBuf],
         version: &str,
+        extract_included_files: bool,
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         let mut examples = Vec::new();
         // This regex captures the name and body of functions marked with `#[test]`.
         // It handles both sync and async test functions.
-        let re = Regex::new(r"(?s)#\[test\]\s*(?:async\s+)?fn\s+(\w+)\s*\(\)\s*\{(.*?)\}")?;
+        let re = Regex::new(r#"(?s)#\[test\]\s*(?:async\s+)?fn\s+(\w+)\s*\(\)\s*\{(.*?)\}"#)?;
 
         for file_path in files {
             let content = fs::read_to_string(file_path)?;
@@ -300,11 +378,22 @@ impl Extractor {
                             relative_path,
                             fn_name.as_str()
                         ),
-                        content: code_block,
+                        content: code_block.clone(),
                         source_file: relative_path.clone(),
                         source_type: ExampleSourceType::Test,
                         version: version.to_string(),
                     });
+
+                    if extract_included_files {
+                        // Also check for `include_bytes!` macros in the test body.
+                        Self::add_included_bytes_examples(
+                            repo_path,
+                            file_path,
+                            &code_block,
+                            version,
+                            &mut examples,
+                        )?;
+                    }
                 }
             }
         }
@@ -344,5 +433,51 @@ impl Extractor {
         }
 
         best_examples.into_values().collect()
+    }
+
+    /// Helper to find `include_bytes!` macros, read the referenced files, and add them as examples.
+    fn add_included_bytes_examples(
+        repo_path: &Path,
+        source_file_path: &Path, // The file containing the `include_bytes!` call
+        code_block: &str,        // The code to search for the macro
+        version: &str,
+        examples: &mut Vec<GeneratedExample>,
+    ) -> Result<(), GitHubIngestError> {
+        // Regex to find include_bytes!("path/to/file.json")
+        let re = Regex::new(r#"include_bytes!\("([^"]+)"\)"#)?;
+        let source_dir = source_file_path.parent().unwrap_or(repo_path);
+
+        for cap in re.captures_iter(code_block) {
+            if let Some(relative_path_match) = cap.get(1) {
+                let included_path_str = relative_path_match.as_str();
+                let included_path = source_dir.join(included_path_str);
+
+                if included_path.exists() {
+                    let included_content = fs::read_to_string(&included_path)?;
+                    if included_content.trim().is_empty() {
+                        continue;
+                    }
+
+                    let relative_included_path = included_path
+                        .strip_prefix(repo_path)
+                        .unwrap_or(&included_path)
+                        .to_string_lossy()
+                        .to_string();
+
+                    examples.push(GeneratedExample {
+                        example_handle: format!(
+                            "{}:{}",
+                            ExampleSourceType::IncludedFile,
+                            relative_included_path
+                        ),
+                        content: included_content,
+                        source_file: relative_included_path,
+                        source_type: ExampleSourceType::IncludedFile,
+                        version: version.to_string(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 }

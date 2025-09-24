@@ -184,6 +184,7 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
                 embedding_api_url: embedding_api_url_clone,
                 embedding_model: embedding_model_clone,
                 embedding_api_key: api_key,
+                extract_included_files: false,
             };
 
             println!("  -> Starting ingestion for {url}@{version}");

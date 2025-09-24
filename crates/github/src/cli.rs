@@ -26,6 +26,9 @@ pub struct GithubArgs {
     /// The name of the embedding model to use (required if embedding-api-url is set).
     #[arg(long, env = "EMBEDDINGS_MODEL", requires = "embedding_api_url")]
     pub embedding_model: Option<String>,
+    /// Extract and embed files referenced by `include_bytes!` macros.
+    #[arg(long)]
+    pub extract_included_files: bool,
 }
 
 pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
@@ -41,6 +44,7 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
         embedding_api_url: args.embedding_api_url.clone(),
         embedding_model: args.embedding_model.clone(),
         embedding_api_key: std::env::var("AI_API_KEY").ok(),
+        extract_included_files: args.extract_included_files,
     };
 
     let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
@@ -83,9 +87,26 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     let example_markdown = sorted_examples
         .iter()
         .map(|ex| {
+            let path = std::path::Path::new(&ex.source_file);
+            let language = if path.file_name().and_then(|s| s.to_str()) == Some("Cargo.toml") {
+                "toml"
+            } else {
+                path.extension()
+                    .and_then(|s| s.to_str())
+                    .map(|ext| match ext {
+                        "rs" => "rust",
+                        "toml" => "toml",
+                        "json" => "json",
+                        "yaml" | "yml" => "yaml",
+                        "md" => "markdown",
+                        _ => "text",
+                    })
+                    .unwrap_or("text")
+            };
+
             format!(
-                "## `{}`\n**Source:** `{}` (`{}`)\n\n```rust\n{}\n```\n",
-                ex.example_handle, ex.source_file, ex.source_type, ex.content
+                "## `{}`\n**Source:** `{}` (`{}`)\n\n```{}\n{}\n```\n",
+                ex.example_handle, ex.source_file, ex.source_type, language, ex.content
             )
         })
         .collect::<Vec<String>>()
