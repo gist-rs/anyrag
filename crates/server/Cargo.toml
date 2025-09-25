@@ -19,6 +19,7 @@ anyrag-rss = { path = "../rss" }
 anyrag-sheets = { path = "../sheets" }
 anyrag-text = { path = "../text" }
 anyrag-firebase = { path = "../firebase" }
+anyrag-solana = { path = "../solana" }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }
@@ -53,11 +54,12 @@ uuid = { workspace = true }
 futures = "0.3.31"
 
 [features]
-default = ["bigquery", "graph_db", "rss", "firebase"]
+default = ["bigquery", "graph_db", "rss", "firebase", "solana"]
 bigquery = ["anyrag/bigquery"]
 graph_db = ["anyrag/graph_db"]
 rss = ["anyrag/rss"]
 firebase = ["anyrag/firebase"]
+solana = []
 
 [dev-dependencies]
 anyrag-test-utils = { path = "../test-utils", features = ["pdf"] }

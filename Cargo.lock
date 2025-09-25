@@ -412,6 +412,7 @@ dependencies = [
  "anyrag-pdf",
  "anyrag-rss",
  "anyrag-sheets",
+ "anyrag-solana",
  "anyrag-test-utils",
  "anyrag-text",
  "anyrag-web",
@@ -463,6 +464,20 @@ dependencies = [
  "tracing",
  "turso",
  "uuid",
+]
+
+[[package]]
+name = "anyrag-solana"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyrag",
+ "async-trait",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.16",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

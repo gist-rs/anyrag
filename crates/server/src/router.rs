@@ -89,6 +89,9 @@ pub fn create_router(app_state: AppState) -> Router {
             )
             .route("/graph/build", post(handlers::graph_build_handler));
 
+        #[cfg(feature = "solana")]
+        let router = router.route("/gen/tx", post(handlers::gen_tx_handler));
+
         router
     };
 

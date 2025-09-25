@@ -11,6 +11,8 @@ pub mod db_handlers;
 pub mod document_handlers;
 pub mod general;
 pub mod generation_handlers;
+#[cfg(feature = "solana")]
+pub mod generation_transaction_handlers;
 pub mod generation_types;
 pub mod graph_handlers;
 pub mod ingest;
@@ -25,6 +27,8 @@ pub use db_handlers::*;
 pub use document_handlers::*;
 pub use general::*;
 pub use generation_handlers::*;
+#[cfg(feature = "solana")]
+pub use generation_transaction_handlers::*;
 pub use graph_handlers::*;
 pub use ingest::*;
 pub use knowledge::*;

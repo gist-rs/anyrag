@@ -1,0 +1,21 @@
+[package]
+name = "anyrag-solana"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "anyrag_solana"
+path = "src/lib.rs"
+
+[dependencies]
+anyrag = { path = "../lib" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros"] }

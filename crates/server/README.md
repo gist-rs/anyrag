@@ -97,6 +97,11 @@ The `.env` file is used for secrets and environment-specific settings. These var
     cargo run -p anyrag-server
     ```
 
+    To enable optional features, use the `--features` flag. For example, to enable Solana-related handlers:
+    ```sh
+    cargo run -p anyrag-server --features solana
+    ```
+
 ### 2. Running the CLI (TUI)
 
 The server must be running before you start the CLI.

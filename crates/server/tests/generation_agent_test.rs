@@ -1,8 +1,7 @@
-//! # Generation Agent E2E Test
+//! # Generation E2E Tests
 //!
-//! This file contains an end-to-end test for the refactored `/gen/text` endpoint.
-//! It verifies that the generation workflow functions correctly when explicitly
-//! directed to use the `knowledge_search` tool, which involves YAML parsing and chunking.
+//! This file contains end-to-end tests for the generation endpoints like `/gen/text`
+//! and `/gen/tx`.
 
 mod common;
 
@@ -128,6 +127,74 @@ sections:
     embedding_mock.assert();
     query_analysis_mock.assert();
     final_generation_mock.assert();
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_gen_tx_handler() -> Result<()> {
+    // --- 1. Arrange & Setup ---
+    let app = TestApp::spawn("test_gen_tx_handler").await?;
+    let user_identifier = "tx-gen-user@example.com";
+    let db = &app.app_state.sqlite_provider.db;
+    let _user = get_or_create_user(db, user_identifier, None).await?;
+
+    // --- 2. Mock External Services ---
+    let expected_tx = json!({
+      "program_id": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "accounts": [
+        {
+          "pubkey": "6nrJ4TdMSMz4omJQA6R5c3TDnfQ1UoBJ1ux7UGsB2pcv",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "pubkey": "7aVgJrZvZ6wTayTR3CVYPqLCNBGw1pB5aUbaqx6RijYX",
+          "is_signer": false,
+          "is_writable": true
+        },
+        {
+          "pubkey": "3i7ijk5nAZwWzKvduAehYXJDu9SnLanEKyrtr9Ru382E",
+          "is_signer": true,
+          "is_writable": false
+        }
+      ],
+      "data": "3kVA21YASy2b"
+    });
+
+    let llm_mock = app.mock_server.mock(|when, then| {
+        when.method(Method::POST)
+            .path("/test_gen_tx_handler/v1/chat/completions")
+            .body_contains("expert Solana transaction generator"); // Unique to the system prompt
+        then.status(200).json_body(json!({
+            "choices": [{"message": {"role": "assistant", "content": expected_tx.to_string()}}]
+        }));
+    });
+
+    // --- 3. Execute the /gen/tx request ---
+    let token = generate_jwt(user_identifier)?;
+    let payload = json!({
+        "context_prompt": "---\n\nCURRENT ON-CHAIN CONTEXT:\naccount_states:\n  RECIPIENT_USDC_ATA:\n    lamports: 2039280\n  USER_USDC_ATA:\n    lamports: 2039280\n  USER_WALLET_PUBKEY:\n    lamports: 1000000000\nkey_map:\n  RECIPIENT_USDC_ATA: 7aVgJrZvZ6wTayTR3CVYPqLCNBGw1pB5aUbaqx6RijYX\n  USER_USDC_ATA: 6nrJ4TdMSMz4omJQA6R5c3TDnfQ1UoBJ1ux7UGsB2pcv\n  USER_WALLET_PUBKEY: 3i7ijk5nAZwWzKvduAehYXJDu9SnLanEKyrtr9Ru382E\n\n\n---",
+        "generation_prompt": "Please send 15 USDC from my token account (USER_USDC_ATA) to the recipient's token account (RECIPIENT_USDC_ATA). The mint is MOCK_USDC_MINT, and I am the authority (USER_WALLET_PUBKEY)."
+    });
+
+    let response = app
+        .client
+        .post(format!("{}/gen/tx", app.address))
+        .bearer_auth(token)
+        .json(&payload)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    // --- 4. Assert the Final Response and Mock Calls ---
+    let body: ApiResponse<Value> = response.json().await?;
+    assert_eq!(
+        body.result["text"], expected_tx,
+        "The generated transaction did not match the expected output."
+    );
+
+    llm_mock.assert();
 
     Ok(())
 }
