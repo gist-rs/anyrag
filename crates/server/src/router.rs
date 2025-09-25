@@ -23,35 +23,6 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/prompt", post(handlers::prompt_handler))
         .route("/db/query", post(handlers::db_query_handler))
         .route("/gen/text", post(handlers::gen_text_handler))
-        .route(
-            "/ingest/text",
-            post(handlers::ingest::text::ingest_text_handler),
-        )
-        .route(
-            "/ingest/pdf",
-            post(handlers::ingest::pdf::ingest_pdf_handler)
-                .layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
-        )
-        .route(
-            "/ingest/sheet",
-            post(handlers::ingest::sheet::ingest_sheet_handler),
-        )
-        .route(
-            "/ingest/web",
-            post(handlers::ingest::web::ingest_web_handler),
-        )
-        .route(
-            "/ingest/github",
-            post(handlers::ingest::github::ingest_github_handler),
-        )
-        .route(
-            "/examples/{repo_name}",
-            get(handlers::ingest::github::get_latest_examples_handler),
-        )
-        .route(
-            "/examples/{repo_name}/{version}",
-            get(handlers::ingest::github::get_versioned_examples_handler),
-        )
         .route("/embed/new", post(handlers::embed_new_handler))
         .route("/search/vector", post(handlers::vector_search_handler))
         .route("/search/keyword", post(handlers::keyword_search_handler))
@@ -60,40 +31,96 @@ pub fn create_router(app_state: AppState) -> Router {
             "/search/knowledge",
             post(handlers::knowledge_search_handler),
         )
-        .route(
-            "/search/examples",
-            post(handlers::ingest::github::search_examples_handler),
-        )
         .route("/knowledge/export", get(handlers::knowledge_export_handler));
 
     // Conditionally add routes by re-binding the router variable.
     // This avoids the `unused_mut` warning when no features are enabled.
-    let router = {
-        #[cfg(feature = "rss")]
-        let router = router.route(
+    let mut router = router;
+
+    #[cfg(feature = "text")]
+    {
+        router = router.route(
+            "/ingest/text",
+            post(handlers::ingest::text::ingest_text_handler),
+        );
+    }
+
+    #[cfg(feature = "pdf")]
+    {
+        router = router.route(
+            "/ingest/pdf",
+            post(handlers::ingest::pdf::ingest_pdf_handler)
+                .layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
+        );
+    }
+
+    #[cfg(feature = "sheets")]
+    {
+        router = router.route(
+            "/ingest/sheet",
+            post(handlers::ingest::sheet::ingest_sheet_handler),
+        );
+    }
+
+    #[cfg(feature = "web")]
+    {
+        router = router.route(
+            "/ingest/web",
+            post(handlers::ingest::web::ingest_web_handler),
+        );
+    }
+
+    #[cfg(feature = "github")]
+    {
+        router = router
+            .route(
+                "/ingest/github",
+                post(handlers::ingest::github::ingest_github_handler),
+            )
+            .route(
+                "/examples/{repo_name}",
+                get(handlers::ingest::github::get_latest_examples_handler),
+            )
+            .route(
+                "/examples/{repo_name}/{version}",
+                get(handlers::ingest::github::get_versioned_examples_handler),
+            )
+            .route(
+                "/search/examples",
+                post(handlers::ingest::github::search_examples_handler),
+            );
+    }
+
+    #[cfg(feature = "rss")]
+    {
+        router = router.route(
             "/ingest/rss",
             post(handlers::ingest::rss::ingest_rss_handler),
         );
+    }
 
-        #[cfg(feature = "firebase")]
-        let router = router.route(
+    #[cfg(feature = "firebase")]
+    {
+        router = router.route(
             "/ingest/firebase",
             post(handlers::ingest::firebase::ingest_firebase_handler),
         );
+    }
 
-        #[cfg(feature = "graph_db")]
-        let router = router
+    #[cfg(feature = "graph_db")]
+    {
+        router = router
             .route(
                 "/search/knowledge_graph",
                 post(handlers::knowledge_graph_search_handler),
             )
             .route("/graph/build", post(handlers::graph_build_handler));
+    }
 
-        #[cfg(feature = "solana")]
-        let router = router.route("/gen/tx", post(handlers::gen_tx_handler));
-
-        router
-    };
+    #[cfg(feature = "solana")]
+    {
+        router = router.route("/gen/tx", post(handlers::gen_tx_handler));
+    }
 
     router
         .with_state(app_state)

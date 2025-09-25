@@ -1,3 +1,4 @@
+#[cfg(feature = "solana")]
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams, PromptResponse};
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag_solana::{SolanaTransactionRequest, TransactionGenerator};

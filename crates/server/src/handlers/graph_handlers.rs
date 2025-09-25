@@ -1,5 +1,3 @@
-#![cfg(feature = "graph_db")]
-
 //! # Knowledge Graph Route Handlers
 //!
 //! This module contains handlers for endpoints that interact with the in-memory

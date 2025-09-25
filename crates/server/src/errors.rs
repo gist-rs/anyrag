@@ -3,12 +3,15 @@ use anyrag::{
     search::SearchError,
     PromptError,
 };
+#[cfg(feature = "github")]
 use anyrag_github::types::GitHubIngestError;
 #[cfg(feature = "rss")]
 use anyrag_rss::RssIngestError;
+#[cfg(feature = "sheets")]
 use anyrag_sheets::SheetError;
+#[cfg(feature = "text")]
 use anyrag_text::TextIngestError;
-#[cfg(feature = "rss")]
+#[cfg(feature = "web")]
 use anyrag_web::WebIngestError;
 use axum::{
     http::StatusCode,
@@ -28,16 +31,19 @@ pub enum AppError {
     /// Errors originating from the `anyrag`.
     Prompt(PromptError),
     /// Errors from the text ingestion process.
+    #[cfg(feature = "text")]
     TextIngest(TextIngestError),
     /// Errors from the RSS ingestion process.
     #[cfg(feature = "rss")]
     RssIngest(RssIngestError),
-
     /// Errors from the sheet ingestion process.
+    #[cfg(feature = "sheets")]
     Sheet(SheetError),
     /// Errors from the GitHub ingestion process.
+    #[cfg(feature = "github")]
     GitHubIngest(GitHubIngestError),
     /// Errors from the web ingestion process.
+    #[cfg(feature = "web")]
     WebIngest(WebIngestError),
     /// Errors from the embedding process.
     Embedding(EmbeddingError),
@@ -61,6 +67,7 @@ impl From<serde_json::Error> for AppError {
 }
 
 /// Conversion from `TextIngestError` to `AppError`.
+#[cfg(feature = "text")]
 impl From<TextIngestError> for AppError {
     fn from(err: TextIngestError) -> Self {
         AppError::TextIngest(err)
@@ -76,6 +83,7 @@ impl From<RssIngestError> for AppError {
 }
 
 /// Conversion from `SheetError` to `AppError`.
+#[cfg(feature = "sheets")]
 impl From<SheetError> for AppError {
     fn from(err: SheetError) -> Self {
         AppError::Sheet(err)
@@ -104,6 +112,7 @@ impl From<SearchError> for AppError {
 }
 
 /// Conversion from `GitHubIngestError` to `AppError`.
+#[cfg(feature = "github")]
 impl From<GitHubIngestError> for AppError {
     fn from(err: GitHubIngestError) -> Self {
         AppError::GitHubIngest(err)
@@ -111,6 +120,7 @@ impl From<GitHubIngestError> for AppError {
 }
 
 /// Conversion from `WebIngestError` to `AppError`.
+#[cfg(feature = "web")]
 impl From<WebIngestError> for AppError {
     fn from(err: WebIngestError) -> Self {
         AppError::WebIngest(err)
@@ -141,6 +151,7 @@ impl From<TursoError> for AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status_code, error_message) = match self {
+            #[cfg(feature = "text")]
             AppError::TextIngest(err) => {
                 error!("TextIngestError: {:?}", err);
                 (
@@ -156,7 +167,7 @@ impl IntoResponse for AppError {
                     format!("Failed to ingest RSS feed: {err}"),
                 )
             }
-
+            #[cfg(feature = "sheets")]
             AppError::Sheet(err) => {
                 error!("SheetError: {:?}", err);
                 (
@@ -164,11 +175,20 @@ impl IntoResponse for AppError {
                     format!("Failed to process sheet: {err}"),
                 )
             }
+            #[cfg(feature = "web")]
             AppError::WebIngest(err) => {
                 error!("WebIngestError: {:?}", err);
                 (
                     StatusCode::UNPROCESSABLE_ENTITY,
                     format!("Failed to ingest from web: {err}"),
+                )
+            }
+            #[cfg(feature = "github")]
+            AppError::GitHubIngest(err) => {
+                error!("GitHubIngestError: {:?}", err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to ingest from GitHub: {err}"),
                 )
             }
             AppError::Knowledge(err) => {
@@ -201,13 +221,6 @@ impl IntoResponse for AppError {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Search operation failed: {err}"),
-                )
-            }
-            AppError::GitHubIngest(err) => {
-                error!("GitHubIngestError: {:?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to ingest from GitHub: {err}"),
                 )
             }
             AppError::Database(err) => {

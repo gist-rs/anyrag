@@ -6,7 +6,7 @@
 //! configuration setup.
 
 use anyrag::{
-    prompts::{knowledge::KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, tasks::*},
+    prompts::{knowledge::KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, tasks},
     types::AppConfig,
 };
 use config::{
@@ -53,24 +53,24 @@ fn build_default_tasks() -> HashMap<String, ConfigValue> {
             "query_generation",
             (
                 "gemini_default",
-                QUERY_GENERATION_SYSTEM_PROMPT,
-                QUERY_GENERATION_USER_PROMPT,
+                tasks::QUERY_GENERATION_SYSTEM_PROMPT,
+                tasks::QUERY_GENERATION_USER_PROMPT,
             ),
         ),
         (
             "direct_generation",
             (
                 "gemini_default",
-                DIRECT_GENERATION_SYSTEM_PROMPT,
-                DIRECT_GENERATION_USER_PROMPT,
+                tasks::DIRECT_GENERATION_SYSTEM_PROMPT,
+                tasks::DIRECT_GENERATION_USER_PROMPT,
             ),
         ),
         (
             "rag_synthesis",
             (
                 "gemini_default",
-                RAG_SYNTHESIS_SYSTEM_PROMPT,
-                RAG_SYNTHESIS_USER_PROMPT,
+                tasks::RAG_SYNTHESIS_SYSTEM_PROMPT,
+                tasks::RAG_SYNTHESIS_USER_PROMPT,
             ),
         ),
         (
@@ -78,55 +78,55 @@ fn build_default_tasks() -> HashMap<String, ConfigValue> {
             (
                 "gemini_default",
                 KNOWLEDGE_RESTRUCTURING_SYSTEM_PROMPT, // Use the new YAML restructuring prompt.
-                KNOWLEDGE_DISTILLATION_USER_PROMPT,
+                tasks::KNOWLEDGE_DISTILLATION_USER_PROMPT,
             ),
         ),
         (
             "query_analysis",
             (
                 "gemini_default",
-                QUERY_ANALYSIS_SYSTEM_PROMPT,
-                QUERY_ANALYSIS_USER_PROMPT,
+                tasks::QUERY_ANALYSIS_SYSTEM_PROMPT,
+                tasks::QUERY_ANALYSIS_USER_PROMPT,
             ),
         ),
         (
             "llm_rerank",
             (
                 "gemini_default",
-                LLM_RERANK_SYSTEM_PROMPT,
-                LLM_RERANK_USER_PROMPT,
+                tasks::LLM_RERANK_SYSTEM_PROMPT,
+                tasks::LLM_RERANK_USER_PROMPT,
             ),
         ),
         (
             "knowledge_augmentation",
             (
                 "gemini_default",
-                KNOWLEDGE_AUGMENTATION_SYSTEM_PROMPT,
-                KNOWLEDGE_AUGMENTATION_USER_PROMPT,
+                tasks::KNOWLEDGE_AUGMENTATION_SYSTEM_PROMPT,
+                tasks::KNOWLEDGE_AUGMENTATION_USER_PROMPT,
             ),
         ),
         (
             "knowledge_metadata_extraction",
             (
                 "gemini_default",
-                KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT,
-                KNOWLEDGE_METADATA_EXTRACTION_USER_PROMPT,
+                tasks::KNOWLEDGE_METADATA_EXTRACTION_SYSTEM_PROMPT,
+                tasks::KNOWLEDGE_METADATA_EXTRACTION_USER_PROMPT,
             ),
         ),
         (
             "context_agent",
             (
                 "gemini_default",
-                CONTEXT_AGENT_SYSTEM_PROMPT,
-                CONTEXT_AGENT_USER_PROMPT,
+                tasks::CONTEXT_AGENT_SYSTEM_PROMPT,
+                tasks::CONTEXT_AGENT_USER_PROMPT,
             ),
         ),
         (
             "query_deconstruction",
             (
                 "gemini_default",
-                QUERY_DECONSTRUCTION_SYSTEM_PROMPT,
-                QUERY_DECONSTRUCTION_USER_PROMPT,
+                tasks::QUERY_DECONSTRUCTION_SYSTEM_PROMPT,
+                tasks::QUERY_DECONSTRUCTION_USER_PROMPT,
             ),
         ),
     ];
@@ -137,8 +137,8 @@ fn build_default_tasks() -> HashMap<String, ConfigValue> {
             "rss_summarization",
             (
                 "gemini_default",
-                RSS_SUMMARIZATION_SYSTEM_PROMPT,
-                RSS_SUMMARIZATION_USER_PROMPT,
+                tasks::RSS_SUMMARIZATION_SYSTEM_PROMPT,
+                tasks::RSS_SUMMARIZATION_USER_PROMPT,
             ),
         ));
     }

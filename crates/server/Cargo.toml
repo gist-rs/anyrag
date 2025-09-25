@@ -10,16 +10,16 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal Crate
-anyrag = { path = "../lib", features = ["core-access", "rss"] }
+anyrag = { path = "../lib", features = ["core-access"] }
 core-access = { path = "../core-access" }
-anyrag-github = { path = "../github" }
-anyrag-web = { path = "../web" }
-anyrag-pdf = { path = "../pdf" }
-anyrag-rss = { path = "../rss" }
-anyrag-sheets = { path = "../sheets" }
-anyrag-text = { path = "../text" }
-anyrag-firebase = { path = "../firebase" }
-anyrag-solana = { path = "../solana" }
+anyrag-github = { path = "../github", optional = true }
+anyrag-web = { path = "../web", optional = true }
+anyrag-pdf = { path = "../pdf", optional = true }
+anyrag-rss = { path = "../rss", optional = true }
+anyrag-sheets = { path = "../sheets", optional = true }
+anyrag-text = { path = "../text", optional = true }
+anyrag-firebase = { path = "../firebase", optional = true }
+anyrag-solana = { path = "../solana", optional = true }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }
@@ -54,12 +54,18 @@ uuid = { workspace = true }
 futures = "0.3.31"
 
 [features]
-default = ["bigquery", "graph_db", "rss", "firebase", "solana"]
+default = ["full"]
 bigquery = ["anyrag/bigquery"]
 graph_db = ["anyrag/graph_db"]
-rss = ["anyrag/rss"]
-firebase = ["anyrag/firebase"]
-solana = []
+rss = ["dep:anyrag-rss", "anyrag/rss"]
+firebase = ["dep:anyrag-firebase"]
+solana = ["dep:anyrag-solana"]
+github = ["dep:anyrag-github"]
+web = ["dep:anyrag-web"]
+pdf = ["dep:anyrag-pdf"]
+sheets = ["dep:anyrag-sheets"]
+text = ["dep:anyrag-text"]
+full = ["bigquery", "graph_db", "rss", "firebase", "solana", "github", "web", "pdf", "sheets", "text"]
 
 [dev-dependencies]
 anyrag-test-utils = { path = "../test-utils", features = ["pdf"] }
