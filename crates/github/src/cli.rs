@@ -1,13 +1,24 @@
-use crate::ingest::{run_github_ingestion, storage::StorageManager, types::IngestionTask};
+use crate::ingest::{
+    crawler::Crawler, extractor::Extractor, run_github_ingestion, storage::StorageManager,
+    types::IngestionTask,
+};
 use anyhow::Result;
 use anyrag::{constants, ingest::Ingestor};
 use anyrag_markdown::{
     EmbeddingConfig as MarkdownEmbeddingConfig, MarkdownIngestor, MarkdownSource,
 };
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde_json;
 use std::fs;
 use tracing::info;
+
+#[derive(ValueEnum, Clone, Debug, Default)]
+#[clap(rename_all = "kebab_case")]
+pub enum DumpType {
+    #[default]
+    Examples,
+    Src,
+}
 
 #[derive(Parser, Debug)]
 pub struct GithubArgs {
@@ -17,6 +28,12 @@ pub struct GithubArgs {
     /// An optional git version (tag, branch, commit hash) to ingest. Defaults to the latest release tag.
     #[arg(long)]
     pub version: Option<String>,
+    /// The type of content to dump (examples or all source files).
+    #[arg(long, value_enum, default_value_t = DumpType::Examples)]
+    pub dump_type: DumpType,
+    /// A comma-separated list of glob patterns to ignore (e.g., "*.lock,LICENSE").
+    #[arg(long, use_value_delimiter = true)]
+    pub ignore: Option<Vec<String>>,
     /// Disables the automatic processing of the generated markdown file into chunks.
     #[arg(long)]
     pub no_process: bool,
@@ -32,11 +49,18 @@ pub struct GithubArgs {
 }
 
 pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
+    match args.dump_type {
+        DumpType::Examples => handle_examples_dump(args).await,
+        DumpType::Src => handle_src_dump(args).await,
+    }
+}
+
+async fn handle_examples_dump(args: &GithubArgs) -> Result<()> {
     info!(
-        "Starting GitHub ingestion for URL: {} with version: {:?}",
+        "Starting GitHub EXAMPLES ingestion for URL: {} with version: {:?}",
         args.url, args.version
     );
-    println!("📥 Starting ingestion for '{}'...", args.url);
+    println!("📥 Starting examples ingestion for '{}'...", args.url);
 
     let task = IngestionTask {
         url: args.url.clone(),
@@ -55,54 +79,44 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     );
 
     if ingested_count == 0 {
-        println!("No new examples were found to generate a context file.");
+        println!("No new examples were found to generate a markdown file.");
         return Ok(());
     }
 
-    // Now, generate the markdown file from the ingested data.
-    println!("📝 Generating consolidated context file...");
+    println!("📝 Generating consolidated examples file...");
     let repo_name = StorageManager::url_to_repo_name(&args.url);
 
-    let version_to_fetch = ingested_version;
-
     let examples = storage_manager
-        .get_examples(&repo_name, &version_to_fetch)
+        .get_examples(&repo_name, &ingested_version)
         .await?;
 
     if examples.is_empty() {
-        println!(
-            "Could not find any examples in the database for version '{version_to_fetch}' to generate context file."
-        );
+        println!("Could not find any examples in the database to generate the file.");
         return Ok(());
     }
 
-    // Sort examples by handle for a deterministic output.
     let mut sorted_examples = examples;
     sorted_examples.sort_by(|a, b| a.example_handle.cmp(&b.example_handle));
 
-    // Add a header to the markdown content that specifies the repository and version.
     let mut markdown_content =
-        format!("# Code Examples for {repo_name} (Version: {version_to_fetch})\n\n");
+        format!("# Code Examples for {repo_name} (Version: {ingested_version})\n\n");
 
     let example_markdown = sorted_examples
         .iter()
         .map(|ex| {
             let path = std::path::Path::new(&ex.source_file);
-            let language = if path.file_name().and_then(|s| s.to_str()) == Some("Cargo.toml") {
-                "toml"
-            } else {
-                path.extension()
-                    .and_then(|s| s.to_str())
-                    .map(|ext| match ext {
-                        "rs" => "rust",
-                        "toml" => "toml",
-                        "json" => "json",
-                        "yaml" | "yml" => "yaml",
-                        "md" => "markdown",
-                        _ => "text",
-                    })
-                    .unwrap_or("text")
-            };
+            let language = path
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|ext| match ext {
+                    "rs" => "rust",
+                    "toml" => "toml",
+                    "json" => "json",
+                    "yaml" | "yml" => "yaml",
+                    "md" => "markdown",
+                    _ => "text",
+                })
+                .unwrap_or("text");
 
             format!(
                 "## `{}`\n**Source:** `{}` (`{}`)\n\n```{}\n{}\n```\n",
@@ -114,50 +128,140 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
 
     markdown_content.push_str(&example_markdown);
 
-    // Sanitize version string for the filename (e.g., replace `/` with `-`)
-    let safe_version = version_to_fetch.replace('/', "-");
-    let output_filename = format!("{repo_name}-{safe_version}-context.md");
+    let safe_version = ingested_version.replace('/', "-");
+    let output_filename = format!("{repo_name}-{safe_version}-examples.md");
     fs::write(&output_filename, markdown_content)?;
-    println!("✅ Successfully generated context file: '{output_filename}'");
+    println!("✅ Successfully generated examples file: '{output_filename}'");
 
-    // Automatically process the generated file into chunks unless disabled.
     if !args.no_process {
-        println!("🚀 Automatically processing generated file into chunks...");
-        let chunk_db_dir = constants::GITHUB_CHUNKS_DB_DIR;
-        fs::create_dir_all(chunk_db_dir)?;
-        let chunk_db_path = format!("{chunk_db_dir}/{repo_name}.db");
-
-        let api_key = std::env::var("AI_API_KEY").ok();
-
-        let embedding_config =
-            if let (Some(url), Some(model)) = (&args.embedding_api_url, &args.embedding_model) {
-                Some(MarkdownEmbeddingConfig {
-                    api_url: url.clone(),
-                    model: model.clone(),
-                    api_key: api_key.clone(),
-                })
-            } else {
-                None
-            };
-
-        let markdown_source = MarkdownSource {
-            db_path: chunk_db_path.clone(),
-            file_path: output_filename.clone(),
-            separator: "---\n".to_string(),
-            embedding_config,
-        };
-
-        let source_json = serde_json::to_string(&markdown_source)?;
-        let ingestor = MarkdownIngestor;
-        let result = ingestor.ingest(&source_json, None).await?;
-        let count = result.documents_added;
-
-        if count > 0 {
-            println!(
-                "✅ Successfully ingested {count} chunks from '{output_filename}' into '{chunk_db_path}'."
-            );
-        }
+        let chunk_db_dir = format!("{}/examples", constants::GITHUB_CHUNKS_DB_DIR);
+        process_markdown_file(args, &output_filename, &repo_name, &chunk_db_dir).await?;
     }
 
+    Ok(())
+}
+
+async fn handle_src_dump(args: &GithubArgs) -> Result<()> {
+    info!(
+        "Starting GitHub SRC ingestion for URL: {} with version: {:?}",
+        args.url, args.version
+    );
+    println!("📥 Starting source code dump for '{}'...", args.url);
+
+    let task = IngestionTask {
+        url: args.url.clone(),
+        version: args.version.clone(),
+        embedding_api_url: None,
+        embedding_model: None,
+        embedding_api_key: None,
+        extract_included_files: false,
+    };
+
+    let crawl_result = Crawler::crawl(&task).await?;
+    let repo_name = StorageManager::url_to_repo_name(&args.url);
+
+    println!("📝 Generating consolidated source code file...");
+
+    let ignore_patterns = args.ignore.clone().unwrap_or_default();
+    let source_files = Extractor::extract_all_sources(&crawl_result.path, &ignore_patterns)?;
+
+    if source_files.is_empty() {
+        println!("No source files were found to generate a markdown file.");
+        return Ok(());
+    }
+
+    let markdown_content = source_files
+        .iter()
+        .filter_map(|(path, content)| {
+            if content.trim().is_empty() {
+                return None;
+            }
+            let language = path
+                .extension()
+                .and_then(|s| s.to_str())
+                .map(|ext| match ext {
+                    "rs" => "rust",
+                    "toml" => "toml",
+                    "json" => "json",
+                    "yaml" | "yml" => "yaml",
+                    "md" => "markdown",
+                    "js" => "javascript",
+                    "ts" => "typescript",
+                    "py" => "python",
+                    "go" => "go",
+                    "java" => "java",
+                    "kt" => "kotlin",
+                    "swift" => "swift",
+                    "sh" => "shell",
+                    "rb" => "ruby",
+                    "php" => "php",
+                    "html" => "html",
+                    "css" => "css",
+                    _ => "text",
+                })
+                .unwrap_or("text");
+
+            Some(format!(
+                "## `{}`\n\n```{}\n{}\n```\n",
+                path.to_string_lossy(),
+                language,
+                content
+            ))
+        })
+        .collect::<Vec<String>>()
+        .join("---\n");
+
+    let safe_version = crawl_result.version.replace('/', "-");
+    let output_filename = format!("{repo_name}-{safe_version}-src.md");
+    fs::write(&output_filename, markdown_content)?;
+    println!("✅ Successfully generated source file: '{output_filename}'");
+
+    if !args.no_process {
+        let chunk_db_dir = format!("{}/src", constants::GITHUB_CHUNKS_DB_DIR);
+        process_markdown_file(args, &output_filename, &repo_name, &chunk_db_dir).await?;
+    }
+
+    Ok(())
+}
+
+/// Helper function to process a generated markdown file into a chunked database.
+async fn process_markdown_file(
+    args: &GithubArgs,
+    output_filename: &str,
+    repo_name: &str,
+    chunk_db_dir: &str,
+) -> Result<()> {
+    println!("🚀 Automatically processing '{output_filename}' into chunks...");
+    fs::create_dir_all(chunk_db_dir)?;
+    let chunk_db_path = format!("{chunk_db_dir}/{repo_name}.db");
+
+    let api_key = std::env::var("AI_API_KEY").ok();
+
+    let embedding_config =
+        if let (Some(url), Some(model)) = (&args.embedding_api_url, &args.embedding_model) {
+            Some(MarkdownEmbeddingConfig {
+                api_url: url.clone(),
+                model: model.clone(),
+                api_key: api_key.clone(),
+            })
+        } else {
+            None
+        };
+
+    let markdown_source = MarkdownSource {
+        db_path: chunk_db_path.clone(),
+        file_path: output_filename.to_string(),
+        separator: "---\n".to_string(),
+        embedding_config,
+    };
+
+    let source_json = serde_json::to_string(&markdown_source)?;
+    let ingestor = MarkdownIngestor;
+    let result = ingestor.ingest(&source_json, None).await?;
+    let count = result.documents_added;
+
+    if count > 0 {
+        println!("✅ Successfully ingested {count} chunks into '{chunk_db_path}'.");
+    }
     Ok(())
 }

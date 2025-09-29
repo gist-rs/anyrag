@@ -5,6 +5,7 @@
 //! naming conventions and location, then parses them to extract code blocks.
 
 use super::types::{ExampleSourceType, GeneratedExample, GitHubIngestError};
+use glob::Pattern;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
@@ -94,9 +95,7 @@ impl Extractor {
         Ok(resolved_examples)
     }
 
-    /// Recursively walks a directory to discover and categorize source files.
-    /// The `if/else if` structure is ordered from most to least specific to ensure
-    /// a file is only categorized once.
+    /// Recursively walks a directory to discover and categorize source files for 'examples' dump.
     fn discover_files_recursive(
         dir: &Path,
         sources: &mut DiscoveredSources,
@@ -110,7 +109,6 @@ impl Extractor {
             let path = entry.path();
             let file_name = entry.file_name().to_string_lossy().to_lowercase();
 
-            // Skip hidden directories and files, especially .git
             if file_name.starts_with('.') {
                 continue;
             }
@@ -135,8 +133,109 @@ impl Extractor {
                 {
                     sources.text_files.push(path.clone());
                 } else if file_name.ends_with(".rs") {
-                    // This is the fallback for any other Rust file (e.g., in src/)
                     sources.doc_comments.push(path.clone());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Extracts all source files from a repository for the 'src' dump, applying ignore patterns.
+    pub fn extract_all_sources(
+        repo_path: &Path,
+        ignore_patterns: &[String],
+    ) -> Result<Vec<(PathBuf, String)>, GitHubIngestError> {
+        info!(
+            "Starting source file extraction from path: {} with ignore patterns: {:?}",
+            repo_path.display(),
+            ignore_patterns
+        );
+
+        let default_patterns = ["*.lock", "LICENSE*"];
+        let all_patterns_str: Vec<String> = default_patterns
+            .iter()
+            .map(|s| s.to_string())
+            .chain(ignore_patterns.iter().cloned())
+            .collect();
+
+        let compiled_patterns: Vec<Pattern> = all_patterns_str
+            .iter()
+            .filter_map(|s| match Pattern::new(s) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    info!("Invalid glob pattern '{}': {}", s, e);
+                    None
+                }
+            })
+            .collect();
+
+        let mut files = Vec::new();
+        Self::discover_all_source_files_recursive(
+            repo_path,
+            repo_path,
+            &mut files,
+            &compiled_patterns,
+        )?;
+
+        let mut results = Vec::new();
+        for file_path in files {
+            let relative_path = file_path.strip_prefix(repo_path).unwrap_or(&file_path);
+            match fs::read_to_string(&file_path) {
+                Ok(content) => {
+                    results.push((relative_path.to_path_buf(), content));
+                }
+                Err(e) => {
+                    info!(
+                        "Skipping file {} due to read error: {}",
+                        file_path.display(),
+                        e
+                    );
+                }
+            }
+        }
+        Ok(results)
+    }
+
+    /// Recursively walks a directory to discover all non-hidden source files, checking against ignore patterns.
+    fn discover_all_source_files_recursive(
+        base_dir: &Path,
+        current_dir: &Path,
+        files: &mut Vec<PathBuf>,
+        ignore_patterns: &[Pattern],
+    ) -> Result<(), GitHubIngestError> {
+        if !current_dir.is_dir() {
+            return Ok(());
+        }
+
+        for entry in fs::read_dir(current_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_name = entry.file_name();
+            let file_name_lossy = file_name.to_string_lossy();
+            let file_name = file_name_lossy.as_ref();
+
+            if file_name.starts_with('.') || path.to_string_lossy().contains("/.git/") {
+                continue;
+            }
+
+            if path.is_dir() {
+                Self::discover_all_source_files_recursive(base_dir, &path, files, ignore_patterns)?;
+            } else {
+                let relative_path = path.strip_prefix(base_dir).unwrap_or(&path);
+
+                let is_ignored_by_glob = ignore_patterns
+                    .iter()
+                    .any(|p| p.matches_path(relative_path));
+
+                let has_no_extension = path.extension().is_none()
+                    && !path.file_name().unwrap_or_default().eq("Makefile");
+
+                if !is_ignored_by_glob && !has_no_extension {
+                    files.push(path);
+                } else if is_ignored_by_glob {
+                    info!("Ignoring file due to glob pattern: {}", path.display());
+                } else {
+                    info!("Ignoring file with no extension: {}", path.display());
                 }
             }
         }
@@ -150,7 +249,6 @@ impl Extractor {
         version: &str,
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         let mut examples = Vec::new();
-        // Regex to find ```rust ... ``` blocks. `(?s)` enables `.` to match newlines.
         let re = Regex::new(r"(?s)```rust\s*\n(.*?)\n```")?;
 
         for file_path in files {
@@ -167,17 +265,14 @@ impl Extractor {
                     if code_block.is_empty() {
                         continue;
                     }
-
-                    // Estimate the line number by counting newlines before the match.
                     let line_number = content[..code_match.start()].lines().count() + 1;
-
                     examples.push(GeneratedExample {
                         example_handle: format!(
                             "{}:{}:{}:{}",
                             ExampleSourceType::Readme,
                             relative_path,
                             line_number,
-                            i // Use capture index for uniqueness
+                            i
                         ),
                         content: code_block,
                         source_file: relative_path.clone(),
@@ -249,7 +344,6 @@ impl Extractor {
             });
 
             if extract_included_files {
-                // Also check for `include_bytes!` macros in the file content.
                 Self::add_included_bytes_examples(
                     repo_path,
                     file_path,
@@ -270,10 +364,7 @@ impl Extractor {
         extract_included_files: bool,
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         let mut examples = Vec::new();
-        // This regex finds blocks of `///` or `//!` lines.
-        // `(?m)` enables multi-line mode, so `^` matches the start of each line.
         let doc_block_re = Regex::new(r"(?m)((?:^\s*(?:///|//!)[^\n]*\n?)+)")?;
-        // This regex finds ```rust ... ``` blocks inside a larger string.
         let code_block_re = Regex::new(r"(?s)```rust\s*\n(.*?)\n```")?;
 
         for file_path in files {
@@ -286,7 +377,6 @@ impl Extractor {
 
             for doc_cap in doc_block_re.captures_iter(&content) {
                 if let Some(doc_comment_block) = doc_cap.get(1) {
-                    // Clean the prefixes from the doc comment block to treat it as Markdown.
                     let markdown_content = doc_comment_block
                         .as_str()
                         .lines()
@@ -295,12 +385,11 @@ impl Extractor {
                                 .strip_prefix("///")
                                 .or_else(|| line.trim_start().strip_prefix("//!"))
                                 .map(|s| s.trim_start())
-                                .unwrap_or(line) // Keep original line if no prefix
+                                .unwrap_or(line)
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
 
-                    // Now find Rust code blocks within the cleaned Markdown content.
                     for (i, code_cap) in code_block_re.captures_iter(&markdown_content).enumerate()
                     {
                         if let Some(code_match) = code_cap.get(1) {
@@ -327,7 +416,6 @@ impl Extractor {
                             });
 
                             if extract_included_files {
-                                // Also check for `include_bytes!` macros in this code block.
                                 Self::add_included_bytes_examples(
                                     repo_path,
                                     file_path,
@@ -352,8 +440,6 @@ impl Extractor {
         extract_included_files: bool,
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         let mut examples = Vec::new();
-        // This regex captures the name and body of functions marked with `#[test]`.
-        // It handles both sync and async test functions.
         let re = Regex::new(r#"(?s)#\[test\]\s*(?:async\s+)?fn\s+(\w+)\s*\(\)\s*\{(.*?)\}"#)?;
 
         for file_path in files {
@@ -385,7 +471,6 @@ impl Extractor {
                     });
 
                     if extract_included_files {
-                        // Also check for `include_bytes!` macros in the test body.
                         Self::add_included_bytes_examples(
                             repo_path,
                             file_path,
@@ -401,15 +486,10 @@ impl Extractor {
     }
 
     /// Resolves conflicts by keeping only the highest-priority source for a given code block.
-    /// If two examples have the exact same content (ignoring whitespace), only the one
-    /// from the highest-priority source type (e.g., Test > DocComment) is kept.
     fn resolve_conflicts(examples: Vec<GeneratedExample>) -> Vec<GeneratedExample> {
         let mut best_examples: HashMap<String, GeneratedExample> = HashMap::new();
 
         for example in examples {
-            // Create a key by hashing the content, normalized to ignore whitespace.
-            // This allows us to identify examples that are functionally identical
-            // even if their formatting differs slightly.
             let normalized_content: String = example
                 .content
                 .chars()
@@ -420,7 +500,6 @@ impl Extractor {
             best_examples
                 .entry(content_hash)
                 .and_modify(|existing| {
-                    // The `Ord` derive on `ExampleSourceType` ensures Test > DocComment > etc.
                     if example.source_type > existing.source_type {
                         info!(
                             "Conflict resolved for content: Upgrading from {:?} in '{}' to {:?} in '{}'",
@@ -438,12 +517,11 @@ impl Extractor {
     /// Helper to find `include_bytes!` macros, read the referenced files, and add them as examples.
     fn add_included_bytes_examples(
         repo_path: &Path,
-        source_file_path: &Path, // The file containing the `include_bytes!` call
-        code_block: &str,        // The code to search for the macro
+        source_file_path: &Path,
+        code_block: &str,
         version: &str,
         examples: &mut Vec<GeneratedExample>,
     ) -> Result<(), GitHubIngestError> {
-        // Regex to find include_bytes!("path/to/file.json")
         let re = Regex::new(r#"include_bytes!\("([^"]+)"\)"#)?;
         let source_dir = source_file_path.parent().unwrap_or(repo_path);
 

@@ -7,6 +7,7 @@ This crate provides all functionality related to ingesting and searching code ex
 *   **GitHub Ingestion Pipeline:**
     *   **Repository Crawler:** Clones public repositories, handling versioning via tags or branches. If no version is specified, it intelligently infers the version from `Cargo.toml`.
     *   **Intelligent Extractor:** Finds Rust code examples from doc comments (`///`, `//!`), `#[doc]` attributes, `README.md`, and files under `examples/` and `tests/`.
+    *   **Source Code Flattener:** Can flatten the entire repository's source code into a single, consolidated markdown file for comprehensive context.
     *   **Versioned Storage:** Stores extracted examples in a dedicated, version-specific SQLite database for each repository, ensuring that re-ingesting a version correctly updates its content without duplication.
     *   **Automatic Embedding:** Automatically generates vector embeddings for each code snippet during ingestion, enabling semantic search.
 
@@ -34,28 +35,46 @@ The primary way to use this crate's ingestion capabilities is through the `dump 
 
 ### `dump github`
 
-Clones a public GitHub repository, extracts all Rust code examples, and stores them in a versioned, local SQLite database under `db/github_ingest/<repo_name>.db`.
+Clones a public GitHub repository and generates a consolidated markdown file from its content. It can either extract curated code examples (`--dump-type examples`) or flatten the entire repository's source code (`--dump-type src`). The generated markdown can then be automatically processed and chunked into a local SQLite database under `db/github_chunks/<dump_type>/<repo_name>.db`.
 
 **Arguments:**
 
 *   `--url <URL>`: **(Required)** The URL of the public GitHub repository to clone.
 *   `--version <VERSION>`: (Optional) A specific git tag or commit hash to check out. If omitted, the version will be inferred from the `version` field in `Cargo.toml`.
+*   `--dump-type <DUMP_TYPE>`: (Optional) The type of content to dump. Defaults to `examples`.
+    *   `examples`: Extracts curated code examples from tests, doc comments, READMEs, and example files.
+    *   `src`: Flattens all source code files into a single markdown file, preserving file paths.
 *   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model.
 *   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use.
 
 **Examples:**
-```sh
-cargo run -p cli dump github \
-  --url https://github.com/rust-lang/book \
-  --version v2.0.0 \
-  --embedding-api-url "http://localhost:1234/v1/embeddings" \
-  --embedding-model "text-embedding-qwen3-embedding-8b"
-```
+
+**1. Dump Curated Code Examples (Default)**
+
+This command extracts only curated code examples from the `turso` repository and saves them as `tursodatabase-turso-v0.1.5-examples.md`.
 
 ```sh
 cargo run -p cli dump github \
   --url https://github.com/tursodatabase/turso \
   --version v0.1.5 \
+  --dump-type examples \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+
+cargo run -p cli dump github \
+  --url https://github.com/jup-ag/jupiter-swap-api-client \
+  --dump-type src
+```
+
+**2. Dump All Source Code**
+
+This command flattens the *entire* source code of the `turso` repository into a single file named `tursodatabase-turso-v0.1.5-src.md`. This is useful for providing comprehensive context to an LLM.
+
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/tursodatabase/turso \
+  --version v0.1.5 \
+  --dump-type src \
   --embedding-api-url "http://localhost:1234/v1/embeddings" \
   --embedding-model "text-embedding-qwen3-embedding-8b"
 ```

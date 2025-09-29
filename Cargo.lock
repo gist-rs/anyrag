@@ -282,6 +282,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "git2",
+ "glob",
  "htmd",
  "html5ever 0.35.0",
  "kuchikiki",
