@@ -99,7 +99,7 @@ The `.env` file is used for secrets and environment-specific settings. These var
 
     To enable optional features, use the `--features` flag. For example, to enable Solana-related handlers:
     ```sh
-    cargo run -p anyrag-server --features solana
+    cargo run -p anyrag-server --features bigquery
     ```
 
 ### 2. Running the CLI (TUI)

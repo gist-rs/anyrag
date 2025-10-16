@@ -19,7 +19,6 @@ anyrag-rss = { path = "../rss", optional = true }
 anyrag-sheets = { path = "../sheets", optional = true }
 anyrag-text = { path = "../text", optional = true }
 anyrag-firebase = { path = "../firebase", optional = true }
-anyrag-solana = { path = "../solana", optional = true }
 
 # Web Framework
 axum = { workspace = true, features = ["macros"] }
@@ -59,13 +58,12 @@ bigquery = ["anyrag/bigquery"]
 graph_db = ["anyrag/graph_db"]
 rss = ["dep:anyrag-rss", "anyrag/rss"]
 firebase = ["dep:anyrag-firebase"]
-solana = ["dep:anyrag-solana"]
 github = ["dep:anyrag-github"]
 web = ["dep:anyrag-web"]
 pdf = ["dep:anyrag-pdf"]
 sheets = ["dep:anyrag-sheets"]
 text = ["dep:anyrag-text"]
-full = ["bigquery", "graph_db", "rss", "firebase", "solana", "github", "web", "pdf", "sheets", "text"]
+full = ["bigquery", "graph_db", "rss", "firebase", "github", "web", "pdf", "sheets", "text"]
 
 [dev-dependencies]
 anyrag-test-utils = { path = "../test-utils", features = ["pdf"] }

@@ -117,11 +117,6 @@ pub fn create_router(app_state: AppState) -> Router {
             .route("/graph/build", post(handlers::graph_build_handler));
     }
 
-    #[cfg(feature = "solana")]
-    {
-        router = router.route("/gen/tx", post(handlers::gen_tx_handler));
-    }
-
     router
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
