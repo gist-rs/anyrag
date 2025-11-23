@@ -8,7 +8,7 @@ name = "anyrag"
 path = "src/lib.rs"
 
 [dependencies]
-
+rig-core = { workspace = true }
 gcp-bigquery-client = { workspace = true, optional = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -38,6 +38,7 @@ firestore = { version = "0.47.0", optional = true }
 futures = { workspace = true }
 wiremock = "0.6.5"
 anyrag-html = { path = "../html" }
+bytes = "1.0"
 html2md = "0.2.15"
 scraper = "0.24.0"
 serde_yaml = { workspace = true }

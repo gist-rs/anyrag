@@ -7,7 +7,9 @@
 
 use crate::{
     errors::PromptError,
-    providers::ai::{gemini::GeminiProvider, local::LocalAiProvider, AiProvider},
+    providers::ai::{
+        gemini::GeminiProvider, local::LocalAiProvider, zai_provider::ZaiProvider, AiProvider,
+    },
     types::ProviderConfig,
 };
 use std::collections::HashMap;
@@ -31,6 +33,10 @@ pub fn create_dynamic_provider(
         model_name
     );
 
+    // Check if we should use ZAI (AI_API_KEY set but LOCAL_AI_API_URL not set and not using gemini)
+    let has_api_key = std::env::var("AI_API_KEY").is_ok();
+    let has_local_url = std::env::var("LOCAL_AI_API_URL").is_ok();
+
     let provider: Box<dyn AiProvider> = if model_name.starts_with("gemini") {
         let api_key = std::env::var("AI_API_KEY").map_err(|_| {
             PromptError::MissingAiProvider(
@@ -45,6 +51,15 @@ pub fn create_dynamic_provider(
             api_url
         );
         Box::new(GeminiProvider::new(api_url, api_key)?)
+    } else if has_api_key && !has_local_url {
+        // Use ZAI when AI_API_KEY is set but LOCAL_AI_API_URL is not
+        info!("Dynamically configuring ZAI provider with model: glm-4.6");
+        let zai_provider = ZaiProvider::from_env().map_err(|_| {
+            PromptError::MissingAiProvider(
+                "AI_API_KEY must be set in .env to use ZAI provider.".to_string(),
+            )
+        })?;
+        Box::new(zai_provider)
     } else {
         // --- Local Provider Logic with Fallback ---
         let local_provider_config = providers_config.get("local_default").ok_or_else(|| {
