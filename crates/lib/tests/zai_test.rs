@@ -152,7 +152,7 @@ fn test_zai_provider_creation() {
 
         // The agent should be successfully created with tools
         // (We don't test actual API calls here to avoid network dependencies)
-        assert!(true);
+        // Just the fact that we can create it without panicking is enough
     });
 
     std::env::remove_var("AI_API_KEY");
