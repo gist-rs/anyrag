@@ -3,7 +3,7 @@
 //! This file contains tests for the ZAI provider's functionality.
 
 use anyhow::Result;
-use anyrag::providers::ai::zai;
+use anyrag::providers::ai::zai::{Client, GLM_4_6};
 use rig::prelude::*;
 use rig::{
     completion::{Prompt, ToolDefinition},
@@ -139,12 +139,12 @@ fn test_zai_provider_creation() {
     std::env::set_var("AI_API_KEY", "test-key");
 
     tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let client = zai::Client::builder("test-key").build();
-        let _completion_model = client.completion_model(zai::GLM_4_6);
+        let client = Client::builder("test-key").build();
+        let _completion_model = client.completion_model(GLM_4_6);
 
         // Create agent with tools
         let _agent = client
-            .agent(zai::GLM_4_6)
+            .agent(GLM_4_6)
             .preamble("You are a calculator here to help the user perform arithmetic operations.")
             .tool(Adder)
             .tool(Subtract)
@@ -166,7 +166,7 @@ fn test_zai_provider_from_env() {
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         // The following would normally use the environment variable
         // let client = providers::zai::Client::from_env();
-        let client = zai::Client::builder("test-key").build();
+        let client = Client::builder("test-key").build();
         assert_eq!(client.base_url, "https://api.z.ai/api/coding/paas/v4");
     });
 
@@ -205,11 +205,11 @@ async fn test_zai_tool_calling_with_api() {
 
     // Create ZAI client
     // This would use AI_API_KEY environment variable
-    let client = zai::Client::builder("test-key").build();
+    let client = Client::builder("test-key").build();
 
     // Create agent with a single context prompt and two tools
     let calculator_agent = client
-        .agent(zai::GLM_4_6)
+        .agent(GLM_4_6)
         .preamble("You are a calculator here to help the user perform arithmetic operations. Use the tools provided to answer the user's question.")
         .max_tokens(1024)
         .tool(Adder)

@@ -2,7 +2,6 @@ pub mod embedding;
 pub mod gemini;
 pub mod local;
 pub mod zai;
-pub mod zai_provider;
 
 use crate::errors::PromptError;
 use async_trait::async_trait;

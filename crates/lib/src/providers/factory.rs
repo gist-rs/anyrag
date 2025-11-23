@@ -7,9 +7,7 @@
 
 use crate::{
     errors::PromptError,
-    providers::ai::{
-        gemini::GeminiProvider, local::LocalAiProvider, zai_provider::ZaiProvider, AiProvider,
-    },
+    providers::ai::{gemini::GeminiProvider, local::LocalAiProvider, zai::ZaiProvider, AiProvider},
     types::ProviderConfig,
 };
 use std::collections::HashMap;

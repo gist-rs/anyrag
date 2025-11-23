@@ -13,7 +13,9 @@
 
 pub mod client;
 pub mod completion;
+pub mod provider;
 
 pub use client::Client;
+pub use provider::ZaiProvider;
 
 pub const GLM_4_6: &str = "glm-4.6";

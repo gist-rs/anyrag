@@ -33,7 +33,7 @@ impl ZaiProvider {
             )
         })?;
 
-        let client = crate::providers::ai::zai::Client::builder(&api_key).build();
+        let client = super::Client::builder(&api_key).build();
 
         Ok(Self {
             client,
