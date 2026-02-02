@@ -51,12 +51,22 @@ pub async fn run_github_ingestion(
     // TODO: Add logic to determine the latest version if none is specified in the task.
     // For now, the version returned by crawl() is used.
 
-    // 3. Extract
-    let examples = Extractor::extract(
-        &crawl_result.path,
-        &crawl_result.version,
-        task.extract_included_files,
-    )?;
+    // 3. Extract based on dump_type
+    let examples = match task.dump_type {
+        types::DumpType::Examples => Extractor::extract(
+            &crawl_result.path,
+            &crawl_result.version,
+            task.extract_included_files,
+        )?,
+        types::DumpType::Tests => {
+            Extractor::extract_all_tests(&crawl_result.path, &crawl_result.version)?
+        }
+        types::DumpType::Src => {
+            // Src dump type doesn't extract examples - handled separately in CLI
+            info!("Src dump type selected - skipping example extraction.");
+            vec![]
+        }
+    };
 
     // 4. Store
     let count = storage_manager

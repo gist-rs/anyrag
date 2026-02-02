@@ -93,19 +93,19 @@ pub async fn get_or_create_user(
         // info!("[core_access] Found existing user: {user:?}");
 
         // If a role override is provided and it's different, update the existing user's role.
-        if let Some(new_role) = role_override {
-            if user.role != new_role {
-                info!(
-                    "[core_access] Updating user {} role from '{}' to '{}'",
-                    user.id, user.role, new_role
-                );
-                conn.execute(
-                    "UPDATE users SET role = ? WHERE id = ?",
-                    params![new_role, user.id.clone()],
-                )
-                .await?;
-                user.role = new_role.to_string(); // Update the struct to be returned
-            }
+        if let Some(new_role) = role_override
+            && user.role != new_role
+        {
+            info!(
+                "[core_access] Updating user {} role from '{}' to '{}'",
+                user.id, user.role, new_role
+            );
+            conn.execute(
+                "UPDATE users SET role = ? WHERE id = ?",
+                params![new_role, user.id.clone()],
+            )
+            .await?;
+            user.role = new_role.to_string(); // Update the struct to be returned
         }
 
         return Ok(user);
@@ -120,16 +120,18 @@ pub async fn get_or_create_user(
     // constraint violation, it means a concurrent process created the user
     // between our SELECT and INSERT (a race condition). In this case, we can
     // safely ignore the error and proceed to the final SELECT.
-    if let Err(e) = conn
+    match conn
         .execute(
             "INSERT INTO users (id, role) VALUES (?, ?)",
             params![user_id.clone(), role],
         )
         .await
     {
-        if !e.to_string().contains("UNIQUE constraint failed") {
+        Ok(_) => {}
+        Err(e) if !e.to_string().contains("UNIQUE constraint failed") => {
             return Err(e.into());
         }
+        Err(_) => {} // UNIQUE constraint violation - ignore and continue
     }
 
     // 3. SELECT the user, which is now guaranteed to exist.

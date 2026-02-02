@@ -18,6 +18,7 @@ pub enum DumpType {
     #[default]
     Examples,
     Src,
+    Tests,
 }
 
 #[derive(Parser, Debug)]
@@ -52,6 +53,7 @@ pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
     match args.dump_type {
         DumpType::Examples => handle_examples_dump(args).await,
         DumpType::Src => handle_src_dump(args).await,
+        DumpType::Tests => handle_tests_dump(args).await,
     }
 }
 
@@ -69,6 +71,7 @@ async fn handle_examples_dump(args: &GithubArgs) -> Result<()> {
         embedding_model: args.embedding_model.clone(),
         embedding_api_key: std::env::var("AI_API_KEY").ok(),
         extract_included_files: args.extract_included_files,
+        dump_type: crate::ingest::types::DumpType::Examples,
     };
 
     let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
@@ -141,6 +144,82 @@ async fn handle_examples_dump(args: &GithubArgs) -> Result<()> {
     Ok(())
 }
 
+async fn handle_tests_dump(args: &GithubArgs) -> Result<()> {
+    info!(
+        "Starting GitHub TESTS ingestion for URL: {} with version: {:?}",
+        args.url, args.version
+    );
+    println!("📥 Starting tests ingestion for '{}'...", args.url);
+
+    let task = IngestionTask {
+        url: args.url.clone(),
+        version: args.version.clone(),
+        embedding_api_url: args.embedding_api_url.clone(),
+        embedding_model: args.embedding_model.clone(),
+        embedding_api_key: std::env::var("AI_API_KEY").ok(),
+        extract_included_files: false, // Tests typically don't use include_bytes!
+        dump_type: crate::ingest::types::DumpType::Tests,
+    };
+
+    let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
+    let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task).await?;
+    println!(
+        "✅ Successfully ingested {} unique tests from '{}' (version: {}).",
+        ingested_count, args.url, ingested_version
+    );
+
+    if ingested_count == 0 {
+        println!("No new tests were found to generate a markdown file.");
+        return Ok(());
+    }
+
+    println!("📝 Generating consolidated tests file...");
+    let repo_name = StorageManager::url_to_repo_name(&args.url);
+
+    let tests = storage_manager
+        .get_examples(&repo_name, &ingested_version)
+        .await?;
+
+    if tests.is_empty() {
+        println!("Could not find any tests in the database to generate the file.");
+        return Ok(());
+    }
+
+    let mut sorted_tests = tests;
+    sorted_tests.sort_by(|a, b| a.example_handle.cmp(&b.example_handle));
+
+    let mut markdown_content =
+        format!("# Test Cases for {repo_name} (Version: {ingested_version})\n\n");
+
+    let test_markdown = sorted_tests
+        .iter()
+        .map(|ex| {
+            let _path = std::path::Path::new(&ex.source_file);
+            let language = "rust";
+
+            format!(
+                "## `{}`\n**Source:** `{}` (`{}`)\n\n```{}\n{}\n```\n",
+                ex.example_handle, ex.source_file, ex.source_type, language, ex.content
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("---\n");
+
+    markdown_content.push_str(&test_markdown);
+
+    let safe_version = ingested_version.replace('/', "-");
+    let output_filename = format!("{repo_name}-{safe_version}-tests.md");
+    fs::write(&output_filename, markdown_content)?;
+    println!("✅ Successfully generated tests file: '{output_filename}'");
+
+    if !args.no_process {
+        let chunk_db_dir = format!("{}/tests", constants::GITHUB_CHUNKS_DB_DIR);
+        process_markdown_file(args, &output_filename, &repo_name, &chunk_db_dir).await?;
+    }
+
+    Ok(())
+}
+
 async fn handle_src_dump(args: &GithubArgs) -> Result<()> {
     info!(
         "Starting GitHub SRC ingestion for URL: {} with version: {:?}",
@@ -155,6 +234,7 @@ async fn handle_src_dump(args: &GithubArgs) -> Result<()> {
         embedding_model: None,
         embedding_api_key: None,
         extract_included_files: false,
+        dump_type: crate::ingest::types::DumpType::Src,
     };
 
     let crawl_result = Crawler::crawl(&task).await?;

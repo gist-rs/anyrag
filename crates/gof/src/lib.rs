@@ -45,6 +45,11 @@ pub struct ExampleArgs {
     /// The name of the embedding model to use (required if embedding-api-url is set).
     #[arg(long, env = "EMBEDDINGS_MODEL", requires = "embedding_api_url")]
     embedding_model: Option<String>,
+    /// Ingest all content types (examples, tests, and source code) from dependencies.
+    /// When this flag is set, it will extract examples, tests, and flatten all source code,
+    /// providing comprehensive context.
+    #[arg(long)]
+    all: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -170,6 +175,7 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
     // 3. Parallel Ingestion
     let storage_manager = anyrag_github::ingest::storage::StorageManager::new(None).await?;
     let mut handles = vec![];
+    let ingest_all = args.all;
 
     for (url, version) in repo_tasks {
         let storage_manager_clone = storage_manager.clone();
@@ -178,27 +184,64 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
         let api_key = std::env::var("AI_API_KEY").ok();
 
         let handle = tokio::spawn(async move {
-            let task = anyrag_github::ingest::types::IngestionTask {
-                url: url.clone(),
-                version: Some(version.clone()),
-                embedding_api_url: embedding_api_url_clone,
-                embedding_model: embedding_model_clone,
-                embedding_api_key: api_key,
-                extract_included_files: false,
+            let storage_manager = storage_manager_clone;
+
+            // If --all is set, ingest all three types (examples, tests, src)
+            // Otherwise, just ingest examples
+            let dump_types = if ingest_all {
+                vec![
+                    anyrag_github::ingest::types::DumpType::Examples,
+                    anyrag_github::ingest::types::DumpType::Tests,
+                    anyrag_github::ingest::types::DumpType::Src,
+                ]
+            } else {
+                vec![anyrag_github::ingest::types::DumpType::Examples]
             };
 
-            println!("  -> Starting ingestion for {url}@{version}");
-            let result = anyrag_github::run_github_ingestion(&storage_manager_clone, task).await;
+            let mut total_count = 0;
+            let mut final_version = String::new();
+            let mut has_error = false;
 
-            match result {
-                Ok((count, ingested_version)) => {
-                    println!("  ✅ Finished {url}@{ingested_version}: Ingested {count} examples.");
-                    Ok(())
+            for dump_type in dump_types {
+                let task = anyrag_github::ingest::types::IngestionTask {
+                    url: url.clone(),
+                    version: Some(version.clone()),
+                    embedding_api_url: embedding_api_url_clone.clone(),
+                    embedding_model: embedding_model_clone.clone(),
+                    embedding_api_key: api_key.clone(),
+                    extract_included_files: false,
+                    dump_type,
+                };
+
+                println!(
+                    "  -> Starting ingestion for {url}@{version} (type: {})",
+                    dump_type
+                );
+                match anyrag_github::run_github_ingestion(&storage_manager, task).await {
+                    Ok((count, ingested_version)) => {
+                        println!(
+                            "  ✅ Finished {url}@{ingested_version} ({type}): Ingested {count} items.",
+                            type = dump_type
+                        );
+                        total_count += count;
+                        final_version = ingested_version;
+                    }
+                    Err(e) => {
+                        eprintln!("  ❌ Error ingesting {url}@{version} ({type}): {e:?}", type = dump_type);
+                        has_error = true;
+                    }
                 }
-                Err(e) => {
-                    eprintln!("  ❌ Error ingesting {url}@{version}: {e:?}");
-                    Err(anyhow!("Ingestion failed for {url}"))
-                }
+            }
+
+            if has_error {
+                Err(anyhow!("Ingestion partially failed for {url}"))
+            } else if !final_version.is_empty() {
+                println!(
+                    "  ✅ Completed {url}@{final_version}: Total of {total_count} items ingested."
+                );
+                Ok(())
+            } else {
+                Err(anyhow!("Ingestion failed for {url}"))
             }
         });
         handles.push(handle);

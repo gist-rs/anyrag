@@ -43,6 +43,7 @@ Clones a public GitHub repository and generates a consolidated markdown file fro
 *   `--version <VERSION>`: (Optional) A specific git tag or commit hash to check out. If omitted, the version will be inferred from the `version` field in `Cargo.toml`.
 *   `--dump-type <DUMP_TYPE>`: (Optional) The type of content to dump. Defaults to `examples`.
     *   `examples`: Extracts curated code examples from tests, doc comments, READMEs, and example files.
+    *   `tests`: Extracts all test functions including `#[test]`, `#[tokio::test]`, and `#[rstest]` from both test files and inline tests in source files.
     *   `src`: Flattens all source code files into a single markdown file, preserving file paths.
 *   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model.
 *   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use.
@@ -64,9 +65,40 @@ cargo run -p cli dump github \
 cargo run -p cli dump github \
   --url https://github.com/jup-ag/jupiter-swap-api-client \
   --dump-type src
+  
+cargo run -p cli dump github \
+  --url https://github.com/tokio-rs/axum.git \
+  --version axum-v0.8.8 \
+  --dump-type examples
 ```
 
-**2. Dump All Source Code**
+**3. Dump All Tests**
+
+This command extracts all test functions from the repository, including inline tests in `src/*.rs` files, `#[tokio::test]` async tests, and `#[rstest]` parameterized tests. The output is saved as `tursodatabase-turso-v0.1.5-tests.md`.
+
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/tursodatabase/turso \
+  --version v0.1.5 \
+  --dump-type tests \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
+**3. Dump All Tests**
+
+This command extracts all test functions from the repository, including inline tests in `src/*.rs` files, `#[tokio::test]` async tests, and `#[rstest]` parameterized tests. The output is saved as `tursodatabase-turso-v0.1.5-tests.md`.
+
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/tursodatabase/turso \
+  --version v0.1.5 \
+  --dump-type tests \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
+**4. Dump All Source Code**
 
 This command flattens the *entire* source code of the `turso` repository into a single file named `tursodatabase-turso-v0.1.5-src.md`. This is useful for providing comprehensive context to an LLM.
 

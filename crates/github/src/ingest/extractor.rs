@@ -196,6 +196,105 @@ impl Extractor {
         Ok(results)
     }
 
+    /// Extracts all test functions from a repository, including inline tests in src/ files.
+    /// Supports #[test], #[tokio::test], and #[rstest] annotations.
+    pub fn extract_all_tests(
+        repo_path: &Path,
+        version: &str,
+    ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
+        info!(
+            "Starting test extraction from path: {}",
+            repo_path.display()
+        );
+
+        let mut sources = DiscoveredSources::default();
+
+        // Discover all Rust files for test parsing
+        Self::discover_all_rust_files(repo_path, &mut sources)?;
+
+        info!(
+            "Discovered {} READMEs, {} text files, {} example files, {} potential test files (src/, tests/, and *_test.rs files), and {} doc comment files.",
+            sources.readmes.len(),
+            sources.text_files.len(),
+            sources.example_files.len(),
+            sources.tests.len(),
+            sources.doc_comments.len()
+        );
+
+        let mut all_tests = Vec::new();
+
+        // Only parse tests from the discovered test files
+        all_tests.extend(Self::parse_test_files(
+            repo_path,
+            &sources.tests,
+            version,
+            false, // Tests typically don't use include_bytes!
+        )?);
+
+        info!(
+            "Extracted {} unique tests from the repository.",
+            all_tests.len()
+        );
+        Ok(all_tests)
+    }
+
+    /// Discovers all Rust files that may contain tests, including:
+    /// - Files in the tests/ directory
+    /// - Files ending with _test.rs
+    /// - All .rs files in src/ directory (for inline tests)
+    fn discover_all_rust_files(
+        dir: &Path,
+        sources: &mut DiscoveredSources,
+    ) -> Result<(), GitHubIngestError> {
+        if !dir.is_dir() {
+            return Ok(());
+        }
+
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_name = entry.file_name().to_string_lossy().to_lowercase();
+            let path_str = path.to_string_lossy();
+
+            if file_name.starts_with('.') {
+                continue;
+            }
+
+            if path.is_dir() {
+                // Recursively search subdirectories
+                Self::discover_all_rust_files(&path, sources)?;
+            } else {
+                // Categorize files based on their location and naming
+                if file_name == "readme.md" {
+                    sources.readmes.push(path.clone());
+                } else if file_name.ends_with(".rs") {
+                    // This is a Rust file - determine if it's a test file or source file
+                    if path_str.contains("/tests/") || file_name.ends_with("_test.rs") {
+                        // Traditional test files
+                        sources.tests.push(path.clone());
+                    } else if path_str.contains("/examples/") {
+                        // Example files
+                        sources.example_files.push(path.clone());
+                    } else if path_str.contains("/src/") {
+                        // Source files that may contain inline tests
+                        sources.tests.push(path.clone());
+                    } else {
+                        // Other .rs files - check for doc comments
+                        sources.doc_comments.push(path.clone());
+                    }
+                } else if file_name == "cargo.toml"
+                    || file_name.ends_with(".txt")
+                    || file_name.ends_with(".json")
+                    || file_name.ends_with(".yaml")
+                    || file_name.ends_with(".yml")
+                {
+                    sources.text_files.push(path.clone());
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Recursively walks a directory to discover all non-hidden source files, checking against ignore patterns.
     fn discover_all_source_files_recursive(
         base_dir: &Path,
@@ -440,7 +539,28 @@ impl Extractor {
         extract_included_files: bool,
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         let mut examples = Vec::new();
-        let re = Regex::new(r#"(?s)#\[test\]\s*(?:async\s+)?fn\s+(\w+)\s*\(\)\s*\{(.*?)\}"#)?;
+
+        // Regex patterns for different test annotations:
+        // 1. #[test] or #[tokio::test] with optional async
+        // 2. #[rstest] which can have various configurations, including #[case] attributes
+        let test_patterns = vec![
+            // #[test] pattern with optional async
+            Regex::new(r#"(?s)#\[test\]\s*(?:async\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*\{(.*?)\}"#)?,
+            // #[tokio::test] specific pattern
+            Regex::new(
+                r#"(?s)#\[tokio::test\]\s*(?:async\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*\{(.*?)\}"#,
+            )?,
+            // #[rstest] pattern - captures function name, arguments, and body
+            // Handles attributes before #[rstest] (like #[case]) and after #[rstest]
+            // Uses careful matching to avoid capturing across multiple test functions
+            Regex::new(
+                r#"(?s)#\[rstest(?:\([^)]*\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:async\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*\{(.*?)\}"#,
+            )?,
+            // Alternative rstest pattern for attributes BEFORE #[rstest] (like #[case])
+            Regex::new(
+                r#"(?s)(?:#\[[^\]]*\]\s*)+#\[rstest(?:\([^)]*\))?\]\s*(?:async\s+)?fn\s+(\w+)\s*\(([^)]*)\)\s*\{(.*?)\}"#,
+            )?,
+        ];
 
         for file_path in files {
             let content = fs::read_to_string(file_path)?;
@@ -450,34 +570,50 @@ impl Extractor {
                 .to_string_lossy()
                 .to_string();
 
-            for cap in re.captures_iter(&content) {
-                if let (Some(fn_name), Some(fn_body)) = (cap.get(1), cap.get(2)) {
-                    let code_block = fn_body.as_str().trim().to_string();
-                    if code_block.is_empty() {
-                        continue;
-                    }
+            for re in &test_patterns {
+                for cap in re.captures_iter(&content) {
+                    if let (Some(fn_name), Some(fn_args), Some(fn_body)) =
+                        (cap.get(1), cap.get(2), cap.get(3))
+                    {
+                        let code_block = fn_body.as_str().trim().to_string();
+                        if code_block.is_empty() {
+                            continue;
+                        }
 
-                    examples.push(GeneratedExample {
-                        example_handle: format!(
-                            "{}:{}:{}",
-                            ExampleSourceType::Test,
-                            relative_path,
-                            fn_name.as_str()
-                        ),
-                        content: code_block.clone(),
-                        source_file: relative_path.clone(),
-                        source_type: ExampleSourceType::Test,
-                        version: version.to_string(),
-                    });
+                        let example_handle = if !fn_args.as_str().trim().is_empty() {
+                            format!(
+                                "{}:{}:{}({})",
+                                ExampleSourceType::Test,
+                                relative_path,
+                                fn_name.as_str(),
+                                fn_args.as_str().trim()
+                            )
+                        } else {
+                            format!(
+                                "{}:{}:{}",
+                                ExampleSourceType::Test,
+                                relative_path,
+                                fn_name.as_str()
+                            )
+                        };
 
-                    if extract_included_files {
-                        Self::add_included_bytes_examples(
-                            repo_path,
-                            file_path,
-                            &code_block,
-                            version,
-                            &mut examples,
-                        )?;
+                        examples.push(GeneratedExample {
+                            example_handle,
+                            content: code_block.clone(),
+                            source_file: relative_path.clone(),
+                            source_type: ExampleSourceType::Test,
+                            version: version.to_string(),
+                        });
+
+                        if extract_included_files {
+                            Self::add_included_bytes_examples(
+                                repo_path,
+                                file_path,
+                                &code_block,
+                                version,
+                                &mut examples,
+                            )?;
+                        }
                     }
                 }
             }

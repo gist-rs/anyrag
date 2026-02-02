@@ -22,7 +22,7 @@ This creates a project-specific knowledge base that can be queried to find highl
 
 ### `gof example`
 
-This is the main ingestion command. It analyzes your project's dependencies and fetches all code examples. You should run this command once to build the initial knowledge base for your project.
+This is main ingestion command. It analyzes your project's dependencies and fetches all code examples. You should run this command once to build initial knowledge base for your project.
 
 **Usage:**
 
@@ -32,7 +32,7 @@ cargo run -p gof -- example
 ```
 
 This command will:
-1.  Find the `Cargo.toml` in the current directory.
+1.  Find `Cargo.toml` in current directory.
 2.  Query `crates.io` to find the repository URL for each dependency.
 3.  Ingest examples from all dependencies in parallel.
 
@@ -41,6 +41,11 @@ This command will:
 *   `--path <PATH>`: Specify a path to a different `Cargo.toml` file.
 *   `--embedding-api-url <URL>`: (Optional) Provide an embedding API endpoint. If set, vector embeddings will be generated for all examples, enabling semantic search.
 *   `--embedding-model <MODEL>`: (Required if embedding URL is set) The name of the embedding model to use.
+*   `--all`: Ingest all content types from dependencies. When this flag is set, `gof` will extract and store three types of content from each dependency:
+    *   **Examples**: Curated code examples from doc comments, READMEs, and example files
+    *   **Tests**: All test functions including `#[test]`, `#[tokio::test]`, and `#[rstest]` from both test files and inline tests in source files
+    *   **Source Code**: The entire source codebase, flattened into a single searchable file
+    *   This provides comprehensive context for your project's dependencies, making it easier to understand how libraries work internally.
 
 **Example with Embeddings:**
 
@@ -50,6 +55,19 @@ export EMBEDDINGS_API_URL="http://localhost:1234/v1/embeddings"
 export EMBEDDINGS_MODEL="text-embedding-qwen3-embedding-8b"
 
 cargo run -p gof -- example
+```
+
+**Example with All Content Types:**
+
+```sh
+# Ingest all source code, tests, and examples from dependencies
+cargo run -p gof -- example --all
+
+# With embeddings for comprehensive semantic search
+export EMBEDDINGS_API_URL="http://localhost:1234/v1/embeddings"
+export EMBEDDINGS_MODEL="text-embedding-qwen3-embedding-8b"
+
+cargo run -p gof -- example --all
 ```
 
 ### `gof mcp` (Model Context Protocol)
@@ -101,6 +119,15 @@ cargo run -p gof -- mcp "how to connect to turso" --repos tursodatabase-turso
 
 ## Typical Workflow
 
+### Basic Workflow (Examples Only)
+
 1.  Navigate to your Rust project's root directory.
-2.  Run `cargo run -p gof -- example` to ingest all examples from your dependencies. This may take some time on the first run.
+2.  Run `cargo run -p gof -- example` to ingest all code examples from your dependencies. This may take some time on the first run.
 3.  Integrate an editor plugin or other tool to call `gof mcp` with your queries to get instant, context-aware code examples without leaving your development environment.
+
+### Comprehensive Workflow (All Content)
+
+1.  Navigate to your Rust project's root directory.
+2.  Run `cargo run -p gof -- example --all` to ingest all examples, tests, and source code from your dependencies. This provides the most comprehensive knowledge base.
+3.  Set up environment variables for embeddings to enable semantic search.
+4.  Integrate an editor plugin or other tool to call `gof mcp` with your queries to get detailed context, including test cases and internal implementations.

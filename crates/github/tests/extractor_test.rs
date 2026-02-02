@@ -403,3 +403,164 @@ fn test_idl_loading() {
         .content
         .contains(r#"include_bytes!("../assets/idl.json")"#));
 }
+
+#[test]
+fn test_extract_all_tests() {
+    // Arrange
+    let temp_dir = tempdir().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path();
+
+    // 1. Create a test file in tests/ directory
+    let tests_dir = repo_path.join("tests");
+    std::fs::create_dir(&tests_dir).unwrap();
+    let integration_test_path = tests_dir.join("integration_test.rs");
+    let integration_test_content = r#"
+#[test]
+fn test_from_tests_dir() {
+    assert_eq!(1, 1);
+}
+
+#[tokio::test]
+async fn async_test_from_tests_dir() {
+    let result = true;
+    assert!(result);
+}
+"#;
+    create_test_file(&integration_test_path, integration_test_content);
+
+    // 2. Create regular src/ files with inline tests
+    let src_dir = repo_path.join("src");
+    std::fs::create_dir(&src_dir).unwrap();
+
+    // Create a _test.rs file
+    let unit_test_path = src_dir.join("module_test.rs");
+    create_test_file(
+        &unit_test_path,
+        r#"#[test]
+fn test_from_module_test() {
+    assert_eq!(2, 2);
+}"#,
+    );
+
+    let lib_rs_path = src_dir.join("lib.rs");
+    let lib_rs_content = r#"
+pub fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+#[test]
+fn inline_test_lib() {
+    assert_eq!(add(2, 3), 5);
+}
+
+#[tokio::test]
+async fn async_inline_test_lib() {
+    let result = async { true }.await;
+    assert!(result);
+}
+"#;
+    create_test_file(&lib_rs_path, lib_rs_content);
+
+    // 4. Create a file with rstest
+    let module_rs_path = src_dir.join("module.rs");
+    let module_rs_content = r#"
+use rstest::rstest;
+
+#[rstest]
+#[case(1, 2, 3)]
+#[case(2, 3, 5)]
+fn test_rstest_addition(#[case] a: i32, #[case] b: i32, #[case] expected: i32) {
+    assert_eq!(a + b, expected);
+}
+
+#[rstest]
+fn test_rstest_simple() {
+    assert!(true);
+}
+"#;
+    create_test_file(&module_rs_path, module_rs_content);
+
+    // Act
+    let tests = Extractor::extract_all_tests(repo_path, "v1.0.0").unwrap();
+
+    // Assert
+    assert!(
+        tests.len() >= 6,
+        "Expected at least 6 tests: 2 from tests/, 1 from _test.rs, 2 from lib.rs, 2 from module.rs"
+    );
+
+    // Verify test handles contain correct source files
+    let has_tests_dir = tests
+        .iter()
+        .any(|t| t.source_file == "tests/integration_test.rs");
+    assert!(has_tests_dir, "Should have tests from tests/ directory");
+
+    let has_module_test = tests
+        .iter()
+        .any(|t| t.source_file.contains("module_test.rs"));
+    assert!(has_module_test, "Should have tests from _test.rs file");
+
+    let has_lib_rs = tests.iter().any(|t| t.source_file == "src/lib.rs");
+    assert!(has_lib_rs, "Should have inline tests from src/lib.rs");
+
+    let has_module_rs = tests.iter().any(|t| t.source_file == "src/module.rs");
+    assert!(has_module_rs, "Should have rstest from src/module.rs");
+
+    // Verify specific test names
+    let test_handles: Vec<_> = tests.iter().map(|t| &t.example_handle).collect();
+
+    assert!(
+        test_handles
+            .iter()
+            .any(|h| h.contains("test_from_tests_dir")),
+        "Should find test_from_tests_dir"
+    );
+    assert!(
+        test_handles
+            .iter()
+            .any(|h| h.contains("async_test_from_tests_dir")),
+        "Should find async_test_from_tests_dir"
+    );
+    assert!(
+        test_handles.iter().any(|h| h.contains("inline_test_lib")),
+        "Should find inline_test_lib"
+    );
+    assert!(
+        test_handles
+            .iter()
+            .any(|h| h.contains("async_inline_test_lib")),
+        "Should find async_inline_test_lib"
+    );
+    assert!(
+        test_handles
+            .iter()
+            .any(|h| h.contains("test_rstest_addition")),
+        "Should find test_rstest_addition"
+    );
+    assert!(
+        test_handles
+            .iter()
+            .any(|h| h.contains("test_rstest_simple")),
+        "Should find test_rstest_simple"
+    );
+
+    // Verify all tests have correct source type
+    assert!(
+        tests
+            .iter()
+            .all(|t| t.source_type == ExampleSourceType::Test),
+        "All extracted items should be Test type"
+    );
+
+    // Verify rstest tests have parameter information in handle
+    let rstest_addition = tests
+        .iter()
+        .find(|t| t.example_handle.contains("test_rstest_addition"))
+        .expect("Should find rstest_addition test");
+    assert!(
+        rstest_addition
+            .example_handle
+            .contains("(#[case] a: i32, #[case] b: i32, #[case] expected: i32)"),
+        "rstest test should include parameters in handle"
+    );
+}

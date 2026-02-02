@@ -33,6 +33,8 @@ struct IngestSource {
     version: Option<String>,
     #[serde(default)]
     extract_included_files: bool,
+    #[serde(default)]
+    dump_type: crate::ingest::types::DumpType,
 }
 
 use std::sync::Arc;
@@ -90,6 +92,7 @@ impl Ingestor for GithubIngestor {
             embedding_model: self.embedding_model.clone(),
             embedding_api_key: self.embedding_api_key.clone(),
             extract_included_files: ingest_source.extract_included_files,
+            dump_type: ingest_source.dump_type,
         };
 
         // 3. Run the ingestion pipeline.

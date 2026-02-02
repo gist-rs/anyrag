@@ -100,6 +100,30 @@ pub struct TrackedRepository {
     pub db_path: String,
 }
 
+/// Represents the type of content to dump from a repository.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
+pub enum DumpType {
+    /// Extracts curated code examples from tests, doc comments, READMEs, and example files.
+    #[default]
+    Examples,
+    /// Extracts all test functions including `#[test]`, `#[tokio::test]`, and `#[rstest]`.
+    Tests,
+    /// Flattens all source code files into a single markdown file.
+    Src,
+}
+
+
+impl std::fmt::Display for DumpType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DumpType::Examples => write!(f, "examples"),
+            DumpType::Tests => write!(f, "tests"),
+            DumpType::Src => write!(f, "src"),
+        }
+    }
+}
+
 /// Represents a task to ingest a specific version of a GitHub repository.
 #[derive(Debug, Clone)]
 pub struct IngestionTask {
@@ -116,4 +140,6 @@ pub struct IngestionTask {
     pub embedding_api_key: Option<String>,
     /// Whether to extract files referenced by `include_bytes!`.
     pub extract_included_files: bool,
+    /// The type of content to dump (examples, tests, or src).
+    pub dump_type: DumpType,
 }
