@@ -70,9 +70,17 @@ cargo run -p cli dump github \
   --url https://github.com/tokio-rs/axum.git \
   --version axum-v0.8.8 \
   --dump-type examples
+  
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/ibraheemdev/papaya.git \
+  --version v0.2.3 \
+  --dump-type examples \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
 ```
 
-**3. Dump All Tests**
+**2. Dump All Tests**
 
 This command extracts all test functions from the repository, including inline tests in `src/*.rs` files, `#[tokio::test]` async tests, and `#[rstest]` parameterized tests. The output is saved as `tursodatabase-turso-v0.1.5-tests.md`.
 
@@ -85,20 +93,7 @@ cargo run -p cli dump github \
   --embedding-model "text-embedding-qwen3-embedding-8b"
 ```
 
-**3. Dump All Tests**
-
-This command extracts all test functions from the repository, including inline tests in `src/*.rs` files, `#[tokio::test]` async tests, and `#[rstest]` parameterized tests. The output is saved as `tursodatabase-turso-v0.1.5-tests.md`.
-
-```sh
-cargo run -p cli dump github \
-  --url https://github.com/tursodatabase/turso \
-  --version v0.1.5 \
-  --dump-type tests \
-  --embedding-api-url "http://localhost:1234/v1/embeddings" \
-  --embedding-model "text-embedding-qwen3-embedding-8b"
-```
-
-**4. Dump All Source Code**
+**3. Dump All Source Code**
 
 This command flattens the *entire* source code of the `turso` repository into a single file named `tursodatabase-turso-v0.1.5-src.md`. This is useful for providing comprehensive context to an LLM.
 
