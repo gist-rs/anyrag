@@ -101,8 +101,7 @@ pub struct TrackedRepository {
 }
 
 /// Represents the type of content to dump from a repository.
-#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DumpType {
     /// Extracts curated code examples from tests, doc comments, READMEs, and example files.
     #[default]
@@ -112,7 +111,6 @@ pub enum DumpType {
     /// Flattens all source code files into a single markdown file.
     Src,
 }
-
 
 impl std::fmt::Display for DumpType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
