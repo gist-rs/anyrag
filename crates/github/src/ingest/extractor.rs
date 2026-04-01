@@ -125,12 +125,7 @@ impl Extractor {
                     sources.tests.push(path.clone());
                 } else if path_str.contains("/examples/") && file_name.ends_with(".rs") {
                     sources.example_files.push(path.clone());
-                } else if file_name == "cargo.toml"
-                    || file_name.ends_with(".txt")
-                    || file_name.ends_with(".json")
-                    || file_name.ends_with(".yaml")
-                    || file_name.ends_with(".yml")
-                {
+                } else if file_name.ends_with(".md") {
                     sources.text_files.push(path.clone());
                 } else if file_name.ends_with(".rs") {
                     sources.doc_comments.push(path.clone());
@@ -391,25 +386,80 @@ impl Extractor {
         version: &str,
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         let mut examples = Vec::new();
+        // Match code blocks with language identifier: ```lang ... ```
+        let re = Regex::new(r"(?s)```(\w+)\s*\n(.*?)\n```")?;
+
         for file_path in files {
+            let content = fs::read_to_string(file_path)?;
             let relative_path = file_path
                 .strip_prefix(repo_path)
                 .unwrap_or(file_path)
                 .to_string_lossy()
                 .to_string();
 
-            let content = fs::read_to_string(file_path)?;
-            if content.trim().is_empty() {
-                continue;
-            }
+            for (i, cap) in re.captures_iter(&content).enumerate() {
+                let language = cap
+                    .get(1)
+                    .map(|m| m.as_str())
+                    .unwrap_or("unknown")
+                    .to_lowercase();
 
-            examples.push(GeneratedExample {
-                example_handle: format!("{}:{}", ExampleSourceType::TextFile, relative_path),
-                content,
-                source_file: relative_path,
-                source_type: ExampleSourceType::TextFile,
-                version: version.to_string(),
-            });
+                // Only extract common programming languages
+                let supported_languages = [
+                    "rust",
+                    "rs",
+                    "javascript",
+                    "js",
+                    "typescript",
+                    "ts",
+                    "python",
+                    "py",
+                    "go",
+                    "java",
+                    "c",
+                    "cpp",
+                    "c++",
+                    "kotlin",
+                    "swift",
+                    "ruby",
+                    "php",
+                    "bash",
+                    "sh",
+                    "shell",
+                    "sql",
+                    "html",
+                    "css",
+                    "scss",
+                    "json",
+                    "yaml",
+                    "toml",
+                ];
+
+                if !supported_languages.contains(&language.as_str()) {
+                    continue;
+                }
+
+                if let Some(code_match) = cap.get(2) {
+                    let code_block = code_match.as_str().trim().to_string();
+                    if code_block.is_empty() {
+                        continue;
+                    }
+                    let line_number = content[..code_match.start()].lines().count() + 1;
+                    examples.push(GeneratedExample {
+                        example_handle: format!(
+                            "{}:{}:{}:{}",
+                            ExampleSourceType::TextFile,
+                            relative_path,
+                            line_number,
+                            i
+                        ),
+                        content: format!("```{}\n{}```", language, code_block),
+                        source_file: relative_path.clone(),
+                        source_type: ExampleSourceType::TextFile,
+                        version: version.to_string(),
+                    });
+                }
+            }
         }
         Ok(examples)
     }

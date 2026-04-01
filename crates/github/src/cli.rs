@@ -122,8 +122,8 @@ async fn handle_examples_dump(args: &GithubArgs) -> Result<()> {
                 .unwrap_or("text");
 
             format!(
-                "## `{}`\n**Source:** `{}` (`{}`)\n\n```{}\n{}\n```\n",
-                ex.example_handle, ex.source_file, ex.source_type, language, ex.content
+                "## `{}`\n\n```{}\n{}\n```\n",
+                ex.example_handle, language, ex.content
             )
         })
         .collect::<Vec<String>>()
@@ -198,8 +198,8 @@ async fn handle_tests_dump(args: &GithubArgs) -> Result<()> {
             let language = "rust";
 
             format!(
-                "## `{}`\n**Source:** `{}` (`{}`)\n\n```{}\n{}\n```\n",
-                ex.example_handle, ex.source_file, ex.source_type, language, ex.content
+                "## `{}`\n\n```{}\n{}\n```\n",
+                ex.example_handle, language, ex.content
             )
         })
         .collect::<Vec<String>>()

@@ -80,6 +80,15 @@ cargo run -p cli dump github \
   --embedding-model "text-embedding-qwen3-embedding-8b"
 ```
 
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/DioxusLabs/dioxus.git \
+  --version v0.7.0 \
+  --dump-type examples \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
 **2. Dump All Tests**
 
 This command extracts all test functions from the repository, including inline tests in `src/*.rs` files, `#[tokio::test]` async tests, and `#[rstest]` parameterized tests. The output is saved as `tursodatabase-turso-v0.1.5-tests.md`.
