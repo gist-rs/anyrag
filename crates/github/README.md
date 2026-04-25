@@ -57,7 +57,7 @@ This command extracts only curated code examples from the `turso` repository and
 ```sh
 cargo run -p cli dump github \
   --url https://github.com/tursodatabase/turso \
-  --version v0.1.5 \
+  --version v0.5.3 \
   --dump-type examples \
   --embedding-api-url "http://localhost:1234/v1/embeddings" \
   --embedding-model "text-embedding-qwen3-embedding-8b"
