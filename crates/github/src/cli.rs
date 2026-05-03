@@ -32,9 +32,13 @@ pub struct GithubArgs {
     /// The type of content to dump (examples or all source files).
     #[arg(long, value_enum, default_value_t = DumpType::Examples)]
     pub dump_type: DumpType,
-    /// A comma-separated list of glob patterns to ignore (e.g., "*.lock,LICENSE").
+    /// A comma-separated list of directory paths to include (e.g., "examples/rust,crates/core").
+    /// When set, only files under these paths are processed. Uses git sparse checkout for efficiency.
     #[arg(long, use_value_delimiter = true)]
-    pub ignore: Option<Vec<String>>,
+    pub includes: Option<Vec<String>>,
+    /// A comma-separated list of glob patterns to exclude (e.g., "*.lock,LICENSE,benches/**").
+    #[arg(long, use_value_delimiter = true)]
+    pub excludes: Option<Vec<String>>,
     /// Disables the automatic processing of the generated markdown file into chunks.
     #[arg(long)]
     pub no_process: bool,
@@ -72,6 +76,8 @@ async fn handle_examples_dump(args: &GithubArgs) -> Result<()> {
         embedding_api_key: std::env::var("AI_API_KEY").ok(),
         extract_included_files: args.extract_included_files,
         dump_type: crate::ingest::types::DumpType::Examples,
+        includes: args.includes.clone(),
+        excludes: args.excludes.clone(),
     };
 
     let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
@@ -159,6 +165,8 @@ async fn handle_tests_dump(args: &GithubArgs) -> Result<()> {
         embedding_api_key: std::env::var("AI_API_KEY").ok(),
         extract_included_files: false, // Tests typically don't use include_bytes!
         dump_type: crate::ingest::types::DumpType::Tests,
+        includes: args.includes.clone(),
+        excludes: args.excludes.clone(),
     };
 
     let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
@@ -235,6 +243,8 @@ async fn handle_src_dump(args: &GithubArgs) -> Result<()> {
         embedding_api_key: None,
         extract_included_files: false,
         dump_type: crate::ingest::types::DumpType::Src,
+        includes: args.includes.clone(),
+        excludes: args.excludes.clone(),
     };
 
     let crawl_result = Crawler::crawl(&task).await?;
@@ -242,8 +252,11 @@ async fn handle_src_dump(args: &GithubArgs) -> Result<()> {
 
     println!("📝 Generating consolidated source code file...");
 
-    let ignore_patterns = args.ignore.clone().unwrap_or_default();
-    let source_files = Extractor::extract_all_sources(&crawl_result.path, &ignore_patterns)?;
+    let source_files = Extractor::extract_all_sources(
+        &crawl_result.path,
+        &args.includes,
+        &args.excludes.clone().unwrap_or_default(),
+    )?;
 
     if source_files.is_empty() {
         println!("No source files were found to generate a markdown file.");

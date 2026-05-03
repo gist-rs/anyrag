@@ -52,7 +52,7 @@ print("hello")
     create_test_file(&readme_path, readme_content);
 
     // Act
-    let examples = Extractor::extract(repo_path, "v1.0.0", false).unwrap();
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
 
     // Assert
     assert_eq!(examples.len(), 2, "Expected to find 2 Rust code blocks.");
@@ -92,7 +92,7 @@ fn test_readme_with_no_rust_blocks() {
     );
 
     // Act
-    let examples = Extractor::extract(repo_path, "v1.0.0", false).unwrap();
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
 
     // Assert
     assert!(examples.is_empty(), "Expected no examples to be found.");
@@ -107,7 +107,7 @@ fn test_empty_readme() {
     create_test_file(&readme_path, "");
 
     // Act
-    let examples = Extractor::extract(repo_path, "v1.0.0", false).unwrap();
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
 
     // Assert
     assert!(
@@ -142,7 +142,7 @@ fn test_extract_example_files() {
     create_test_file(&text_example_path, text_content);
 
     // Act
-    let examples = Extractor::extract(repo_path, "v1.0.0", false).unwrap();
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
 
     // Assert
     assert_eq!(
@@ -205,7 +205,7 @@ fn some_function() {}
     create_test_file(&lib_rs_path, lib_rs_content);
 
     // Act
-    let examples = Extractor::extract(repo_path, "v1.0.0", false).unwrap();
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
 
     // Assert
     assert_eq!(
@@ -262,7 +262,7 @@ async fn async_test_example() {
     create_test_file(&test_file_path, test_file_content);
 
     // Act
-    let examples = Extractor::extract(repo_path, "v1.0.0", false).unwrap();
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
 
     // Assert
     assert_eq!(
@@ -325,7 +325,7 @@ fn test_conflict_resolution_priority() {
     );
 
     // Act
-    let examples = Extractor::extract(repo_path, "v1.0.0", false).unwrap();
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
 
     // Assert
     assert_eq!(
@@ -371,7 +371,7 @@ fn test_idl_loading() {
     create_test_file(&test_file_path, test_file_content);
 
     // Act
-    let examples = Extractor::extract(repo_path, "v1.0.0", true).unwrap();
+    let examples = Extractor::extract(repo_path, "v1.0.0", true, &None, &[]).unwrap();
 
     // Assert
     assert_eq!(
@@ -481,7 +481,7 @@ fn test_rstest_simple() {
     create_test_file(&module_rs_path, module_rs_content);
 
     // Act
-    let tests = Extractor::extract_all_tests(repo_path, "v1.0.0").unwrap();
+    let tests = Extractor::extract_all_tests(repo_path, "v1.0.0", &None, &[]).unwrap();
 
     // Assert
     assert!(

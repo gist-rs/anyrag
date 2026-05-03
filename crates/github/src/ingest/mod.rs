@@ -18,6 +18,7 @@ use self::{
     types::{GitHubIngestError, IngestionTask},
 };
 use anyrag::{providers::ai::AiProvider, SearchResult};
+use glob::Pattern;
 use std::sync::Arc;
 use tracing::{info, instrument};
 
@@ -51,16 +52,39 @@ pub async fn run_github_ingestion(
     // TODO: Add logic to determine the latest version if none is specified in the task.
     // For now, the version returned by crawl() is used.
 
-    // 3. Extract based on dump_type
+    // 3. Compile exclude patterns from task
+    let compiled_excludes: Vec<Pattern> = task
+        .excludes
+        .as_ref()
+        .map(|excludes| {
+            excludes
+                .iter()
+                .filter_map(|s| match Pattern::new(s) {
+                    Ok(p) => Some(p),
+                    Err(e) => {
+                        info!("Invalid exclude glob pattern '{}': {}", s, e);
+                        None
+                    }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // 4. Extract based on dump_type
     let examples = match task.dump_type {
         types::DumpType::Examples => Extractor::extract(
             &crawl_result.path,
             &crawl_result.version,
             task.extract_included_files,
+            &task.includes,
+            &compiled_excludes,
         )?,
-        types::DumpType::Tests => {
-            Extractor::extract_all_tests(&crawl_result.path, &crawl_result.version)?
-        }
+        types::DumpType::Tests => Extractor::extract_all_tests(
+            &crawl_result.path,
+            &crawl_result.version,
+            &task.includes,
+            &compiled_excludes,
+        )?,
         types::DumpType::Src => {
             // Src dump type doesn't extract examples - handled separately in CLI
             info!("Src dump type selected - skipping example extraction.");
@@ -68,12 +92,12 @@ pub async fn run_github_ingestion(
         }
     };
 
-    // 4. Store
+    // 5. Store
     let count = storage_manager
         .store_examples(&tracked_repo, examples)
         .await?;
 
-    // 5. Embed new examples if embedding is configured.
+    // 6. Embed new examples if embedding is configured.
     if let (Some(url), Some(model)) = (&task.embedding_api_url, &task.embedding_model) {
         // We only run embedding if new examples were actually stored.
         if count > 0 {

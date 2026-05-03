@@ -31,11 +31,18 @@ impl Crawler {
         let temp_dir = tempdir().map_err(GitHubIngestError::Io)?;
         let repo_path = temp_dir.path().to_path_buf();
 
-        // 1. Clone the repository
-        let clone_status = Command::new("git")
-            .arg("clone")
-            .arg("--depth")
-            .arg("1") // Start with a shallow clone for speed
+        // 1. Clone the repository (use sparse checkout when includes are specified)
+        let mut clone_cmd = Command::new("git");
+        clone_cmd.arg("clone");
+
+        if task.includes.is_some() {
+            // Blobless clone + sparse for targeted directory extraction
+            clone_cmd.arg("--filter=blob:none").arg("--sparse");
+        } else {
+            clone_cmd.arg("--depth").arg("1"); // Shallow clone for speed
+        }
+
+        let clone_status = clone_cmd
             .arg(&task.url)
             .arg(&repo_path)
             .status()
@@ -48,6 +55,29 @@ impl Crawler {
             ));
         }
         info!("Successfully cloned repository to: {:?}", repo_path);
+
+        // 2. Apply sparse checkout if includes are specified
+        if let Some(includes) = &task.includes {
+            info!("Applying sparse checkout for paths: {:?}", includes);
+            let sparse_status = Command::new("git")
+                .arg("-C")
+                .arg(&repo_path)
+                .arg("sparse-checkout")
+                .arg("set")
+                .args(includes)
+                .status()
+                .await
+                .map_err(|e| {
+                    GitHubIngestError::Git(format!("Failed to set sparse checkout: {e}"))
+                })?;
+
+            if !sparse_status.success() {
+                return Err(GitHubIngestError::Git(
+                    "git sparse-checkout set command failed".to_string(),
+                ));
+            }
+            info!("Sparse checkout applied for {} path(s)", includes.len());
+        }
 
         let version = if let Some(version_spec) = &task.version {
             // 2. If a specific version is requested, fetch and check it out.

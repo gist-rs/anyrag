@@ -45,6 +45,8 @@ Clones a public GitHub repository and generates a consolidated markdown file fro
     *   `examples`: Extracts curated code examples from tests, doc comments, READMEs, and example files.
     *   `tests`: Extracts all test functions including `#[test]`, `#[tokio::test]`, and `#[rstest]` from both test files and inline tests in source files.
     *   `src`: Flattens all source code files into a single markdown file, preserving file paths.
+*   `--includes <PATHS>`: (Optional) A comma-separated list of directory paths to include (e.g., `examples/rust,crates/core`). When set, only files under these paths are processed. Uses git sparse checkout for faster cloning of large repos.
+*   `--excludes <PATTERNS>`: (Optional) A comma-separated list of glob patterns to exclude (e.g., `*.lock,LICENSE,benches/**`). Files matching these patterns are skipped during extraction. Works with all dump types.
 *   `--embedding-api-url <URL>`: (Optional) The API endpoint for a text embedding model.
 *   `--embedding-model <MODEL_NAME>`: (Required if `--embedding-api-url` is set) The name of the embedding model to use.
 
@@ -61,16 +63,21 @@ cargo run -p cli dump github \
   --dump-type examples \
   --embedding-api-url "http://localhost:1234/v1/embeddings" \
   --embedding-model "text-embedding-qwen3-embedding-8b"
+```
 
+```sh
 cargo run -p cli dump github \
   --url https://github.com/jup-ag/jupiter-swap-api-client \
   --dump-type src
-  
+```
+
+```sh
 cargo run -p cli dump github \
   --url https://github.com/tokio-rs/axum.git \
   --version axum-v0.8.8 \
   --dump-type examples
-  
+```
+
 ```sh
 cargo run -p cli dump github \
   --url https://github.com/ibraheemdev/papaya.git \
@@ -111,6 +118,50 @@ cargo run -p cli dump github \
   --url https://github.com/tursodatabase/turso \
   --version v0.1.5 \
   --dump-type src \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
+**4. Target Specific Folders (Includes)**
+
+For large repositories, use `--includes` to clone and extract only specific directories. This uses git sparse checkout for efficiency — ideal for monorepos like `rerun`.
+
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/rerun-io/rerun \
+  --includes examples/rust \
+  --dump-type examples \
+  --embedding-api-url "http://localhost:1234/v1/embeddings" \
+  --embedding-model "text-embedding-qwen3-embedding-8b"
+```
+
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/some-user/monorepo \
+  --includes crates/core/src,examples \
+  --dump-type src
+```
+
+**5. Exclude Unwanted Files (Excludes)**
+
+Use `--excludes` to skip files matching glob patterns. Works with all dump types.
+
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/tursodatabase/turso \
+  --version v0.1.5 \
+  --dump-type src \
+  --excludes "*.lock,LICENSE,benches/**,fuzz/**"
+```
+
+You can also combine both for fine-grained control:
+
+```sh
+cargo run -p cli dump github \
+  --url https://github.com/rerun-io/rerun \
+  --includes examples/rust \
+  --excludes "*_test.rs" \
+  --dump-type examples \
   --embedding-api-url "http://localhost:1234/v1/embeddings" \
   --embedding-model "text-embedding-qwen3-embedding-8b"
 ```

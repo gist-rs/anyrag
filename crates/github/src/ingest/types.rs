@@ -140,4 +140,10 @@ pub struct IngestionTask {
     pub extract_included_files: bool,
     /// The type of content to dump (examples, tests, or src).
     pub dump_type: DumpType,
+    /// Optional list of directory paths to include (e.g., `["examples/rust", "crates/core"]`).
+    /// When set, only files under these paths are extracted. Uses git sparse checkout for efficiency.
+    pub includes: Option<Vec<String>>,
+    /// Optional list of glob patterns to exclude (e.g., `["*.lock", "benches/**"]`).
+    /// When set, files matching these patterns are skipped during extraction.
+    pub excludes: Option<Vec<String>>,
 }
