@@ -120,11 +120,16 @@ impl Extractor {
             return true;
         };
 
-        // Check if relative path starts with any include path
+        // Check if relative path is inside, equal to, or an ancestor of any include path
         let relative_str = relative.to_string_lossy();
-        include_paths
-            .iter()
-            .any(|inc| relative_str.starts_with(&format!("{inc}/")) || *relative_str == *inc)
+        include_paths.iter().any(|inc| {
+            let inc_with_slash = format!("{inc}/");
+            let rel_with_slash = format!("{relative_str}/");
+            // Path is the include target, inside the include, or an ancestor directory of it
+            *relative_str == *inc
+                || relative_str.starts_with(&inc_with_slash)
+                || inc_with_slash.starts_with(&rel_with_slash)
+        })
     }
 
     /// Recursively walks a directory to discover and categorize source files for 'examples' dump.

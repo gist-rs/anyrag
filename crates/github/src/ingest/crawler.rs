@@ -125,6 +125,12 @@ impl Crawler {
                 )));
             }
             info!("Successfully checked out version: {}", version_spec);
+
+            // Re-apply sparse checkout after switching to a different ref
+            if task.includes.is_some() {
+                Self::reapply_sparse_checkout(&repo_path).await?;
+            }
+
             version_spec.clone()
         } else {
             // 3. If no version is specified, determine the latest version.
@@ -180,6 +186,12 @@ impl Crawler {
                     Self::get_head_commit(&repo_path).await?
                 } else {
                     info!("Successfully checked out latest tag: {}", tag);
+
+                    // Re-apply sparse checkout after switching to a different ref
+                    if task.includes.is_some() {
+                        Self::reapply_sparse_checkout(&repo_path).await?;
+                    }
+
                     tag
                 }
             } else {
@@ -272,5 +284,29 @@ impl Crawler {
         }
 
         Ok(None)
+    }
+
+    /// Re-applies the sparse checkout after switching refs (tags/branches).
+    /// When checking out a different ref, git may expand the working tree
+    /// beyond the sparse cone. This restores the sparse filter.
+    async fn reapply_sparse_checkout(repo_path: &Path) -> Result<(), GitHubIngestError> {
+        let reapply_status = Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .arg("sparse-checkout")
+            .arg("reapply")
+            .status()
+            .await
+            .map_err(|e| {
+                GitHubIngestError::Git(format!("Failed to reapply sparse checkout: {e}"))
+            })?;
+
+        if !reapply_status.success() {
+            return Err(GitHubIngestError::Git(
+                "git sparse-checkout reapply command failed".to_string(),
+            ));
+        }
+        info!("Sparse checkout re-applied after ref switch.");
+        Ok(())
     }
 }
