@@ -10,7 +10,7 @@ use anyrag::{
     SearchResult,
 };
 use clap::{Parser, Subcommand};
-use crates_io_api::SyncClient;
+use crates_io_api::AsyncClient as CratesClient;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::{env, fs, path::PathBuf, sync::Arc};
@@ -136,15 +136,15 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
     );
 
     // 2. Resolve Repository URLs
-    let client = SyncClient::new(
+    let client = CratesClient::new(
         "anyrag-gof-cli (anyrag@example.com)",
         std::time::Duration::from_millis(1000),
     )
     .context("Failed to create crates.io API client")?;
 
-    let mut repo_tasks = Vec::new();
+    let mut repo_tasks: Vec<(String, String)> = Vec::new();
     for (name, version) in dependencies {
-        match client.get_crate(&name) {
+        match client.get_crate(&name).await {
             Ok(crate_info) => {
                 if let Some(repo_url) = crate_info.crate_data.repository {
                     info!("Resolved '{}' to repository '{}'", name, repo_url);
@@ -211,6 +211,8 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
                     embedding_api_key: api_key.clone(),
                     extract_included_files: false,
                     dump_type,
+                    includes: None,
+                    excludes: None,
                 };
 
                 println!(
