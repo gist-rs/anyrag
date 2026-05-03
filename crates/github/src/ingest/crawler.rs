@@ -81,32 +81,8 @@ impl Crawler {
 
         let version = if let Some(version_spec) = &task.version {
             // 2. If a specific version is requested, fetch and check it out.
-            // We need to unshallow the repo to fetch all tags/branches.
-            let unshallow_status = Command::new("git")
-                .arg("-C")
-                .arg(&repo_path)
-                .arg("fetch")
-                .arg("--unshallow")
-                .status()
-                .await
-                .map_err(|e| GitHubIngestError::Git(format!("Failed to unshallow repo: {e}")))?;
-
-            if !unshallow_status.success() {
-                warn!("Failed to unshallow the repository. Will proceed with the default branch.");
-            } else {
-                let fetch_tags_status = Command::new("git")
-                    .arg("-C")
-                    .arg(&repo_path)
-                    .arg("fetch")
-                    .arg("--tags")
-                    .status()
-                    .await
-                    .map_err(|e| GitHubIngestError::Git(format!("Failed to fetch tags: {e}")))?;
-
-                if !fetch_tags_status.success() {
-                    warn!("Failed to fetch tags. Proceeding without them.");
-                }
-            }
+            // Fetch tags (safely handles non-shallow repos from sparse clones).
+            Self::fetch_tags_for_checkout(&repo_path).await?;
 
             let checkout_status = Command::new("git")
                 .arg("-C")
@@ -137,31 +113,8 @@ impl Crawler {
             info!("No version specified, attempting to determine the latest version.");
 
             // To find the latest tag, we need to fetch all tags first.
-            let unshallow_status = Command::new("git")
-                .arg("-C")
-                .arg(&repo_path)
-                .arg("fetch")
-                .arg("--unshallow")
-                .status()
-                .await
-                .map_err(|e| GitHubIngestError::Git(format!("Failed to unshallow repo: {e}")))?;
-
-            if !unshallow_status.success() {
-                warn!("Failed to unshallow the repository. Will proceed with the default branch commit hash.");
-            }
-
-            let fetch_tags_status = Command::new("git")
-                .arg("-C")
-                .arg(&repo_path)
-                .arg("fetch")
-                .arg("--tags")
-                .status()
-                .await
-                .map_err(|e| GitHubIngestError::Git(format!("Failed to fetch tags: {e}")))?;
-
-            if !fetch_tags_status.success() {
-                warn!("Failed to fetch tags. Proceeding without them.");
-            }
+            // Fetch tags (safely handles non-shallow repos from sparse clones).
+            Self::fetch_tags_for_checkout(&repo_path).await?;
 
             let latest_tag = Self::get_latest_semver_tag(&repo_path).await?;
 
@@ -307,6 +260,45 @@ impl Crawler {
             ));
         }
         info!("Sparse checkout re-applied after ref switch.");
+        Ok(())
+    }
+
+    /// Fetches tags needed for version resolution.
+    /// Safely handles both shallow and non-shallow (e.g., sparse blobless) clones
+    /// by tolerating the `--unshallow` failure on complete repositories.
+    async fn fetch_tags_for_checkout(repo_path: &Path) -> Result<(), GitHubIngestError> {
+        // Try to unshallow — will fail harmlessly on non-shallow (blobless/sparse) clones.
+        let unshallow_status = Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .arg("fetch")
+            .arg("--unshallow")
+            .status()
+            .await
+            .map_err(|e| {
+                GitHubIngestError::Git(format!("Failed to run git fetch --unshallow: {e}"))
+            })?;
+
+        if !unshallow_status.success() {
+            // Non-shallow clones (e.g., --filter=blob:none) will fail here; that's expected.
+            info!(
+                "Repository is not shallow (likely a blobless/sparse clone). Skipping unshallow."
+            );
+        }
+
+        let fetch_tags_status = Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .arg("fetch")
+            .arg("--tags")
+            .status()
+            .await
+            .map_err(|e| GitHubIngestError::Git(format!("Failed to fetch tags: {e}")))?;
+
+        if !fetch_tags_status.success() {
+            warn!("Failed to fetch tags. Proceeding without them.");
+        }
+
         Ok(())
     }
 }
