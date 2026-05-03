@@ -79,11 +79,19 @@ cargo run -p cli dump github \
 # → Sparse checkout: 135 entries, 14 files (vs ~167k objects full clone)
 ```
 
-### `examples` dump — ❌ DB error (pre-existing, unrelated to this feature)
+### `examples` dump — ✅ SUCCESS (after clearing stale 0-byte DB)
 ```
-# Error: UNIQUE constraint failed / no such table: generated_examples
-# The --no-process flag doesn't skip DB storage in the examples handler.
-# This is a pre-existing issue with the storage pipeline, not the sparse checkout.
+cargo run -p cli dump github \
+  --url https://github.com/rerun-io/rerun \
+  --includes examples/rust \
+  --dump-type examples \
+  --no-process
+
+# → 8 unique examples ingested, version: v0.5.1
+# → Generated 115K markdown (rerun-io-rerun-v0.5.1-examples.md)
+# → Only files from examples/rust/ appear in output
+# → Sparse checkout: 135 entries, 14 files (vs ~167k objects full clone)
+# Note: required `DELETE FROM repositories WHERE repo_name = 'rerun-io-rerun'` + rm stale 0-byte DB
 ```
 
 ## Known Issues (pre-existing)
