@@ -31,11 +31,18 @@ impl Crawler {
         let temp_dir = tempdir().map_err(GitHubIngestError::Io)?;
         let repo_path = temp_dir.path().to_path_buf();
 
-        // 1. Clone the repository
-        let clone_status = Command::new("git")
-            .arg("clone")
-            .arg("--depth")
-            .arg("1") // Start with a shallow clone for speed
+        // 1. Clone the repository (use sparse checkout when includes are specified)
+        let mut clone_cmd = Command::new("git");
+        clone_cmd.arg("clone");
+
+        if task.includes.is_some() {
+            // Blobless clone + sparse for targeted directory extraction
+            clone_cmd.arg("--filter=blob:none").arg("--sparse");
+        } else {
+            clone_cmd.arg("--depth").arg("1"); // Shallow clone for speed
+        }
+
+        let clone_status = clone_cmd
             .arg(&task.url)
             .arg(&repo_path)
             .status()
@@ -49,34 +56,33 @@ impl Crawler {
         }
         info!("Successfully cloned repository to: {:?}", repo_path);
 
-        let version = if let Some(version_spec) = &task.version {
-            // 2. If a specific version is requested, fetch and check it out.
-            // We need to unshallow the repo to fetch all tags/branches.
-            let unshallow_status = Command::new("git")
+        // 2. Apply sparse checkout if includes are specified
+        if let Some(includes) = &task.includes {
+            info!("Applying sparse checkout for paths: {:?}", includes);
+            let sparse_status = Command::new("git")
                 .arg("-C")
                 .arg(&repo_path)
-                .arg("fetch")
-                .arg("--unshallow")
+                .arg("sparse-checkout")
+                .arg("set")
+                .args(includes)
                 .status()
                 .await
-                .map_err(|e| GitHubIngestError::Git(format!("Failed to unshallow repo: {e}")))?;
+                .map_err(|e| {
+                    GitHubIngestError::Git(format!("Failed to set sparse checkout: {e}"))
+                })?;
 
-            if !unshallow_status.success() {
-                warn!("Failed to unshallow the repository. Will proceed with the default branch.");
-            } else {
-                let fetch_tags_status = Command::new("git")
-                    .arg("-C")
-                    .arg(&repo_path)
-                    .arg("fetch")
-                    .arg("--tags")
-                    .status()
-                    .await
-                    .map_err(|e| GitHubIngestError::Git(format!("Failed to fetch tags: {e}")))?;
-
-                if !fetch_tags_status.success() {
-                    warn!("Failed to fetch tags. Proceeding without them.");
-                }
+            if !sparse_status.success() {
+                return Err(GitHubIngestError::Git(
+                    "git sparse-checkout set command failed".to_string(),
+                ));
             }
+            info!("Sparse checkout applied for {} path(s)", includes.len());
+        }
+
+        let version = if let Some(version_spec) = &task.version {
+            // 2. If a specific version is requested, fetch and check it out.
+            // Fetch tags (safely handles non-shallow repos from sparse clones).
+            Self::fetch_tags_for_checkout(&repo_path).await?;
 
             let checkout_status = Command::new("git")
                 .arg("-C")
@@ -95,37 +101,20 @@ impl Crawler {
                 )));
             }
             info!("Successfully checked out version: {}", version_spec);
+
+            // Re-apply sparse checkout after switching to a different ref
+            if task.includes.is_some() {
+                Self::reapply_sparse_checkout(&repo_path).await?;
+            }
+
             version_spec.clone()
         } else {
             // 3. If no version is specified, determine the latest version.
             info!("No version specified, attempting to determine the latest version.");
 
             // To find the latest tag, we need to fetch all tags first.
-            let unshallow_status = Command::new("git")
-                .arg("-C")
-                .arg(&repo_path)
-                .arg("fetch")
-                .arg("--unshallow")
-                .status()
-                .await
-                .map_err(|e| GitHubIngestError::Git(format!("Failed to unshallow repo: {e}")))?;
-
-            if !unshallow_status.success() {
-                warn!("Failed to unshallow the repository. Will proceed with the default branch commit hash.");
-            }
-
-            let fetch_tags_status = Command::new("git")
-                .arg("-C")
-                .arg(&repo_path)
-                .arg("fetch")
-                .arg("--tags")
-                .status()
-                .await
-                .map_err(|e| GitHubIngestError::Git(format!("Failed to fetch tags: {e}")))?;
-
-            if !fetch_tags_status.success() {
-                warn!("Failed to fetch tags. Proceeding without them.");
-            }
+            // Fetch tags (safely handles non-shallow repos from sparse clones).
+            Self::fetch_tags_for_checkout(&repo_path).await?;
 
             let latest_tag = Self::get_latest_semver_tag(&repo_path).await?;
 
@@ -150,6 +139,12 @@ impl Crawler {
                     Self::get_head_commit(&repo_path).await?
                 } else {
                     info!("Successfully checked out latest tag: {}", tag);
+
+                    // Re-apply sparse checkout after switching to a different ref
+                    if task.includes.is_some() {
+                        Self::reapply_sparse_checkout(&repo_path).await?;
+                    }
+
                     tag
                 }
             } else {
@@ -242,5 +237,68 @@ impl Crawler {
         }
 
         Ok(None)
+    }
+
+    /// Re-applies the sparse checkout after switching refs (tags/branches).
+    /// When checking out a different ref, git may expand the working tree
+    /// beyond the sparse cone. This restores the sparse filter.
+    async fn reapply_sparse_checkout(repo_path: &Path) -> Result<(), GitHubIngestError> {
+        let reapply_status = Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .arg("sparse-checkout")
+            .arg("reapply")
+            .status()
+            .await
+            .map_err(|e| {
+                GitHubIngestError::Git(format!("Failed to reapply sparse checkout: {e}"))
+            })?;
+
+        if !reapply_status.success() {
+            return Err(GitHubIngestError::Git(
+                "git sparse-checkout reapply command failed".to_string(),
+            ));
+        }
+        info!("Sparse checkout re-applied after ref switch.");
+        Ok(())
+    }
+
+    /// Fetches tags needed for version resolution.
+    /// Safely handles both shallow and non-shallow (e.g., sparse blobless) clones
+    /// by tolerating the `--unshallow` failure on complete repositories.
+    async fn fetch_tags_for_checkout(repo_path: &Path) -> Result<(), GitHubIngestError> {
+        // Try to unshallow — will fail harmlessly on non-shallow (blobless/sparse) clones.
+        let unshallow_status = Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .arg("fetch")
+            .arg("--unshallow")
+            .status()
+            .await
+            .map_err(|e| {
+                GitHubIngestError::Git(format!("Failed to run git fetch --unshallow: {e}"))
+            })?;
+
+        if !unshallow_status.success() {
+            // Non-shallow clones (e.g., --filter=blob:none) will fail here; that's expected.
+            info!(
+                "Repository is not shallow (likely a blobless/sparse clone). Skipping unshallow."
+            );
+        }
+
+        let fetch_tags_status = Command::new("git")
+            .arg("-C")
+            .arg(repo_path)
+            .arg("fetch")
+            .arg("--tags")
+            .status()
+            .await
+            .map_err(|e| GitHubIngestError::Git(format!("Failed to fetch tags: {e}")))?;
+
+        if !fetch_tags_status.success() {
+            warn!("Failed to fetch tags. Proceeding without them.");
+        }
+
+        Ok(())
     }
 }

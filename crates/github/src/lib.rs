@@ -35,6 +35,10 @@ struct IngestSource {
     extract_included_files: bool,
     #[serde(default)]
     dump_type: crate::ingest::types::DumpType,
+    #[serde(default)]
+    includes: Option<Vec<String>>,
+    #[serde(default)]
+    excludes: Option<Vec<String>>,
 }
 
 use std::sync::Arc;
@@ -93,6 +97,8 @@ impl Ingestor for GithubIngestor {
             embedding_api_key: self.embedding_api_key.clone(),
             extract_included_files: ingest_source.extract_included_files,
             dump_type: ingest_source.dump_type,
+            includes: ingest_source.includes,
+            excludes: ingest_source.excludes,
         };
 
         // 3. Run the ingestion pipeline.

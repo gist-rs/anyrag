@@ -31,6 +31,8 @@ impl Extractor {
         repo_path: &Path,
         version: &str,
         extract_included_files: bool,
+        includes: &Option<Vec<String>>,
+        excludes: &[Pattern],
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         info!(
             "Starting example extraction from path: {}",
@@ -38,7 +40,7 @@ impl Extractor {
         );
 
         let mut sources = DiscoveredSources::default();
-        Self::discover_files_recursive(repo_path, &mut sources)?;
+        Self::discover_files_recursive(repo_path, repo_path, &mut sources, includes, excludes)?;
 
         info!(
             "Discovered {} READMEs, {} text files, {} example files, {} tests, and {} source files for doc comments.",
@@ -95,10 +97,48 @@ impl Extractor {
         Ok(resolved_examples)
     }
 
+    /// Checks if a file path matches the include/exclude filters.
+    /// Returns `true` if the file should be processed.
+    fn path_matches_filters(
+        base_dir: &Path,
+        path: &Path,
+        includes: &Option<Vec<String>>,
+        excludes: &[Pattern],
+    ) -> bool {
+        let relative = match path.strip_prefix(base_dir) {
+            Ok(r) => r,
+            Err(_) => return true,
+        };
+
+        // Check excludes first - if matched, file is excluded
+        if excludes.iter().any(|p| p.matches_path(relative)) {
+            return false;
+        }
+
+        // If no includes specified, include all (that weren't excluded)
+        let Some(include_paths) = includes else {
+            return true;
+        };
+
+        // Check if relative path is inside, equal to, or an ancestor of any include path
+        let relative_str = relative.to_string_lossy();
+        include_paths.iter().any(|inc| {
+            let inc_with_slash = format!("{inc}/");
+            let rel_with_slash = format!("{relative_str}/");
+            // Path is the include target, inside the include, or an ancestor directory of it
+            *relative_str == *inc
+                || relative_str.starts_with(&inc_with_slash)
+                || inc_with_slash.starts_with(&rel_with_slash)
+        })
+    }
+
     /// Recursively walks a directory to discover and categorize source files for 'examples' dump.
     fn discover_files_recursive(
+        base_dir: &Path,
         dir: &Path,
         sources: &mut DiscoveredSources,
+        includes: &Option<Vec<String>>,
+        excludes: &[Pattern],
     ) -> Result<(), GitHubIngestError> {
         if !dir.is_dir() {
             return Ok(());
@@ -114,8 +154,12 @@ impl Extractor {
             }
 
             if path.is_dir() {
-                Self::discover_files_recursive(&path, sources)?;
-            } else {
+                // Skip directories outside include paths
+                if !Self::path_matches_filters(base_dir, &path, includes, &[]) {
+                    continue;
+                }
+                Self::discover_files_recursive(base_dir, &path, sources, includes, excludes)?;
+            } else if Self::path_matches_filters(base_dir, &path, includes, excludes) {
                 let path_str = path.to_string_lossy();
                 if file_name == "readme.md" {
                     sources.readmes.push(path.clone());
@@ -138,19 +182,21 @@ impl Extractor {
     /// Extracts all source files from a repository for the 'src' dump, applying ignore patterns.
     pub fn extract_all_sources(
         repo_path: &Path,
-        ignore_patterns: &[String],
+        includes: &Option<Vec<String>>,
+        excludes: &[String],
     ) -> Result<Vec<(PathBuf, String)>, GitHubIngestError> {
         info!(
-            "Starting source file extraction from path: {} with ignore patterns: {:?}",
+            "Starting source file extraction from path: {} with includes: {:?}, excludes: {:?}",
             repo_path.display(),
-            ignore_patterns
+            includes,
+            excludes
         );
 
         let default_patterns = ["*.lock", "LICENSE*"];
         let all_patterns_str: Vec<String> = default_patterns
             .iter()
             .map(|s| s.to_string())
-            .chain(ignore_patterns.iter().cloned())
+            .chain(excludes.iter().cloned())
             .collect();
 
         let compiled_patterns: Vec<Pattern> = all_patterns_str
@@ -169,6 +215,7 @@ impl Extractor {
             repo_path,
             repo_path,
             &mut files,
+            includes,
             &compiled_patterns,
         )?;
 
@@ -196,16 +243,19 @@ impl Extractor {
     pub fn extract_all_tests(
         repo_path: &Path,
         version: &str,
+        includes: &Option<Vec<String>>,
+        excludes: &[Pattern],
     ) -> Result<Vec<GeneratedExample>, GitHubIngestError> {
         info!(
-            "Starting test extraction from path: {}",
-            repo_path.display()
+            "Starting test extraction from path: {} with includes: {:?}",
+            repo_path.display(),
+            includes
         );
 
         let mut sources = DiscoveredSources::default();
 
         // Discover all Rust files for test parsing
-        Self::discover_all_rust_files(repo_path, &mut sources)?;
+        Self::discover_all_rust_files(repo_path, repo_path, &mut sources, includes, excludes)?;
 
         info!(
             "Discovered {} READMEs, {} text files, {} example files, {} potential test files (src/, tests/, and *_test.rs files), and {} doc comment files.",
@@ -238,8 +288,11 @@ impl Extractor {
     /// - Files ending with _test.rs
     /// - All .rs files in src/ directory (for inline tests)
     fn discover_all_rust_files(
+        base_dir: &Path,
         dir: &Path,
         sources: &mut DiscoveredSources,
+        includes: &Option<Vec<String>>,
+        excludes: &[Pattern],
     ) -> Result<(), GitHubIngestError> {
         if !dir.is_dir() {
             return Ok(());
@@ -249,16 +302,20 @@ impl Extractor {
             let entry = entry?;
             let path = entry.path();
             let file_name = entry.file_name().to_string_lossy().to_lowercase();
-            let path_str = path.to_string_lossy();
 
             if file_name.starts_with('.') {
                 continue;
             }
 
             if path.is_dir() {
+                // Skip directories outside include paths
+                if !Self::path_matches_filters(base_dir, &path, includes, &[]) {
+                    continue;
+                }
                 // Recursively search subdirectories
-                Self::discover_all_rust_files(&path, sources)?;
-            } else {
+                Self::discover_all_rust_files(base_dir, &path, sources, includes, excludes)?;
+            } else if Self::path_matches_filters(base_dir, &path, includes, excludes) {
+                let path_str = path.to_string_lossy();
                 // Categorize files based on their location and naming
                 if file_name == "readme.md" {
                     sources.readmes.push(path.clone());
@@ -295,6 +352,7 @@ impl Extractor {
         base_dir: &Path,
         current_dir: &Path,
         files: &mut Vec<PathBuf>,
+        includes: &Option<Vec<String>>,
         ignore_patterns: &[Pattern],
     ) -> Result<(), GitHubIngestError> {
         if !current_dir.is_dir() {
@@ -313,21 +371,32 @@ impl Extractor {
             }
 
             if path.is_dir() {
-                Self::discover_all_source_files_recursive(base_dir, &path, files, ignore_patterns)?;
+                // Skip directories outside include paths
+                if !Self::path_matches_filters(base_dir, &path, includes, &[]) {
+                    continue;
+                }
+                Self::discover_all_source_files_recursive(
+                    base_dir,
+                    &path,
+                    files,
+                    includes,
+                    ignore_patterns,
+                )?;
             } else {
-                let relative_path = path.strip_prefix(base_dir).unwrap_or(&path);
-
-                let is_ignored_by_glob = ignore_patterns
-                    .iter()
-                    .any(|p| p.matches_path(relative_path));
+                // Check include/exclude filters
+                if !Self::path_matches_filters(base_dir, &path, includes, ignore_patterns) {
+                    info!(
+                        "Ignoring file due to include/exclude filter: {}",
+                        path.display()
+                    );
+                    continue;
+                }
 
                 let has_no_extension = path.extension().is_none()
                     && !path.file_name().unwrap_or_default().eq("Makefile");
 
-                if !is_ignored_by_glob && !has_no_extension {
+                if !has_no_extension {
                     files.push(path);
-                } else if is_ignored_by_glob {
-                    info!("Ignoring file due to glob pattern: {}", path.display());
                 } else {
                     info!("Ignoring file with no extension: {}", path.display());
                 }
