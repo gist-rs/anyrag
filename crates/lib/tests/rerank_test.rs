@@ -3,7 +3,10 @@
 //! This file contains tests for the `reciprocal_rank_fusion` function
 //! to ensure its logic for de-duplication and versioning is correct.
 
-use anyrag::{rerank::reciprocal_rank_fusion, types::SearchResult};
+use anyrag::{
+    rerank::reciprocal_rank_fusion,
+    types::{SearchResult, SearchSourceType},
+};
 
 #[test]
 fn test_rrf_deduplication_and_versioning() {
@@ -15,6 +18,7 @@ fn test_rrf_deduplication_and_versioning() {
         link: "http://example.com/doc_a".to_string(),
         description: "Content of A".to_string(),
         score: 0.0, // Initial score doesn't matter
+        source_type: SearchSourceType::Unknown,
     };
 
     // A unique document.
@@ -23,6 +27,7 @@ fn test_rrf_deduplication_and_versioning() {
         link: "http://example.com/doc_b".to_string(),
         description: "Content of B".to_string(),
         score: 0.0,
+        source_type: SearchSourceType::Unknown,
     };
 
     // Two versions of the same document (same link, different content).
@@ -32,12 +37,14 @@ fn test_rrf_deduplication_and_versioning() {
         link: "http://example.com/doc_c".to_string(),
         description: "Content of C, version 1".to_string(),
         score: 0.0,
+        source_type: SearchSourceType::Unknown,
     };
     let doc_c_v2 = SearchResult {
         title: "Document C v2".to_string(),
         link: "http://example.com/doc_c".to_string(),
         description: "Content of C, version 2".to_string(),
         score: 0.0,
+        source_type: SearchSourceType::Unknown,
     };
 
     // Create two result sets.
