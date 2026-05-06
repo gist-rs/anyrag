@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 
+// Re-export chrono types used in episodic memory
+pub use chrono::NaiveDateTime;
+
 /// A client for executing natural language prompts against a storage provider.
 ///
 /// This client orchestrates the process of converting a prompt into a SQL query
@@ -201,6 +204,23 @@ impl PromptClientBuilder {
     }
 }
 
+/// Indicates the origin type of a search result.
+/// Used for weighted Reciprocal Rank Fusion to boost or penalize results
+/// based on their source during RIIR (Rewrite It In Rust) tasks.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSourceType {
+    /// Legacy untagged results.
+    #[default]
+    Unknown,
+    /// Code examples from `/search/examples` or code ingestion.
+    Code,
+    /// Documentation from `/search/knowledge` (web, PDF, text).
+    Documentation,
+    /// Structured YAML FAQ data.
+    Faq,
+}
+
 /// A search result from any search provider (vector, keyword, etc.).
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SearchResult {
@@ -209,6 +229,9 @@ pub struct SearchResult {
     pub description: String,
     /// A relevance score where higher is better. For vector search, this is the cosine similarity (1.0 is a perfect match). For keyword search, this is a placeholder 0.0.
     pub score: f64,
+    /// The source type of this result, used for weighted fusion.
+    #[serde(default)]
+    pub source_type: SearchSourceType,
 }
 
 impl Rerankable for SearchResult {
@@ -223,6 +246,37 @@ impl Rerankable for SearchResult {
     fn get_description(&self) -> &str {
         &self.description
     }
+}
+
+/// Query context for source-type weighting in RIIR-aware search.
+/// Determines how code vs documentation results are weighted during fusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryContext {
+    /// Code generation: code_boost=10, doc_penalty=0.5
+    CodeGeneration,
+    /// Balanced: code_boost=1, doc_penalty=1 (equal treatment)
+    #[default]
+    Explanation,
+    /// Debugging: code_boost=5, doc_penalty=0.8
+    Debugging,
+}
+
+/// Concept tags for Rust-specific query routing (concept sharding).
+/// Queries are classified by concept and routed to filtered vector search.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RustConcept {
+    Lifetimes,
+    Macros,
+    Async,
+    Traits,
+    Generics,
+    ErrorHandling,
+    Ownership,
+    FFI,
+    Testing,
+    Concurrency,
 }
 
 /// Represents the data type of a field in a table schema.
@@ -307,6 +361,57 @@ impl From<HttpRequestPromptOptions> for ExecutePromptOptions {
             format_user_prompt_template: options.format_user_prompt_template,
         }
     }
+}
+
+// --- Episodic Memory Types (Plan 003: Self-Improving Cycle) ---
+
+/// Result of compiling generated Rust code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CompilationResult {
+    Success {
+        warnings: u32,
+        clippy_lints: u32,
+    },
+    Failed {
+        error_message: String,
+        error_code: Option<String>,
+        suggestion: Option<String>,
+    },
+    /// Generated but not yet verified by compilation.
+    NotCompiled,
+}
+
+/// A single RIIR (Rewrite It In Rust) translation episode.
+/// Tracks the full lifecycle: source → retrieval → generation → compilation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranslationEpisode {
+    /// Unique identifier (UUID v7).
+    pub id: String,
+    /// Source language (e.g., "python", "typescript").
+    pub source_language: String,
+    /// Original input code.
+    pub source_code: String,
+    /// LLM-generated Rust code.
+    pub generated_rust: String,
+    /// What RAG retrieved for context.
+    pub retrieved_context: Vec<SearchResult>,
+    /// Embedding vector at generation time.
+    pub hidden_state: Option<Vec<f64>>,
+    /// Result of compiling the generated Rust code.
+    pub compilation_result: CompilationResult,
+    /// ISO 8601 timestamp when this episode was created.
+    pub created_at: String,
+}
+
+/// Statistics for episodic memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodicStats {
+    pub total_episodes: u64,
+    pub successful: u64,
+    pub failed: u64,
+    pub success_rate: f64,
+    pub top_error_codes: Vec<(String, u64)>,
 }
 
 // --- Configuration Structs ---
