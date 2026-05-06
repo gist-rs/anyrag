@@ -7,6 +7,7 @@
 
 use crate::ingest::types::{ContentMetadata, MetadataResponse};
 use crate::providers::ai::AiProvider;
+use crate::search::tag_rust_concepts;
 use crate::PromptError;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -206,5 +207,47 @@ pub async fn extract_and_store_metadata(
         .await?;
     }
     conn.execute("COMMIT", ()).await?;
+    Ok(())
+}
+
+/// Stores Rust concept tags extracted from content into the metadata table.
+///
+/// This enables concept-sharded vector search — queries about "lifetimes" only
+/// match documents tagged with the `Lifetimes` concept. Falls back silently if
+/// tagging produces no concepts.
+pub async fn store_concept_tags(
+    conn: &Connection,
+    document_id: &str,
+    owner_id: Option<&str>,
+    content: &str,
+) -> Result<(), KnowledgeError> {
+    let concepts = tag_rust_concepts(content);
+    if concepts.is_empty() {
+        debug!("No Rust concepts found in document {document_id}, skipping tagging.");
+        return Ok(());
+    }
+
+    debug!(
+        "Tagging document {document_id} with {} Rust concepts: {:?}",
+        concepts.len(),
+        concepts
+    );
+
+    for concept in &concepts {
+        let concept_str = serde_json::to_string(concept)
+            .unwrap_or_else(|_| format!("{concept:?}").to_lowercase());
+        conn.execute(
+            "INSERT INTO content_metadata (document_id, owner_id, metadata_type, metadata_subtype, metadata_value) VALUES (?, ?, ?, ?, ?)",
+            params![
+                document_id.to_string(),
+                owner_id.map(|s| s.to_string()),
+                "KEYPHRASE",
+                "RUST_CONCEPT",
+                concept_str,
+            ],
+        )
+        .await?;
+    }
+
     Ok(())
 }

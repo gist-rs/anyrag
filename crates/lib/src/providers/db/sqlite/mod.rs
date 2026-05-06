@@ -3,7 +3,7 @@ use crate::{
     errors::PromptError,
     providers::db::storage::{KeywordSearch, MetadataSearch, Storage, VectorSearch},
     search::SearchError,
-    types::SearchResult,
+    types::{SearchResult, SearchSourceType},
 };
 use async_trait::async_trait;
 #[cfg(feature = "core-access")]
@@ -430,6 +430,7 @@ impl VectorSearch for SqliteProvider {
                 link,
                 description: content,
                 score,
+                source_type: SearchSourceType::Unknown,
             });
         }
 
@@ -525,6 +526,7 @@ impl KeywordSearch for SqliteProvider {
                 link: row.get::<String>(1)?,
                 description: row.get::<String>(2)?,
                 score: 0.5,
+                source_type: SearchSourceType::Unknown,
             });
         }
 
@@ -646,6 +648,7 @@ impl MetadataSearch for SqliteProvider {
                 link,
                 description,
                 score,
+                source_type: SearchSourceType::Unknown,
             });
         }
 

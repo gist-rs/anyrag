@@ -56,6 +56,24 @@ pub const CREATE_CONTENT_METADATA_TABLE_SQL: &str = "
     CREATE INDEX IF NOT EXISTS idx_metadata_owner_id ON content_metadata(owner_id);
 ";
 
+/// SQL to create the `episodes` table for RIIR translation episodic memory.
+pub const CREATE_EPISODES_TABLE_SQL: &str = "
+    CREATE TABLE IF NOT EXISTS episodes (
+        id TEXT PRIMARY KEY,
+        source_language TEXT NOT NULL,
+        source_code TEXT NOT NULL,
+        generated_rust TEXT NOT NULL,
+        retrieved_context TEXT,         -- JSON array of SearchResult
+        hidden_state TEXT,              -- JSON array of f64 (embedding vector)
+        compilation_result TEXT NOT NULL, -- JSON: CompilationResult enum
+        created_at TEXT NOT NULL,
+        synthesized BOOLEAN DEFAULT FALSE
+    );
+    CREATE INDEX IF NOT EXISTS idx_episodes_compilation ON episodes(compilation_result);
+    CREATE INDEX IF NOT EXISTS idx_episodes_created ON episodes(created_at);
+    CREATE INDEX IF NOT EXISTS idx_episodes_synthesized ON episodes(synthesized);
+";
+
 /// An array containing all the schema creation SQL statements.
 /// This allows them to be executed in order to set up a new database.
 pub const ALL_TABLE_CREATION_SQL: &[&str] = &[
@@ -63,4 +81,5 @@ pub const ALL_TABLE_CREATION_SQL: &[&str] = &[
     CREATE_DOCUMENTS_TABLE_SQL,
     CREATE_DOCUMENT_EMBEDDINGS_TABLE_SQL,
     CREATE_CONTENT_METADATA_TABLE_SQL,
+    CREATE_EPISODES_TABLE_SQL,
 ];
