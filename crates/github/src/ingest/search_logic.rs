@@ -124,6 +124,7 @@ async fn keyword_search_for_repo(
             link: row.get(1)?,
             description: row.get(2)?,
             score: 0.5, // Default score for keyword search
+            source_type: anyrag::types::SearchSourceType::Code,
         });
     }
     Ok(results)
@@ -194,6 +195,7 @@ async fn vector_search_for_repo(
                 TursoValue::Real(f) => f,
                 _ => 0.0,
             },
+            source_type: anyrag::types::SearchSourceType::Code,
         });
     }
     Ok(results)

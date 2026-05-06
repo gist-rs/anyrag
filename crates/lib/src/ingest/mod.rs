@@ -6,6 +6,8 @@
 
 pub mod embedding;
 
+pub mod episodic;
+
 pub mod knowledge;
 
 #[cfg(feature = "sheets")]

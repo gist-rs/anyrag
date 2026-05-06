@@ -236,6 +236,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         embedding_model: &embeddings_model,
         embedding_api_key: embedding_api_key.as_deref(),
         temporal_ranking_config: None,
+        concepts: None,
     };
 
     let search_results =

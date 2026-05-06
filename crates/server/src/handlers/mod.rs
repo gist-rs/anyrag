@@ -9,6 +9,7 @@ pub mod admin_handlers;
 pub mod auth_handlers;
 pub mod db_handlers;
 pub mod document_handlers;
+pub mod episodes;
 pub mod general;
 pub mod generation_handlers;
 pub mod generation_types;
@@ -24,6 +25,7 @@ pub use admin_handlers::*;
 pub use auth_handlers::*;
 pub use db_handlers::*;
 pub use document_handlers::*;
+pub use episodes::*;
 pub use general::*;
 pub use generation_handlers::*;
 #[cfg(feature = "graph_db")]

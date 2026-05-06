@@ -13,7 +13,7 @@ use crate::{
         db::storage::{KeywordSearch, MetadataSearch, TemporalSearch, VectorSearch},
     },
     rerank::reciprocal_rank_fusion,
-    types::SearchResult,
+    types::{RustConcept, SearchResult, SearchSourceType},
     PromptError,
 };
 use chrono::NaiveDate;
@@ -63,6 +63,10 @@ pub struct HybridSearchOptions<'a> {
     pub embedding_model: &'a str,
     pub embedding_api_key: Option<&'a str>,
     pub temporal_ranking_config: Option<TemporalRankingConfig<'a>>,
+    /// Optional concept tags for filtered vector search.
+    /// When set, vector search is restricted to documents matching these concepts.
+    /// Falls back to unfiltered search if no concepts are provided.
+    pub concepts: Option<Vec<RustConcept>>,
 }
 
 // --- Query Analysis ---
@@ -103,6 +107,79 @@ pub enum SearchError {
     Embedding(PromptError),
     #[error("A search task failed or panicked.")]
     TaskFailed,
+}
+
+// --- Concept Classification ---
+
+/// Classifies query entities and keyphrases into Rust concept tags.
+///
+/// Uses simple keyword matching (no extra LLM call needed). Reuses the
+/// entity/keyphrase extraction already performed by the search pipeline.
+/// Returns an empty vector if no concepts match, which causes a fallback
+/// to unfiltered search.
+pub fn classify_concepts(entities: &[String], keyphrases: &[String]) -> Vec<RustConcept> {
+    let mut concepts = Vec::new();
+    for entity in entities.iter().chain(keyphrases.iter()) {
+        let e = entity.to_lowercase();
+        if e.contains("lifetime") || e.contains("'a") || e.contains("'static") {
+            concepts.push(RustConcept::Lifetimes);
+        }
+        if e.contains("macro") || e.contains("macro_rules") {
+            concepts.push(RustConcept::Macros);
+        }
+        if e.contains("async") || e.contains("await") || e.contains("tokio") || e.contains("future")
+        {
+            concepts.push(RustConcept::Async);
+        }
+        if e.contains("trait") || e.contains("impl") || e.contains("dyn") {
+            concepts.push(RustConcept::Traits);
+        }
+        if e.contains("generic") || e.contains("<t>") || e.contains("phantom") {
+            concepts.push(RustConcept::Generics);
+        }
+        if e.contains("result")
+            || e.contains("option")
+            || e.contains("anyhow")
+            || e.contains("thiserror")
+        {
+            concepts.push(RustConcept::ErrorHandling);
+        }
+        if e.contains("ownership")
+            || e.contains("borrow")
+            || e.contains("move")
+            || e.contains("clone")
+        {
+            concepts.push(RustConcept::Ownership);
+        }
+        if e.contains("ffi")
+            || e.contains("extern")
+            || e.contains("unsafe")
+            || e.contains("bindgen")
+        {
+            concepts.push(RustConcept::FFI);
+        }
+        if e.contains("test") || e.contains("#[test]") || e.contains("benchmark") {
+            concepts.push(RustConcept::Testing);
+        }
+        if e.contains("thread") || e.contains("mutex") || e.contains("arc") || e.contains("channel")
+        {
+            concepts.push(RustConcept::Concurrency);
+        }
+    }
+    concepts.sort();
+    concepts.dedup();
+    concepts
+}
+
+/// Tags document content with Rust concepts during ingestion.
+///
+/// Same keyword mapping as [`classify_concepts`], applied to raw content.
+/// Used by the ingestion pipeline to store concept tags in metadata JSON
+/// for later filtered vector search.
+pub fn tag_rust_concepts(content: &str) -> Vec<RustConcept> {
+    let entities = vec![]; // No entities from raw content
+    let keyphrases: Vec<String> = content.split_whitespace().map(String::from).collect();
+    classify_concepts(&entities, &keyphrases)
 }
 
 /// Uses an LLM to extract entities and keyphrases from a user query.
@@ -396,6 +473,7 @@ where
                             ),
                             description: chunk_content,
                             score: parent_doc.score, // Inherit score from parent
+                            source_type: SearchSourceType::Unknown,
                         });
                     }
                 }

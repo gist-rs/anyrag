@@ -1,7 +1,8 @@
 //! # Search Route Handlers
 //!
 //! This module contains all the Axum handlers for search-related endpoints,
-//! including vector, keyword, and hybrid search.
+//! including vector, keyword, and hybrid search. Supports context-aware
+//! weighted Reciprocal Rank Fusion for RIIR tasks (Plan 002).
 
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use crate::auth::middleware::AuthenticatedUser;
@@ -10,8 +11,9 @@ use anyrag::{
         ai::generate_embeddings_batch,
         db::storage::{KeywordSearch, VectorSearch},
     },
-    rerank::{llm_rerank, reciprocal_rank_fusion},
+    rerank::{llm_rerank, reciprocal_rank_fusion, reciprocal_rank_fusion_weighted, RrfWeights},
     search::SearchMode,
+    types::{QueryContext, SearchSourceType},
     SearchResult,
 };
 use axum::{
@@ -36,6 +38,10 @@ pub struct SearchRequest {
     pub mode: SearchMode,
     #[serde(default)]
     pub use_knowledge_graph: Option<bool>,
+    /// Query context for source-type weighting (RIIR-aware search).
+    /// When set, weighted RRF boosts/penalizes results by source type.
+    #[serde(default)]
+    pub context: Option<QueryContext>,
 }
 
 // --- Search Handlers ---
@@ -64,10 +70,15 @@ pub async fn vector_search_handler(
                 "Embedding API returned no vector for the query"
             ))
         })?;
-    let results = app_state
+    let mut results = app_state
         .sqlite_provider
         .vector_search(query_vector, limit, owner_id.as_deref(), None)
         .await?;
+
+    // Tag results from knowledge/document search as Documentation.
+    for result in &mut results {
+        result.source_type = SearchSourceType::Documentation;
+    }
 
     info!("Vector search found {} results.", results.len());
 
@@ -85,10 +96,16 @@ pub async fn keyword_search_handler(
     let owner_id = Some(user.0.id);
     info!("Received keyword search for query: '{}'", payload.query);
     let limit = payload.limit.unwrap_or(10);
-    let results = app_state
+    let mut results = app_state
         .sqlite_provider
         .keyword_search(&payload.query, limit * 2, owner_id.as_deref(), None)
         .await?;
+
+    // Tag results from knowledge/document search as Documentation.
+    for result in &mut results {
+        result.source_type = SearchSourceType::Documentation;
+    }
+
     info!("Keyword search found {} results.", results.len());
     let debug_info = json!({ "query": payload.query, "limit": limit, "owner_id": owner_id });
     Ok(wrap_response(results, debug_params, Some(debug_info)))
@@ -138,8 +155,16 @@ pub async fn hybrid_search_handler(
         )
     );
 
-    let vector_results = vector_results?;
-    let keyword_results = keyword_results?;
+    let mut vector_results = vector_results?;
+    let mut keyword_results = keyword_results?;
+
+    // Tag results by source type for weighted fusion.
+    for result in &mut vector_results {
+        result.source_type = SearchSourceType::Documentation;
+    }
+    for result in &mut keyword_results {
+        result.source_type = SearchSourceType::Documentation;
+    }
 
     info!(
         "Hybrid search candidates: {} vector, {} keyword.",
@@ -184,7 +209,20 @@ pub async fn hybrid_search_handler(
                 .map_err(|e| AppError::Internal(anyhow::anyhow!("LLM Reranking failed: {e}")))?
             }
         }
-        SearchMode::Rrf => reciprocal_rank_fusion(vec![vector_results, keyword_results]),
+        SearchMode::Rrf => {
+            let result_sets = vec![vector_results, keyword_results];
+            match payload.context {
+                Some(context) => {
+                    let weights = RrfWeights::from_context(context);
+                    info!(
+                        "Using weighted RRF with context {:?} (code_boost={}, doc_penalty={})",
+                        context, weights.code_boost, weights.doc_penalty
+                    );
+                    reciprocal_rank_fusion_weighted(&result_sets, &weights)
+                }
+                None => reciprocal_rank_fusion(result_sets),
+            }
+        }
     };
 
     ranked_results.truncate(limit as usize);
@@ -194,7 +232,13 @@ pub async fn hybrid_search_handler(
         ranked_results.len()
     );
 
-    let debug_info = json!({ "query": payload.query, "limit": limit, "mode": payload.mode, "owner_id": owner_id });
+    let debug_info = json!({
+        "query": payload.query,
+        "limit": limit,
+        "mode": payload.mode,
+        "context": payload.context,
+        "owner_id": owner_id
+    });
     Ok(wrap_response(
         ranked_results,
         debug_params,

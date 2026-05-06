@@ -255,6 +255,7 @@ pub async fn knowledge_search_handler(
         embedding_model: &app_state.config.embedding.model_name,
         embedding_api_key: app_state.config.embedding.api_key.as_deref(),
         temporal_ranking_config,
+        concepts: None,
     };
 
     let search_results =

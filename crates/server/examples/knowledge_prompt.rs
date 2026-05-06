@@ -62,6 +62,7 @@ async fn ask_question(
         limit: Some(5), // How many KB entries to use for context
         mode: Default::default(),
         use_knowledge_graph: Some(true),
+        context: None,
     };
 
     let result = handlers::knowledge_search_handler(

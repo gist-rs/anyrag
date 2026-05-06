@@ -111,12 +111,14 @@ fn test_mcp_json_formatting() -> Result<()> {
             link: "file1.rs".to_string(),
             description: "content1".to_string(),
             score: 0.9,
+            source_type: anyrag::types::SearchSourceType::Unknown,
         },
         anyrag::SearchResult {
             title: "handle2".to_string(),
             link: "file2.rs".to_string(),
             description: "content2".to_string(),
             score: 0.8,
+            source_type: anyrag::types::SearchSourceType::Unknown,
         },
     ];
 

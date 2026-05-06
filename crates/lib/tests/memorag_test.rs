@@ -196,6 +196,7 @@ async fn run_hybrid_search(
         embedding_model: "",
         embedding_api_key: None,
         temporal_ranking_config: None,
+        concepts: None,
     };
     let search_results = hybrid_search(storage_provider_arc, ai_provider, search_options).await?;
     let context = search_results

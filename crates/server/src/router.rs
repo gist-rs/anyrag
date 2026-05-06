@@ -31,7 +31,29 @@ pub fn create_router(app_state: AppState) -> Router {
             "/search/knowledge",
             post(handlers::knowledge_search_handler),
         )
-        .route("/knowledge/export", get(handlers::knowledge_export_handler));
+        .route("/knowledge/export", get(handlers::knowledge_export_handler))
+        // --- Episodes & Self-Improving Cycle Routes ---
+        .route(
+            "/episodes",
+            post(handlers::episodes::record_episode_handler),
+        )
+        .route("/episodes", get(handlers::episodes::list_episodes_handler))
+        .route(
+            "/episodes/stats",
+            get(handlers::episodes::episode_stats_handler),
+        )
+        .route(
+            "/episodes/{id}/verify",
+            post(handlers::episodes::verify_episode_handler),
+        )
+        .route(
+            "/cycle/status",
+            get(handlers::episodes::cycle_status_handler),
+        )
+        .route(
+            "/cycle/trigger",
+            post(handlers::episodes::cycle_trigger_handler),
+        );
 
     // Conditionally add routes by re-binding the router variable.
     // This avoids the `unused_mut` warning when no features are enabled.

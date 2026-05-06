@@ -148,6 +148,7 @@ async fn main() -> Result<()> {
         instruction: None,
         mode: Default::default(),
         use_knowledge_graph: Some(false),
+        context: None,
     };
 
     let final_answer = match handlers::knowledge_search_handler(
