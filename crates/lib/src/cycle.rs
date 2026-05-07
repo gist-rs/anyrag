@@ -14,7 +14,7 @@ pub struct CycleConfig {
     pub min_success_rate: f64,
     /// Path to write training JSONL. Default: "exports/training.jsonl"
     pub export_path: String,
-    /// mini-dllm API URL for hot-reload trigger.
+    /// microgpt-rs API URL for hot-reload trigger.
     pub model_api_url: Option<String>,
 }
 

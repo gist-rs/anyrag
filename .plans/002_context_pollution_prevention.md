@@ -243,4 +243,4 @@ None — all changes use existing dependencies (SQLite, existing LLM provider).
 
 - `.research/00_Neuro-Symbolic LLM Architecture.md` — §Context Pollution, §Concept Sharding
 - `.research/01_Advanced Neuro-Symbolic Rust Translation.md` — §Latency Mitigation via anyrag
-- `mini-dllm/.plans/009_rest_speculative_decoding.md` — REST bridge consumes these APIs
+- `microgpt-rs/.plans/009_rest_speculative_decoding.md` — REST bridge consumes these APIs

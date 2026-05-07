@@ -2,7 +2,7 @@
 
 ## Objective
 
-Implement the full 32-day self-improving loop described in the research: anyrag collects successful RIIR translations (episodic memory), synthesizes patterns into structured training data, exports JSONL, feeds it into mini-dllm's wgpu LoRA trainer (Plan 008), and hot-reloads the trained adapter back into the inference engine.
+Implement the full 32-day self-improving loop described in the research: anyrag collects successful RIIR translations (episodic memory), synthesizes patterns into structured training data, exports JSONL, feeds it into 's wgpu LoRA trainer (Plan 008), and hot-reloads the trained adapter back into the inference engine.
 
 ## The Problem
 
@@ -10,8 +10,8 @@ Current state:
 1. **No episodic memory**: anyrag ingests documents but doesn't track which translations succeeded (compiled) vs failed
 2. **Export is FAQ-only**: `/knowledge/export` only exports YAML FAQ pairs, not code translation pairs with hidden states
 3. **No auto-synthesis**: The curator deduplicates but doesn't synthesize patterns into training data
-4. **No bridge to LoRA trainer**: No pipeline from anyrag export → mini-dllm Plan 008 training
-5. **No hot-reload**: Once `lora.bin` is trained, there's no mechanism to load it into a running mini-dllm instance
+4. **No bridge to LoRA trainer**: No pipeline from anyrag export →  Plan 008 training
+5. **No hot-reload**: Once `lora.bin` is trained, there's no mechanism to load it into a running  instance
 
 The research describes a 4-phase cycle:
 - **Day 1 (RAG Phase)**: Answer queries via retrieval
@@ -233,7 +233,7 @@ pub struct CycleConfig {
     pub synthesis_interval_days: u32,       // default: 30
     /// Path to write training JSONL.
     pub export_path: String,               // default: "exports/training.jsonl"
-    /// mini-dllm API URL for hot-reload trigger.
+    ///  API URL for hot-reload trigger.
     pub model_api_url: Option<String>,      // e.g., "http://localhost:8080"
 }
 
@@ -285,7 +285,7 @@ impl SelfImprovingCycle {
                 Ok(None)
             }
             CycleState::Upgrading => {
-                // POST to mini-dllm API to hot-reload lora.bin
+                // POST to  API to hot-reload lora.bin
                 if let Some(url) = &self.config.model_api_url {
                     // reqwest::post(format!("{}/reload_lora", url)).send().await?;
                 }
@@ -308,13 +308,13 @@ pub enum CycleAction {
 }
 ```
 
-### Part 5: mini-dllm Hot-Reload Endpoint
+### Part 5:  Hot-Reload Endpoint
 
 ```rust
-// This goes in mini-dllm, not anyrag.
-// mini-dllm gets a simple HTTP endpoint that reloads lora.bin:
+// This goes in , not anyrag.
+//  gets a simple HTTP endpoint that reloads lora.bin:
 
-// mini-dllm/src/server.rs (new, behind "server" feature)
+// /src/server.rs (new, behind "server" feature)
 // POST /reload_lora — loads new lora.bin and swaps the adapter
 // GET /status — returns current model stats, LoRA version, acceptance rate
 ```
@@ -338,6 +338,138 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX idx_episodes_success ON episodes(compilation_result);
 CREATE INDEX idx_episodes_created ON episodes(created_at);
 ```
+
+## 5.3 How microgpt-rs Plan 008 Trainer Consumes the JSONL
+
+### JSONL Format
+
+anyrag's `Curator::export_for_lora()` produces a JSONL file where each line is a JSON object with a `messages` array following the chat completion format:
+
+```jsonl
+{"messages":[{"role":"system","content":"Rewrite the following code in idiomatic Rust."},{"role":"user","content":"def hello(): print(\"hello\")"},{"role":"assistant","content":"fn hello() { println!(\"hello\"); }"}]}
+{"messages":[{"role":"system","content":"Rewrite the following code in idiomatic Rust."},{"role":"user","content":"class Foo: ..."},{"role":"assistant","content":"struct Foo { ... }"}]}
+```
+
+Two sources feed into this JSONL:
+1. **FAQ pairs** — structured YAML knowledge documents (existing `/knowledge/export` logic)
+2. **Translation episodes** — successful `CompilationResult::Success` episodes from the `episodes` table
+
+### Consumption Pipeline
+
+```
+anyrag                          microgpt-rs (Plan 008)
+──────                          ────────────────────
+Curator::export_for_lora()
+        │
+        ▼
+training.jsonl ──────────────► DataLoader::from_jsonl(path, batch_size, seq_len, pad_id)
+                                       │
+                                       ▼
+                                 Parse each line as TrainingSample { tokens: Vec<usize> }
+                                 - system + user content = input_ids
+                                 - assistant content = target_ids (shifted by 1)
+                                       │
+                                       ▼
+                                 batches() → Iterator<Item = (Vec<u32>, Vec<u32>)>
+                                 - Shuffles samples each epoch
+                                 - Pads/truncates to seq_len
+                                 - Returns (input_ids, target_ids) pairs
+                                       │
+                                       ▼
+                                 GPU Training Loop
+                                 for each (input_ids, target_ids):
+                                   1. GpuForwardPass::forward(input_ids) → logits
+                                   2. Cross-entropy loss(logits, target_ids)
+                                   3. GpuBackwardPass::compute_lora_gradients()
+                                   4. AdamW optimizer step
+                                       │
+                                       ▼
+                                 export_lora() → lora.bin (safetensors)
+```
+
+### Config Compatibility
+
+Plan 008's `DataLoader` requires `seq_len` and `pad_id` to match the tokenizer used during microgpt-rs inference. For the micro config:
+- `vocab_size = 4096` (BPE tokenizer from Plan 007)
+- `n_embd = 32`, `n_layer = 1`
+- `lora_rank = 4`, `lora_alpha = 8.0`
+
+The JSONL `messages` content must be tokenized by microgpt-rs's BPE tokenizer **before** training. The `DataLoader` expects pre-tokenized `TrainingSample { tokens }` — not raw text. This means either:
+1. anyrag exports pre-tokenized JSONL (requires shared tokenizer), or
+2. microgpt-rs tokenizes the JSONL at load time in `DataLoader::from_jsonl()`
+
+Current implementation uses option 2: `DataLoader::from_jsonl()` parses raw text messages and microgpt-rs's tokenizer handles encoding.
+
+### File Path Convention
+
+- anyrag writes to: `exports/training.jsonl` (configurable via `CycleConfig::export_path`)
+- microgpt-rs reads from: passed as CLI arg `--data training.jsonl`
+- The cycle orchestrator's `ReadyToExport` state writes the file; microgpt-rs's CLI consumes it.
+
+## 5.4 How microgpt-rs Hot-Reloads Trained lora.bin
+
+### Hot-Reload Architecture
+
+```
+microgpt-rs (Plan 008)                     anyrag Cycle
+──────────────────                       ────────────
+POST /reload_lora ◄─────────────────── CycleConfig::model_api_url
+        │                                         │
+        ▼                                         │
+load_lora(path, &mut forward)                     │
+  1. Read lora.bin (safetensors)                  │
+  2. Deserialize tensors                          │
+  3. Upload A/B matrices to GPU                   │
+  4. Swap into GpuForwardPass.lora.adapters       │
+        │                                         │
+        ▼                                         │
+Next inference uses new LoRA weights              │
+```
+
+### The Reload Endpoint
+
+microgpt-rs exposes a simple HTTP server (behind `#[cfg(feature = "server")]`):
+
+```
+POST /reload_lora    — Reads lora.bin from disk, uploads to GPU, swaps adapter
+GET  /status         — Returns current model stats, LoRA version, acceptance rate
+```
+
+The reload is **atomic at the inference level**: the GPU buffers are swapped in a single write, so the next `forward()` call uses the new weights. There is no partial state — the old adapter GPU buffers are simply overwritten.
+
+### lora.bin Format (safetensors)
+
+```rust
+// Key naming convention:
+// "lora.{layer_idx}.a" — A matrix (down-projection): [n_embd, rank]  f32
+// "lora.{layer_idx}.b" — B matrix (up-projection):   [rank, out_dim] f32
+
+// Example for 1-layer micro config with rank=4, targets=["q","k","v","o","mlp1","mlp2"]:
+// lora.0.a  → [32, 4]   f32 (q_proj down)
+// lora.0.b  → [4, 32]   f32 (q_proj up)
+// lora.1.a  → [32, 4]   f32 (k_proj down)
+// lora.1.b  → [4, 32]   f32 (k_proj up)
+// ... etc for v, o, mlp1, mlp2
+```
+
+For WASM targets where safetensors may not compile, a simpler binary format is used:
+`[blake3_hash(4B) | n_layers(4B) | rank(4B) | layer_data...]` where each `layer_data` is `[a_len(4B) | a_data | b_len(4B) | b_data]`.
+
+### Trigger Flow
+
+1. anyrag cycle reaches `CycleState::Upgrading`
+2. `CycleConfig::model_api_url` points to microgpt-rs's server (e.g., `http://localhost:8080`)
+3. anyrag sends `POST {model_api_url}/reload_lora`
+4. microgpt-rs reads `lora.bin` from disk (path configured server-side)
+5. `load_lora()` deserializes + uploads to GPU
+6. Next inference call uses updated LoRA weights
+7. anyrag clears episodic memory and returns to `CycleState::Collecting`
+
+### Current State
+
+- `CycleConfig::model_api_url` exists in anyrag's config but the POST call is commented out (placeholder)
+- microgpt-rs's server endpoint is not yet implemented (part of Plan 008 Phase 7)
+- The `load_lora()` function is defined in Plan 008's Phase 6 but not yet implemented
 
 ## Tasks
 
@@ -376,8 +508,8 @@ CREATE INDEX idx_episodes_created ON episodes(created_at);
 ### Phase 5: Integration
 - [x] 5.1 Wire: episode recording → RAG pipeline → episode storage
 - [x] 5.2 Wire: synthesis → export → file system
-- [ ] 5.3 Document: how mini-dllm Plan 008 trainer consumes the JSONL
-- [ ] 5.4 Document: how mini-dllm hot-reloads trained lora.bin
+- [x] 5.3 Document: how  Plan 008 trainer consumes the JSONL
+- [x] 5.4 Document: how  hot-reloads trained lora.bin
 - [x] 5.5 End-to-end test: record episode → verify → synthesize → export → JSONL
 
 ## Key Risks & Mitigations
@@ -395,7 +527,7 @@ CREATE INDEX idx_episodes_created ON episodes(created_at);
 2. **Training synthesis**: Curator auto-generates training pairs from successful episodes
 3. **LoRA export**: `/knowledge/export/lora` produces JSONL for Plan 008 trainer
 4. **32-day cycle**: Background orchestrator advances through collection → synthesis → export → upgrade
-5. **Hot-reload**: mini-dllm can swap `lora.bin` without restart
+5. **Hot-reload**:  can swap `lora.bin` without restart
 
 ## Files to Create/Modify
 
@@ -413,7 +545,7 @@ CREATE INDEX idx_episodes_created ON episodes(created_at);
 
 ## Cross-Project References
 
-- `mini-dllm/.plans/008_wgpu_lora_training.md` — Consumes the JSONL this plan produces
-- `mini-dllm/.plans/009_rest_speculative_decoding.md` — Queries episodic hidden states during inference
+- `/.plans/008_wgpu_lora_training.md` — Consumes the JSONL this plan produces
+- `/.plans/009_rest_speculative_decoding.md` — Queries episodic hidden states during inference
 - `.research/00_Neuro-Symbolic LLM Architecture.md` — §Runtime LoRA Pipeline (Day 1→32)
 - `.research/01_Advanced Neuro-Symbolic Rust Translation.md` — §Continuous Learning Loop
