@@ -1,19 +1,19 @@
 # AnyRag: Self-Improving Knowledge Base & RAG Engine
 
-A Rust-based platform for building a self-improving knowledge base and interacting with your data — from data warehouses to live Google Sheets — using natural language.
+A Rust-based platform for building a self-improving knowledge base from GitHub sources — code examples, documentation, Rust docs — using natural language.
 
 ## Core Features
 
-- **Multi-Source Ingestion** — Build a knowledge base from diverse sources:
-  - Web URLs (with Jina Reader API support)
+- **Multi-Source Ingestion** — Build a knowledge base from diverse sources (GitHub-primary):
+  - **GitHub repositories** — clone repos, extract code examples/tests/src, version-aware search with embeddings
+  - Web URLs (Raw HTML or Jina Reader API)
   - PDF documents (file upload or URL)
   - RSS Feeds
   - Google Sheets (generic tables or Q&A pairs)
-  - Notion Databases
   - Firebase Firestore collections
-  - GitHub repositories (code examples extraction)
   - Raw Text (auto-chunked)
-  - Local Markdown files
+  - Notion Databases *(standalone crate)*
+  - Local Markdown files *(standalone crate)*
 - **AI-Powered Distillation** — Uses an LLM to automatically extract structured Q&A pairs and generate new ones from unstructured text, restructured into YAML sections.
 - **Vector Embeddings** — Generates embeddings for semantic search across all ingested content.
 - **Advanced RAG Pipeline** — Multi-stage hybrid search with LLM query analysis, parallel retrieval (metadata + vector + keyword), and Reciprocal Rank Fusion re-ranking.
@@ -21,7 +21,7 @@ A Rust-based platform for building a self-improving knowledge base and interacti
 - **Knowledge Graph** — In-memory or RocksDB-backed graph with time-based validity for fact retrieval.
 - **Text-to-SQL** — Translates natural language prompts into executable SQL queries for Google BigQuery or local SQLite.
 - **Code RAG** — Ingest and search code examples from public GitHub repositories.
-- **Self-Improvement Cycle** — Export FAQ knowledge base as JSONL for fine-tuning your base LLM.
+- **Episodic Memory & Self-Improving Cycle** — Record translation episodes, verify compilation results, and drive a state machine (`Collecting` → `Synthesizing` → `Exporting` → `Training` → `Upgrading`) toward autonomous LoRA fine-tuning. Export FAQ as JSONL for training data.
 - **Identity & Ownership** — JWT + Google OAuth2 authentication with deterministic "Guest User" fallback. Search results are filtered by owner.
 - **Config-Driven** — YAML configuration with environment variable substitution, per-provider prompt templates, and `prompt.yml` overrides.
 
@@ -133,24 +133,25 @@ Feature flags in `anyrag-server` control which ingestion plugins are compiled:
 [features]
 default = ["full"]
 full = ["bigquery", "graph_db", "rss", "firebase", "github", "web", "pdf", "sheets", "text"]
+# Note: notion and markdown are standalone crates, not server plugins
 ```
 
 ## Workspace Crates
 
 | Crate | Description |
 |---|---|
-| **[`anyrag`](crates/lib)** | Core library — AI/DB providers, search pipeline, re-ranking, curator, knowledge graph, ingestion traits, prompt templates, types |
-| **[`anyrag-server`](crates/server)** | Axum web server — REST API with feature-flagged routes, JWT/OAuth2 auth, config-driven prompt management |
+| **[`anyrag`](crates/lib)** | Core library — AI/DB providers, search pipeline, re-ranking, curator, knowledge graph, episodic memory, self-improving cycle, ingestion traits, prompt templates, types |
+| **[`anyrag-server`](crates/server)** | Axum web server — REST API with feature-flagged routes, JWT/OAuth2 auth, episodes & cycle endpoints, config-driven prompt management |
 | **[`anyrag-cli`](crates/cli)** | CLI tool — `login`, `dump firebase`, `dump github`, `process`, `list`, `count` commands |
 | **[`anyrag-github`](crates/github)** | GitHub ingestion — clone repos, extract code examples/tests/src, version-aware search with embeddings |
-| **[`anyrag-web`](crates/web)** | Web ingestion — fetch URLs, convert HTML to Markdown, AI restructuring into structured YAML |
+| **[`anyrag-web`](crates/web)** | Web ingestion — `WebIngestor` with `WebIngestStrategy` (`RawHtml` or `Jina`), fetch URLs, convert HTML to Markdown, AI restructuring into structured YAML |
 | **[`anyrag-pdf`](crates/pdf)** | PDF ingestion — extract text from PDFs (file upload or URL), AI restructuring into structured YAML |
 | **[`anyrag-rss`](crates/rss)** | RSS ingestion — parse RSS feeds, store each item as a separate document |
 | **[`anyrag-sheets`](crates/sheets)** | Google Sheets ingestion — fetch public sheets as CSV, support generic tables and Q&A pairs |
 | **[`anyrag-text`](crates/text)** | Text ingestion — auto-chunk raw text with overlap, store chunks as documents |
-| **[`anyrag-notion`](crates/notion)** | Notion ingestion — fetch Notion database pages via API, flatten properties to text |
 | **[`anyrag-firebase`](crates/firebase)** | Firebase ingestion — dump Firestore collections into local SQLite |
-| **[`anyrag-markdown`](crates/markdown)** | Markdown ingestion — split local `.md` files by separator, optional embedding generation |
+| **[`anyrag-notion`](crates/notion)** | Notion ingestion — fetch Notion database pages via API, flatten properties to text *(standalone, not a server plugin)* |
+| **[`anyrag-markdown`](crates/markdown)** | Markdown ingestion — split local `.md` files by separator, optional embedding generation *(standalone, not a server plugin)* |
 | **[`anyrag-html`](crates/html)** | HTML utilities — clean HTML tags, convert to Markdown, fetch URLs to cleaned Markdown |
 | **[`core-access`](crates/core-access)** | Identity & auth — user management with deterministic UUIDv5 IDs, role-based access (`root`/`user`/`guest`) |
 | **[`gof`](crates/gof)** | Project-aware RAG CLI — auto-ingest code examples from `Cargo.toml` dependencies via crates.io resolution, MCP search protocol |
@@ -169,17 +170,19 @@ anyrag/
 │   │       ├── search.rs       # Multi-stage hybrid search
 │   │       ├── rerank.rs       # RRF + LLM re-ranking
 │   │       ├── curator.rs      # Automated knowledge synthesis
+│   │       ├── cycle.rs        # Self-improving cycle state machine
 │   │       ├── graph/          # Knowledge graph (indradb)
 │   │       ├── prompts/        # System/user prompt templates
 │   │       ├── providers/      # AI + DB provider abstractions
-│   │       ├── ingest/         # Ingestion traits + shared logic
+│   │       ├── ingest/         # Ingestion traits, episodic memory, knowledge, embeddings
 │   │       └── types.rs        # Shared data structures
 │   ├── server/             # Axum REST API server
 │   │   └── src/
 │   │       ├── router.rs       # Feature-flagged route definitions
 │   │       ├── config.rs       # YAML config with env var substitution
+│   │       ├── state.rs        # AppState, AI/DB providers, cycle mutex
 │   │       ├── auth/           # JWT + Google OAuth2
-│   │       └── handlers/       # Route handlers (ingest, search, admin)
+│   │       └── handlers/       # Route handlers (ingest, search, admin, episodes)
 │   ├── cli/                # Administrative CLI
 │   ├── github/             # GitHub repo ingestion + code RAG
 │   ├── web/                # Web URL ingestion
@@ -240,14 +243,14 @@ All JSON responses follow a consistent `result` object structure. Append `?debug
 
 ### Search & RAG
 
-| Method | Path | Description |
-|---|---|---|
-| `POST` | `/search/knowledge` | **Primary RAG endpoint** — hybrid search + synthesis |
-| `POST` | `/search/examples` | **Code RAG** — search GitHub code examples |
-| `POST` | `/search/hybrid` | Hybrid search (vector + keyword) with re-ranking |
-| `POST` | `/search/vector` | Pure vector similarity search |
-| `POST` | `/search/keyword` | Pure keyword search |
-| `POST` | `/search/knowledge_graph` | Graph fact lookup (`graph_db` feature) |
+| Method | Path | Feature Flag | Description |
+|---|---|---|---|
+| `POST` | `/search/knowledge` | — | **Primary RAG endpoint** — hybrid search + synthesis |
+| `POST` | `/search/examples` | `github` | **Code RAG** — search GitHub code examples |
+| `POST` | `/search/hybrid` | — | Hybrid search (vector + keyword) with re-ranking |
+| `POST` | `/search/vector` | — | Pure vector similarity search |
+| `POST` | `/search/keyword` | — | Pure keyword search |
+| `POST` | `/search/knowledge_graph` | `graph_db` | Graph fact lookup |
 
 ### Generation & Admin
 
@@ -261,6 +264,17 @@ All JSON responses follow a consistent `result` object structure. Append `?debug
 | `POST` | `/graph/build` | Build knowledge graph from table (`graph_db`) |
 | `GET`  | `/documents` | List visible documents |
 | `GET`  | `/users` | List users (admin only) |
+
+### Episodes & Self-Improving Cycle
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/episodes` | Record a new translation episode |
+| `GET`  | `/episodes` | List recorded episodes (query: `limit`, `since`, `successful_only`) |
+| `GET`  | `/episodes/stats` | Get episodic memory statistics |
+| `POST` | `/episodes/{id}/verify` | Verify compilation result for an episode |
+| `GET`  | `/cycle/status` | Get current cycle state machine status |
+| `POST` | `/cycle/trigger` | Trigger a cycle tick to potentially advance state |
 
 ### Auth
 
