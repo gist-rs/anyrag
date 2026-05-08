@@ -74,6 +74,40 @@ pub const CREATE_EPISODES_TABLE_SQL: &str = "
     CREATE INDEX IF NOT EXISTS idx_episodes_synthesized ON episodes(synthesized);
 ";
 
+/// SQL to create the `rag_slots` table for Raven Routed Slot Memory.
+/// Named slots for categorizing ingested documents into bounded memory partitions.
+pub const CREATE_RAG_SLOTS_TABLE_SQL: &str = "
+    CREATE TABLE IF NOT EXISTS rag_slots (
+        name TEXT PRIMARY KEY,              -- SlotName enum as snake_case string
+        description TEXT NOT NULL DEFAULT '',
+        is_frozen BOOLEAN NOT NULL DEFAULT FALSE,
+        decay_rate REAL NOT NULL DEFAULT 0.1,  -- λ (lambda), Raven Eq. 18
+        max_documents INTEGER NOT NULL DEFAULT 1000,
+        keywords TEXT NOT NULL DEFAULT '[]',    -- JSON array of routing keywords
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_rag_slots_frozen ON rag_slots(is_frozen);
+";
+
+/// SQL to create the `slot_documents` table for document-to-slot associations.
+/// Many-to-many relationship between documents and slots.
+pub const CREATE_SLOT_DOCUMENTS_TABLE_SQL: &str = "
+    CREATE TABLE IF NOT EXISTS slot_documents (
+        id TEXT PRIMARY KEY,                -- UUID v7
+        slot_name TEXT NOT NULL,            -- FK to rag_slots.name
+        document_id TEXT NOT NULL,          -- FK to documents.id
+        routed_by TEXT NOT NULL DEFAULT 'keyword',  -- RouteMethod enum
+        routed_at TEXT NOT NULL DEFAULT (datetime('now')),
+        relevance_score REAL NOT NULL DEFAULT 1.0,
+        FOREIGN KEY (slot_name) REFERENCES rag_slots(name) ON DELETE CASCADE,
+        FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_slot_documents_slot ON slot_documents(slot_name);
+    CREATE INDEX IF NOT EXISTS idx_slot_documents_document ON slot_documents(document_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_slot_documents_unique ON slot_documents(slot_name, document_id);
+";
+
 /// An array containing all the schema creation SQL statements.
 /// This allows them to be executed in order to set up a new database.
 pub const ALL_TABLE_CREATION_SQL: &[&str] = &[
@@ -82,4 +116,6 @@ pub const ALL_TABLE_CREATION_SQL: &[&str] = &[
     CREATE_DOCUMENT_EMBEDDINGS_TABLE_SQL,
     CREATE_CONTENT_METADATA_TABLE_SQL,
     CREATE_EPISODES_TABLE_SQL,
+    CREATE_RAG_SLOTS_TABLE_SQL,
+    CREATE_SLOT_DOCUMENTS_TABLE_SQL,
 ];

@@ -17,12 +17,14 @@ pub mod prompts;
 pub mod providers;
 pub mod rerank;
 pub mod search;
+pub mod slots;
 pub mod types;
 
 pub use errors::PromptError;
 pub use executor::AnyragExecutor;
 pub use rerank::{RerankError, Rerankable, RrfWeights};
 pub use search::{SearchError, SearchMode};
+pub use slots::{KeywordRouter, SlotIngester, SlotName};
 pub use types::{
     CompilationResult, EpisodicStats, ExecutePromptOptions, HttpRequestPromptOptions, PromptClient,
     PromptClientBuilder, PromptResult, QueryContext, RustConcept, SearchResult, SearchSourceType,
