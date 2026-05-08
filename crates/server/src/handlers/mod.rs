@@ -18,6 +18,7 @@ pub mod graph_handlers;
 pub mod ingest;
 pub mod knowledge;
 pub mod search;
+pub mod slots;
 
 // Re-export all handlers from the sub-modules to make them easily accessible
 // to the router under a single `handlers::` path.
@@ -33,6 +34,7 @@ pub use graph_handlers::*;
 pub use ingest::*;
 pub use knowledge::*;
 pub use search::*;
+pub use slots::*;
 
 // Shared items used by multiple handler modules.
 use super::{

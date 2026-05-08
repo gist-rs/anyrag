@@ -1,7 +1,7 @@
 use super::{handlers, state::AppState};
 use axum::extract::DefaultBodyLimit;
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use tower_http::trace::TraceLayer;
@@ -32,6 +32,19 @@ pub fn create_router(app_state: AppState) -> Router {
             post(handlers::knowledge_search_handler),
         )
         .route("/knowledge/export", get(handlers::knowledge_export_handler))
+        // --- Slot Management & Routed Search Routes ---
+        .route("/search/slots", post(handlers::slot_search_handler))
+        .route("/slots", get(handlers::list_slots_handler))
+        .route("/slots", post(handlers::create_slot_handler))
+        .route("/slots/reindex", post(handlers::reindex_slots_handler))
+        .route(
+            "/slots/{name}/documents",
+            get(handlers::list_slot_documents_handler),
+        )
+        .route(
+            "/slots/{name}/documents/{doc_id}",
+            delete(handlers::remove_document_from_slot_handler),
+        )
         // --- Episodes & Self-Improving Cycle Routes ---
         .route(
             "/episodes",
