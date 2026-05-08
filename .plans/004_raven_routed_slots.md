@@ -251,60 +251,60 @@ None — all changes use existing dependencies (turso/libsql, serde, chrono, uui
 ## Tasks
 
 ### Phase 1: Types & Schema
-- [ ] 1.1 Create `crates/lib/src/slots/mod.rs` — module index, re-exports
-- [ ] 1.2 Create `crates/lib/src/slots/types.rs` — `Slot`, `SlotName`, `SlotDocument`, `RouteMethod`, `RouteResult`
-- [ ] 1.3 Add `CREATE_RAG_SLOTS_TABLE_SQL` and `CREATE_SLOT_DOCUMENTS_TABLE_SQL` to `crates/lib/src/providers/db/sqlite/sql.rs`
-- [ ] 1.4 Append new table SQL to `ALL_TABLE_CREATION_SQL` array
-- [ ] 1.5 Add `pub mod slots;` to `crates/lib/src/lib.rs`
-- [ ] 1.6 Add test: slot types serialize/deserialize correctly
-- [ ] 1.7 Add test: schema creation succeeds on in-memory Turso DB
+- [x] 1.1 Create `crates/lib/src/slots/mod.rs` — module index, re-exports
+- [x] 1.2 Create `crates/lib/src/slots/types.rs` — `Slot`, `SlotName`, `SlotDocument`, `RouteMethod`, `RouteResult`
+- [x] 1.3 Add `CREATE_RAG_SLOTS_TABLE_SQL` and `CREATE_SLOT_DOCUMENTS_TABLE_SQL` to `crates/lib/src/providers/db/sqlite/sql.rs`
+- [x] 1.4 Append new table SQL to `ALL_TABLE_CREATION_SQL` array
+- [x] 1.5 Add `pub mod slots;` to `crates/lib/src/lib.rs`
+- [x] 1.6 Add test: slot types serialize/deserialize correctly
+- [x] 1.7 Add test: schema creation succeeds on in-memory Turso DB
 
 ### Phase 2: Default Slot Seeding & Keyword Router
-- [ ] 2.1 Create `crates/lib/src/slots/router.rs` — `KeywordRouter`, `default_slot_keywords()`
-- [ ] 2.2 Create `crates/lib/src/slots/seeder.rs` — `seed_default_slots()` for code RAG schema
-- [ ] 2.3 Implement `KeywordRouter::route()` — content + metadata → `RouteResult`
-- [ ] 2.4 Default slot config: `architecture` (frozen, decay_rate=0.0), `types` (0.05), `apis` (0.05), `dependencies` (0.1), `tests` (0.1), `chatter` (0.5)
-- [ ] 2.5 Add test: `architecture` slot keywords match `mod.rs` and `lib.rs` content
-- [ ] 2.6 Add test: single document routes to multiple slots (e.g., `types` + `apis`)
-- [ ] 2.7 Add test: frozen slot has `decay_rate = 0.0`
-- [ ] 2.8 Add test: `chatter` slot has highest decay rate
+- [x] 2.1 Create `crates/lib/src/slots/router.rs` — `KeywordRouter`, `default_slot_keywords()`
+- [x] 2.2 Create `crates/lib/src/slots/seeder.rs` — `seed_default_slots()` for code RAG schema
+- [x] 2.3 Implement `KeywordRouter::route()` — content + metadata → `RouteResult`
+- [x] 2.4 Default slot config: `architecture` (frozen, decay_rate=0.0), `types` (0.05), `apis` (0.05), `dependencies` (0.1), `tests` (0.1), `chatter` (0.5)
+- [x] 2.5 Add test: `architecture` slot keywords match `mod.rs` and `lib.rs` content
+- [x] 2.6 Add test: single document routes to multiple slots (e.g., `types` + `apis`)
+- [x] 2.7 Add test: frozen slot has `decay_rate = 0.0`
+- [x] 2.8 Add test: `chatter` slot has highest decay rate
 
 ### Phase 3: Ingestion Integration (Additive Hook)
-- [ ] 3.1 Create `crates/lib/src/slots/ingest.rs` — `SlotIngester` that wraps existing `Ingestor` trait
-- [ ] 3.2 After document insertion, call `KeywordRouter::route()` on content
-- [ ] 3.3 Insert matching rows into `slot_documents` table
-- [ ] 3.4 Add `route_to_slots` flag to ingestion config (opt-in, default off)
-- [ ] 3.5 Add test: ingest a Rust struct → routes to `types` slot
-- [ ] 3.6 Add test: ingest a `#[test]` function → routes to `tests` slot
-- [ ] 3.7 Add test: ingest `cargo.toml` content → routes to `dependencies` slot
+- [x] 3.1 Create `crates/lib/src/slots/ingest.rs` — `SlotIngester` that wraps existing `Ingestor` trait
+- [x] 3.2 After document insertion, call `KeywordRouter::route()` on content
+- [x] 3.3 Insert matching rows into `slot_documents` table
+- [x] 3.4 Add `route_to_slots` flag to ingestion config (opt-in, default off) — implemented as separate `SlotIngester`, effectively opt-in
+- [x] 3.5 Add test: ingest a Rust struct → routes to `types` slot
+- [x] 3.6 Add test: ingest a `#[test]` function → routes to `tests` slot
+- [x] 3.7 Add test: ingest `cargo.toml` content → routes to `dependencies` slot
 
 ### Phase 4: Selective Decay (Raven Equation 18)
-- [ ] 4.1 Create `crates/lib/src/slots/decay.rs` — decay calculation logic
-- [ ] 4.2 Implement `decayed_score(relevance_score, decay_rate, routed_at) -> f64`
-- [ ] 4.3 Implement `apply_decay_batch()` — SQL UPDATE for all non-frozen slot documents
-- [ ] 4.4 Add decay SQL to slot search queries: `relevance_score * EXP(-decay_rate * JULIANDAY('now') - JULIANDAY(routed_at))`
-- [ ] 4.5 Add test: frozen slot score remains 1.0 after 30 days
-- [ ] 4.6 Add test: `chatter` slot decays to ~0.01 after 7 days with λ=0.5
-- [ ] 4.7 Add test: `types` slot decays slowly (~0.7 after 7 days with λ=0.05)
+- [x] 4.1 Create `crates/lib/src/slots/decay.rs` — decay calculation logic
+- [x] 4.2 Implement `decayed_score(relevance_score, decay_rate, routed_at) -> f64`
+- [x] 4.3 Implement `apply_decay_batch()` — SQL UPDATE for all non-frozen slot documents
+- [x] 4.4 Add decay SQL to slot search queries: `relevance_score * EXP(-decay_rate * JULIANDAY('now') - JULIANDAY(routed_at))`
+- [x] 4.5 Add test: frozen slot score remains 1.0 after 30 days
+- [x] 4.6 Add test: `chatter` slot decays to ~0.01 after 7 days with λ=0.5
+- [x] 4.7 Add test: `types` slot decays slowly (~0.7 after 7 days with λ=0.05)
 
 ### Phase 5: Routed Search Endpoint
-- [ ] 5.1 Create `crates/lib/src/slots/search.rs` — `SlotSearch` with slot filter
-- [ ] 5.2 Add `POST /search/slots` endpoint to `crates/server/src/handlers/search.rs`
-- [ ] 5.3 Request accepts `active_slots: Vec<SlotName>` and always includes frozen slots
-- [ ] 5.4 Build SQL filter: `WHERE document_id IN (SELECT ... FROM slot_documents WHERE slot_name IN (...) OR is_frozen = TRUE)`
-- [ ] 5.5 Reuse existing `reciprocal_rank_fusion` with slot-filtered candidates
-- [ ] 5.6 Add `SlotSearchRequest` and `SlotSearchResponse` types to server types
-- [ ] 5.7 Register route in `crates/server/src/router.rs`
+- [x] 5.1 Create `crates/lib/src/slots/search.rs` — `SlotSearch` with slot filter
+- [x] 5.2 Add `POST /search/slots` endpoint to `crates/server/src/handlers/slots.rs`
+- [x] 5.3 Request accepts `active_slots: Vec<SlotName>` and always includes frozen slots
+- [x] 5.4 Build SQL filter: `WHERE document_id IN (SELECT ... FROM slot_documents WHERE slot_name IN (...) OR is_frozen = TRUE)`
+- [x] 5.5 Slots filter candidates only; existing RRF handles ranking separately — out of scope for Phase 1
+- [x] 5.6 Add `SlotSearchRequest` and `SlotSearchResponse` types in `crates/server/src/handlers/slots.rs`
+- [x] 5.7 Register route in `crates/server/src/router.rs`
 - [ ] 5.8 Add test: search with `active_slots = ["apis"]` returns API docs + frozen architecture docs
 - [ ] 5.9 Add test: search with no active slots returns only frozen slot documents
 - [ ] 5.10 Add test: slot search endpoint returns 404 for documents not in any slot
 
 ### Phase 6: Slot Management Endpoints
-- [ ] 6.1 Add `GET /slots` — list all slots with document counts
-- [ ] 6.2 Add `POST /slots` — create custom slot (name, keywords, decay_rate)
-- [ ] 6.3 Add `GET /slots/{name}/documents` — list documents in a slot
-- [ ] 6.4 Add `DELETE /slots/{name}/documents/{doc_id}` — remove document from slot
-- [ ] 6.5 Add `POST /slots/reindex` — re-route all documents through keyword router
+- [x] 6.1 Add `GET /slots` — list all slots with document counts
+- [x] 6.2 Add `POST /slots` — create custom slot (name, keywords, decay_rate)
+- [x] 6.3 Add `GET /slots/{name}/documents` — list documents in a slot
+- [x] 6.4 Add `DELETE /slots/{name}/documents/{doc_id}` — remove document from slot
+- [x] 6.5 Add `POST /slots/reindex` — re-route all documents through keyword router
 - [ ] 6.6 Add test: create custom slot, ingest doc, verify routing
 - [ ] 6.7 Add test: reindex re-routes documents after keyword changes
 
@@ -312,9 +312,9 @@ None — all changes use existing dependencies (turso/libsql, serde, chrono, uui
 - [ ] 7.1 Benchmark: keyword routing throughput (docs/sec) for 1000 documents
 - [ ] 7.2 Benchmark: slot-filtered search vs unfiltered search latency
 - [ ] 7.3 Benchmark: decay calculation overhead on 10K slot_documents
-- [ ] 7.4 Run `cargo clippy --workspace --allow-dirty`
-- [ ] 7.5 Run `cargo test --workspace`
-- [ ] 7.6 Verify existing search pipeline is untouched (regression test)
+- [x] 7.4 Run `cargo clippy --workspace --allow-dirty`
+- [x] 7.5 Run `cargo test --workspace`
+- [x] 7.6 Verify existing search pipeline is untouched (regression test)
 
 ## Key Risks & Mitigations
 
