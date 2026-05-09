@@ -156,3 +156,18 @@ harness = true
 name = "sheet_ingest_test"
 path = "tests/sheet_ingest_test.rs"
 harness = true
+
+[[test]]
+name = "slots_test"
+path = "tests/slots_test.rs"
+harness = true
+
+[[test]]
+name = "slots_bench_test"
+path = "tests/slots_bench_test.rs"
+harness = true
+
+[[test]]
+name = "classify_test"
+path = "tests/classify_test.rs"
+harness = true

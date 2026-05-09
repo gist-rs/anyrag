@@ -295,9 +295,9 @@ None — all changes use existing dependencies (turso/libsql, serde, chrono, uui
 - [x] 5.5 Slots filter candidates only; existing RRF handles ranking separately — out of scope for Phase 1
 - [x] 5.6 Add `SlotSearchRequest` and `SlotSearchResponse` types in `crates/server/src/handlers/slots.rs`
 - [x] 5.7 Register route in `crates/server/src/router.rs`
-- [ ] 5.8 Add test: search with `active_slots = ["apis"]` returns API docs + frozen architecture docs
-- [ ] 5.9 Add test: search with no active slots returns only frozen slot documents
-- [ ] 5.10 Add test: slot search endpoint returns 404 for documents not in any slot
+- [x] 5.8 Add test: search with `active_slots = ["apis"]` returns API docs + frozen architecture docs
+- [x] 5.9 Add test: search with no active slots returns only frozen slot documents
+- [x] 5.10 Add test: slot search endpoint returns 404 for documents not in any slot
 
 ### Phase 6: Slot Management Endpoints
 - [x] 6.1 Add `GET /slots` — list all slots with document counts
@@ -305,13 +305,13 @@ None — all changes use existing dependencies (turso/libsql, serde, chrono, uui
 - [x] 6.3 Add `GET /slots/{name}/documents` — list documents in a slot
 - [x] 6.4 Add `DELETE /slots/{name}/documents/{doc_id}` — remove document from slot
 - [x] 6.5 Add `POST /slots/reindex` — re-route all documents through keyword router
-- [ ] 6.6 Add test: create custom slot, ingest doc, verify routing
-- [ ] 6.7 Add test: reindex re-routes documents after keyword changes
+- [x] 6.6 Add test: create custom slot, ingest doc, verify routing
+- [x] 6.7 Add test: reindex re-routes documents after keyword changes
 
 ### Phase 7: Benchmarks & Cleanup
-- [ ] 7.1 Benchmark: keyword routing throughput (docs/sec) for 1000 documents
-- [ ] 7.2 Benchmark: slot-filtered search vs unfiltered search latency
-- [ ] 7.3 Benchmark: decay calculation overhead on 10K slot_documents
+- [x] 7.1 Benchmark: keyword routing throughput (docs/sec) for 1000 documents
+- [x] 7.2 Benchmark: slot-filtered search vs unfiltered search latency
+- [x] 7.3 Benchmark: decay calculation overhead on 10K slot_documents
 - [x] 7.4 Run `cargo clippy --workspace --allow-dirty`
 - [x] 7.5 Run `cargo test --workspace`
 - [x] 7.6 Verify existing search pipeline is untouched (regression test)

@@ -47,6 +47,20 @@ pub struct SlotFilter {
 /// If `active_slots` is empty and `include_frozen` is false, returns a clause
 /// that matches nothing. If `include_frozen` is true and no active slots are
 /// specified, only frozen slot documents are returned.
+/// Build a WHERE clause fragment that filters documents to active slots only.
+///
+/// Uses JOIN-compatible conditions (no IN subquery) for turso/libSQL compatibility.
+/// Frozen slots are always included regardless of `active_slots`.
+/// Returns a `SlotFilter` with the WHERE conditions and parameter values.
+///
+/// # Arguments
+/// * `config` - Slot search configuration
+///
+/// # Returns
+/// A `SlotFilter` containing the WHERE conditions and bound parameters.
+/// If `active_slots` is empty and `include_frozen` is false, returns a clause
+/// that matches nothing. If `include_frozen` is true and no active slots are
+/// specified, only frozen slot documents are returned.
 pub fn build_slot_filter(config: &SlotSearchConfig) -> SlotFilter {
     let mut params = Vec::new();
     let mut conditions = Vec::new();
@@ -75,56 +89,42 @@ pub fn build_slot_filter(config: &SlotSearchConfig) -> SlotFilter {
     if conditions.is_empty() {
         // No active slots and no frozen — match nothing
         return SlotFilter {
-            sql: "AND 1 = 0".to_string(),
+            sql: "1 = 0".to_string(),
             params,
         };
     }
 
-    let where_clause = conditions.join(" OR ");
-    let sql = format!(
-        "AND d.id IN (\
-            SELECT sd.document_id \
-            FROM slot_documents sd \
-            JOIN rag_slots s ON s.name = sd.slot_name \
-            WHERE {where_clause}\
-        )"
-    );
-
+    let sql = conditions.join(" OR ");
     SlotFilter { sql, params }
 }
 
 /// Build the full slot-filtered document query SQL.
 ///
+/// Uses JOINs instead of IN subqueries for turso/libSQL compatibility.
 /// Returns a SQL query that selects documents with their decayed relevance scores,
 /// filtered by the specified slot configuration.
 pub fn slot_filtered_document_sql(config: &SlotSearchConfig) -> (String, Vec<String>) {
     let filter = build_slot_filter(config);
 
     let sql = format!(
-        "SELECT\
-            d.id,\
-            d.title,\
-            d.content,\
-            d.source_url,\
-            d.created_at,\
-            COALESCE(\
-                (\
-                    SELECT MAX(\
-                        CASE\
-                            WHEN s.is_frozen = TRUE THEN sd.relevance_score\
-                            ELSE sd.relevance_score * EXP(-s.decay_rate * (JULIANDAY('now') - JULIANDAY(sd.routed_at)))\
-                        END\
-                    )\
-                    FROM slot_documents sd\
-                    JOIN rag_slots s ON s.name = sd.slot_name\
-                    WHERE sd.document_id = d.id\
-                ),\
-                0.0\
-            ) AS slot_score\
-        FROM documents d\
-        WHERE 1 = 1\
-        {filter_sql}\
-        ORDER BY slot_score DESC",
+        r#"SELECT
+            d.id,
+            d.title,
+            d.content,
+            d.source_url,
+            d.created_at,
+            MAX(
+                CASE
+                    WHEN s.is_frozen = TRUE THEN sd.relevance_score
+                    ELSE sd.relevance_score * EXP(-s.decay_rate * (JULIANDAY('now') - JULIANDAY(sd.routed_at)))
+                END
+            ) AS slot_score
+        FROM documents d
+        JOIN slot_documents sd ON sd.document_id = d.id
+        JOIN rag_slots s ON s.name = sd.slot_name
+        WHERE {filter_sql}
+        GROUP BY d.id
+        ORDER BY slot_score DESC"#,
         filter_sql = filter.sql
     );
 
@@ -194,7 +194,7 @@ mod tests {
 
         assert!(filter.sql.contains("is_frozen = TRUE"));
         assert!(filter.sql.contains("sd.slot_name IN"));
-        assert!(filter.sql.contains("SELECT sd.document_id"));
+        assert!(filter.sql.contains(" OR "));
         assert_eq!(filter.params.len(), 2);
         assert_eq!(filter.params[0], "apis");
         assert_eq!(filter.params[1], "types");
@@ -210,6 +210,7 @@ mod tests {
 
         assert!(filter.sql.contains("is_frozen = TRUE"));
         assert!(!filter.sql.contains("sd.slot_name IN"));
+        assert!(!filter.sql.contains(" OR "));
         assert!(filter.params.is_empty());
     }
 
@@ -221,7 +222,7 @@ mod tests {
         };
         let filter = build_slot_filter(&config);
 
-        assert!(filter.sql.contains("1 = 0"));
+        assert_eq!(filter.sql, "1 = 0");
         assert!(filter.params.is_empty());
     }
 
@@ -251,7 +252,25 @@ mod tests {
         assert!(sql.contains("JULIANDAY"));
         assert!(sql.contains("slot_score"));
         assert!(sql.contains("ORDER BY slot_score DESC"));
+        assert!(sql.contains("JOIN slot_documents"));
+        assert!(sql.contains("GROUP BY d.id"));
         assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn test_slot_filtered_document_sql_no_subquery() {
+        // Ensure the generated SQL does NOT contain IN subqueries (turso compat)
+        let config = SlotSearchConfig {
+            active_slots: &[SlotName::Apis],
+            include_frozen: true,
+        };
+        let (sql, _) = slot_filtered_document_sql(&config);
+
+        // Should NOT contain "AND d.id IN" or similar IN subquery patterns
+        assert!(
+            !sql.contains("AND d.id IN"),
+            "SQL should not use IN subquery: {sql}"
+        );
     }
 
     #[test]

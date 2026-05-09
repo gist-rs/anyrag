@@ -446,6 +446,93 @@ pub struct EmbeddingConfig {
     pub api_key: Option<String>,
 }
 
+/// Domain mapping for the `/classify/domain` endpoint.
+///
+/// Defines how anyrag maps prompt classification to microgpt-rs domains.
+/// Each mapping has a domain name, associated anyrag slots (for embedding scoring),
+/// and keywords (for keyword overlap scoring).
+///
+/// These defaults match `microgpt-rs/domains.toml` so the two services
+/// share the same domain vocabulary out of the box.
+#[derive(Debug, Deserialize, Clone)]
+pub struct DomainMapping {
+    /// Unique domain name (e.g., "rust_code", "py2rs", "sudoku").
+    pub domain: String,
+    /// anyrag slot names used for embedding similarity scoring.
+    /// If empty, embedding scoring is skipped for this domain.
+    #[serde(default)]
+    pub slots: Vec<String>,
+    /// Keywords for keyword overlap scoring (case-insensitive).
+    #[serde(default)]
+    pub keywords: Vec<String>,
+}
+
+/// Default domain mappings matching `microgpt-rs/domains.toml`.
+///
+/// These are used when no `[[domain_mapping]]` entries are configured
+/// in `config.yml`. The keywords and slot assignments provide sensible
+/// defaults for code RAG workloads.
+fn default_domain_mappings() -> Vec<DomainMapping> {
+    vec![
+        DomainMapping {
+            domain: "sudoku".to_string(),
+            slots: vec!["tests".to_string()],
+            keywords: vec![
+                "sudoku".to_string(),
+                "puzzle".to_string(),
+                "grid".to_string(),
+                "9x9".to_string(),
+                "digit".to_string(),
+            ],
+        },
+        DomainMapping {
+            domain: "pathfinding".to_string(),
+            slots: vec!["tests".to_string()],
+            keywords: vec![
+                "path".to_string(),
+                "maze".to_string(),
+                "bear".to_string(),
+                "terrain".to_string(),
+                "tactical".to_string(),
+                "grid".to_string(),
+            ],
+        },
+        DomainMapping {
+            domain: "rust_code".to_string(),
+            slots: vec![
+                "apis".to_string(),
+                "types".to_string(),
+                "architecture".to_string(),
+            ],
+            keywords: vec![
+                "rust".to_string(),
+                "cargo".to_string(),
+                "axum".to_string(),
+                "tokio".to_string(),
+                "trait".to_string(),
+                "impl".to_string(),
+                "compile".to_string(),
+            ],
+        },
+        DomainMapping {
+            domain: "py2rs".to_string(),
+            slots: vec!["apis".to_string(), "types".to_string()],
+            keywords: vec![
+                "python".to_string(),
+                "rewrite".to_string(),
+                "fastapi".to_string(),
+                "flask".to_string(),
+                "translate".to_string(),
+            ],
+        },
+        DomainMapping {
+            domain: "general".to_string(),
+            slots: vec![],
+            keywords: vec![],
+        },
+    ]
+}
+
 /// A reusable configuration for a specific AI provider instance.
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)]
@@ -529,4 +616,8 @@ pub struct AppConfig {
     pub providers: HashMap<String, ProviderConfig>,
     /// A map of tasks, each specifying a provider and prompts.
     pub tasks: HashMap<String, TaskConfig>,
+    /// Domain mappings for the `/classify/domain` endpoint.
+    /// Defaults to the domains from `microgpt-rs/domains.toml` if not configured.
+    #[serde(default = "default_domain_mappings")]
+    pub domain_mappings: Vec<DomainMapping>,
 }

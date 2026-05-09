@@ -402,7 +402,7 @@ pub async fn reindex_slots_handler(
             ];
 
             conn.execute(
-                "INSERT OR IGNORE INTO slot_documents (id, slot_name, document_id, routed_by, routed_at, relevance_score) \
+                "INSERT INTO slot_documents (id, slot_name, document_id, routed_by, routed_at, relevance_score) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params,
             )

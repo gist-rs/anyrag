@@ -3,12 +3,74 @@
 //! POST /classify/domain — Embedding-based domain classification for prompt routing.
 //! Combines keyword overlap (30%) with vector embedding similarity (70%).
 //! Falls back to keyword-only when the AI provider is unavailable.
+//!
+//! ## microgpt-rs Integration (Plan 005, Task 7)
+//!
+//! This endpoint is designed to be called by `microgpt-rs` as the V2 embedding-based
+//! domain router, upgrading from the V1 `KeywordRouter` (Plan 023).
+//!
+//! ### How to configure `domains.toml`
+//!
+//! `microgpt-rs/domains.toml` domain names and keywords should match the
+//! `[[domain_mapping]]` entries in anyrag's `config.yml`. The default anyrag
+//! config already includes mappings for: `sudoku`, `pathfinding`, `rust_code`,
+//! `py2rs`, `general`. To add custom domains, add entries to `config.yml`:
+//!
+//! ```yaml
+//! domain_mappings:
+//!   - domain: "my_domain"
+//!     slots: ["apis"]
+//!     keywords: ["my_keyword", "custom"]
+//! ```
+//!
+//! ### How to call `/classify/domain` from microgpt-rs
+//!
+//! Send a POST request with the prompt and candidate domains:
+//!
+//! ```json
+//! POST http://localhost:9090/classify/domain
+//! Authorization: Bearer <jwt>
+//! {
+//!   "prompt": "Rewrite this FastAPI endpoint to Axum",
+//!   "candidate_domains": [
+//!     { "name": "rust_code", "keywords": ["rust", "cargo", "axum"], "slots": [] },
+//!     { "name": "py2rs", "keywords": ["python", "rewrite", "fastapi"], "slots": [] }
+//!   ]
+//! }
+//! ```
+//!
+//! Or omit `candidate_domains` to use the server's configured defaults:
+//!
+//! ```json
+//! { "prompt": "solve this sudoku puzzle" }
+//! ```
+//!
+//! Response:
+//!
+//! ```json
+//! {
+//!   "result": {
+//!     "domain": "py2rs",
+//!     "confidence": 0.85,
+//!     "matched_slots": ["apis", "types"],
+//!     "alternatives": [{ "domain": "rust_code", "confidence": 0.45 }]
+//!   }
+//! }
+//! ```
+//!
+//! ### Fallback behavior when anyrag is unavailable
+//!
+//! If anyrag is down or unreachable, microgpt-rs should fall back to its
+//! built-in `KeywordRouter` (Plan 023). The V1 keyword router is ~80% accurate
+//! and requires no external service. Set a short timeout (200ms) on the REST
+//! call to avoid blocking the prompt pipeline.
 
 use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
     providers::{ai::generate_embeddings_batch, db::storage::VectorSearch},
     router::{ClassificationResult, DomainDefinition, HybridClassifier, ScoredDomain},
+    types::DomainMapping,
 };
 use axum::{
     extract::{Query, State},
@@ -25,6 +87,8 @@ pub struct ClassifyDomainRequest {
     /// The prompt to classify.
     pub prompt: String,
     /// Candidate domain definitions with keywords and slot associations.
+    /// If empty, falls back to server-configured `domain_mappings` from config.
+    #[serde(default)]
     pub candidate_domains: Vec<DomainDefinition>,
 }
 
@@ -32,6 +96,7 @@ pub struct ClassifyDomainRequest {
 ///
 /// Combines keyword overlap (30%) with embedding similarity (70%).
 /// Falls back to keyword-only if the AI provider is unavailable.
+/// Falls back to config `domain_mappings` if no candidates provided.
 pub async fn classify_domain_handler(
     State(app_state): State<AppState>,
     user: AuthenticatedUser,
@@ -40,15 +105,19 @@ pub async fn classify_domain_handler(
 ) -> Result<Json<ApiResponse<ClassificationResult>>, AppError> {
     info!("Classifying domain for prompt: '{}'", payload.prompt);
 
-    if payload.candidate_domains.is_empty() {
+    // Resolve candidate domains: use request-provided, or fall back to config defaults.
+    let candidate_domains = resolve_candidate_domains(&payload, &app_state.config.domain_mappings);
+
+    if candidate_domains.is_empty() {
         return Err(AppError::Internal(anyhow::anyhow!(
-            "No candidate domains provided"
+            "No candidate domains provided and no domain_mappings configured"
         )));
     }
 
+    let used_defaults = payload.candidate_domains.is_empty();
+
     // Step 1: Compute keyword scores for all domains (pure, no I/O)
-    let mut scored_domains: Vec<ScoredDomain> = payload
-        .candidate_domains
+    let mut scored_domains: Vec<ScoredDomain> = candidate_domains
         .iter()
         .map(|domain| {
             let keyword_score = HybridClassifier::keyword_score(&payload.prompt, domain);
@@ -62,13 +131,8 @@ pub async fn classify_domain_handler(
         .collect();
 
     // Step 2: Try embedding scoring (may fail — falls back to keyword-only)
-    match compute_embedding_scores(
-        &app_state,
-        &payload.prompt,
-        &payload.candidate_domains,
-        &user.0.id,
-    )
-    .await
+    match compute_embedding_scores(&app_state, &payload.prompt, &candidate_domains, &user.0.id)
+        .await
     {
         Ok(emb_scores) => {
             for sd in &mut scored_domains {
@@ -96,10 +160,33 @@ pub async fn classify_domain_handler(
 
     let debug_info = json!({
         "prompt": payload.prompt,
-        "candidate_count": payload.candidate_domains.len(),
+        "candidate_count": candidate_domains.len(),
+        "used_defaults": used_defaults,
     });
 
     Ok(wrap_response(result, debug_params, Some(debug_info)))
+}
+
+/// Resolve candidate domains from the request, or fall back to config defaults.
+///
+/// If the request provides `candidate_domains`, use those directly.
+/// Otherwise, convert the server's `domain_mappings` config into `DomainDefinition`s.
+fn resolve_candidate_domains(
+    payload: &ClassifyDomainRequest,
+    config_mappings: &[DomainMapping],
+) -> Vec<DomainDefinition> {
+    if !payload.candidate_domains.is_empty() {
+        return payload.candidate_domains.clone();
+    }
+
+    config_mappings
+        .iter()
+        .map(|mapping| DomainDefinition {
+            name: mapping.domain.clone(),
+            keywords: mapping.keywords.clone(),
+            slots: mapping.slots.clone(),
+        })
+        .collect()
 }
 
 /// Compute embedding-based scores for each domain.
@@ -181,4 +268,65 @@ async fn compute_embedding_scores(
     }
 
     Ok(domain_scores)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_mappings() -> Vec<DomainMapping> {
+        vec![
+            DomainMapping {
+                domain: "sudoku".to_string(),
+                slots: vec!["tests".to_string()],
+                keywords: vec![
+                    "sudoku".to_string(),
+                    "puzzle".to_string(),
+                    "grid".to_string(),
+                ],
+            },
+            DomainMapping {
+                domain: "rust_code".to_string(),
+                slots: vec!["apis".to_string(), "types".to_string()],
+                keywords: vec!["rust".to_string(), "cargo".to_string(), "axum".to_string()],
+            },
+        ]
+    }
+
+    #[test]
+    fn test_resolve_uses_request_candidates_when_provided() {
+        let payload = ClassifyDomainRequest {
+            prompt: "test".to_string(),
+            candidate_domains: vec![DomainDefinition {
+                name: "custom".to_string(),
+                keywords: vec!["custom".to_string()],
+                slots: vec![],
+            }],
+        };
+        let result = resolve_candidate_domains(&payload, &sample_mappings());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "custom");
+    }
+
+    #[test]
+    fn test_resolve_falls_back_to_config_defaults() {
+        let payload = ClassifyDomainRequest {
+            prompt: "test".to_string(),
+            candidate_domains: vec![],
+        };
+        let result = resolve_candidate_domains(&payload, &sample_mappings());
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "sudoku");
+        assert_eq!(result[1].name, "rust_code");
+    }
+
+    #[test]
+    fn test_resolve_empty_when_no_config() {
+        let payload = ClassifyDomainRequest {
+            prompt: "test".to_string(),
+            candidate_domains: vec![],
+        };
+        let result = resolve_candidate_domains(&payload, &[]);
+        assert!(result.is_empty());
+    }
 }

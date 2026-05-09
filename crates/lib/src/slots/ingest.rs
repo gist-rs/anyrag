@@ -194,6 +194,19 @@ impl SlotIngester {
             .map_err(|e| PromptError::StorageConnection(e.to_string()))?;
 
         for doc in &slot_docs {
+            // Delete existing entry for this (slot_name, document_id) pair to avoid
+            // unique constraint violations — turso/libSQL does not support INSERT OR IGNORE.
+            let delete_params: Vec<turso::Value> = vec![
+                doc.slot_name.to_string().into(),
+                doc.document_id.clone().into(),
+            ];
+            conn.execute(
+                "DELETE FROM slot_documents WHERE slot_name = ?1 AND document_id = ?2",
+                delete_params,
+            )
+            .await
+            .map_err(|e| PromptError::StorageOperationFailed(e.to_string()))?;
+
             let params: Vec<turso::Value> = vec![
                 doc.id.clone().into(),
                 doc.slot_name.to_string().into(),
@@ -204,7 +217,7 @@ impl SlotIngester {
             ];
 
             conn.execute(
-                "INSERT OR IGNORE INTO slot_documents (id, slot_name, document_id, routed_by, routed_at, relevance_score) \
+                "INSERT INTO slot_documents (id, slot_name, document_id, routed_by, routed_at, relevance_score) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params,
             )
