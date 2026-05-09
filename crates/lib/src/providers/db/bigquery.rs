@@ -10,11 +10,9 @@ use gcp_bigquery_client::{
 };
 use serde_json::Value;
 use std::{
-    collections::HashMap,
     fmt::{self, Debug},
     sync::Arc,
 };
-use tokio::sync::RwLock;
 use tracing::debug;
 
 /// A provider for interacting with Google BigQuery.
@@ -22,7 +20,7 @@ use tracing::debug;
 pub struct BigQueryProvider {
     client: Client,
     project_id: String,
-    schema_cache: Arc<RwLock<HashMap<String, Arc<AnyragTableSchema>>>>,
+    schema_cache: papaya::HashMap<String, Arc<AnyragTableSchema>>,
 }
 
 impl BigQueryProvider {
@@ -34,7 +32,7 @@ impl BigQueryProvider {
         Ok(Self {
             client,
             project_id,
-            schema_cache: Arc::new(RwLock::new(HashMap::new())),
+            schema_cache: papaya::HashMap::new(),
         })
     }
 
@@ -131,8 +129,8 @@ impl Storage for BigQueryProvider {
         &self,
         table_name: &str,
     ) -> Result<Arc<AnyragTableSchema>, PromptError> {
-        if let Some(schema) = self.schema_cache.read().await.get(table_name) {
-            return Ok(schema.clone());
+        if let Some(schema) = self.schema_cache.pin().get(table_name).cloned() {
+            return Ok(schema);
         }
 
         let parts: Vec<&str> = table_name.split('.').collect();
@@ -158,8 +156,7 @@ impl Storage for BigQueryProvider {
         let schema_arc = Arc::new(anyrag_schema);
 
         self.schema_cache
-            .write()
-            .await
+            .pin()
             .insert(table_name.to_string(), schema_arc.clone());
 
         Ok(schema_arc)

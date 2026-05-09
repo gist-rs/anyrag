@@ -228,4 +228,4 @@ keywords = ["sudoku", "puzzle", "grid", "9x9"]
 |---------|------|-------------|
 | `microgpt-rs` | `.plans/023_prompt_router.md` | Consumer of this API. `KeywordRouter` is V1, this is V2. |
 | `anyrag` | `.plans/004_raven_routed_slots.md` | Slot system + KeywordRouter reused for classification |
-| `riir-validator-sdk` | N/A | Curators build validators; this classifies which one to use |
+| `riir-ai` (riir-validator-sdk) | N/A | Platform generates validators internally; this classifies which one to use |
