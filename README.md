@@ -21,6 +21,7 @@ A Rust-based platform for building a self-improving knowledge base from GitHub s
 - **Knowledge Graph** — In-memory or RocksDB-backed graph with time-based validity for fact retrieval.
 - **Text-to-SQL** — Translates natural language prompts into executable SQL queries for Google BigQuery or local SQLite.
 - **Code RAG** — Ingest and search code examples from public GitHub repositories.
+- **Raven Routed Slot Memory** — Deterministic slot-based memory for code RAG. Documents are routed to named slots (e.g., `architecture`, `types`, `apis`, `dependencies`, `tests`, `chatter`) via keyword matching. Frozen slots never decay; non-frozen slots decay over time following Raven Equation 18: `score(t) = score₀ × exp(-λΔt)`. Slot-filtered search reduces context pollution by retrieving only from active slots.
 - **Episodic Memory & Self-Improving Cycle** — Record translation episodes, verify compilation results, and drive a state machine (`Collecting` → `Synthesizing` → `Exporting` → `Training` → `Upgrading`) toward autonomous LoRA fine-tuning. Export FAQ as JSONL for training data.
 - **Identity & Ownership** — JWT + Google OAuth2 authentication with deterministic "Guest User" fallback. Search results are filtered by owner.
 - **Config-Driven** — YAML configuration with environment variable substitution, per-provider prompt templates, and `prompt.yml` overrides.
@@ -74,7 +75,7 @@ User Query
 ┌─────────────────────────────────────────────────────────┐
 │                      anyrag (lib)                        │
 │          (core business logic, orchestration)            │
-│  executor · search · rerank · curator · graph            │
+│  executor · search · rerank · curator · graph · slots    │
 │  prompts · providers · ingest · types · constants        │
 └────────┬───────────────────────────────────┬────────────┘
          │                                   │
@@ -140,7 +141,7 @@ full = ["bigquery", "graph_db", "rss", "firebase", "github", "web", "pdf", "shee
 
 | Crate | Description |
 |---|---|
-| **[`anyrag`](crates/lib)** | Core library — AI/DB providers, search pipeline, re-ranking, curator, knowledge graph, episodic memory, self-improving cycle, ingestion traits, prompt templates, types |
+| **[`anyrag`](crates/lib)** | Core library — AI/DB providers, search pipeline, re-ranking, curator, knowledge graph, episodic memory, self-improving cycle, Raven routed slot memory, ingestion traits, prompt templates, types |
 | **[`anyrag-server`](crates/server)** | Axum web server — REST API with feature-flagged routes, JWT/OAuth2 auth, episodes & cycle endpoints, config-driven prompt management |
 | **[`anyrag-cli`](crates/cli)** | CLI tool — `login`, `dump firebase`, `dump github`, `process`, `list`, `count` commands |
 | **[`anyrag-github`](crates/github)** | GitHub ingestion — clone repos, extract code examples/tests/src, version-aware search with embeddings |
@@ -174,6 +175,7 @@ anyrag/
 │   │       ├── graph/          # Knowledge graph (indradb)
 │   │       ├── prompts/        # System/user prompt templates
 │   │       ├── providers/      # AI + DB provider abstractions
+│   │       ├── slots/          # Raven Routed Slot Memory (types, router, decay, search, ingest, seeder)
 │   │       ├── ingest/         # Ingestion traits, episodic memory, knowledge, embeddings
 │   │       └── types.rs        # Shared data structures
 │   ├── server/             # Axum REST API server
@@ -275,6 +277,35 @@ All JSON responses follow a consistent `result` object structure. Append `?debug
 | `POST` | `/episodes/{id}/verify` | Verify compilation result for an episode |
 | `GET`  | `/cycle/status` | Get current cycle state machine status |
 | `POST` | `/cycle/trigger` | Trigger a cycle tick to potentially advance state |
+
+### Slot Management & Routed Search
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/slots` | List all slots with document counts (auto-seeds defaults if empty) |
+| `POST` | `/slots` | Create a custom slot with keywords and decay rate |
+| `POST` | `/search/slots` | Slot-filtered search with decay scoring |
+| `GET` | `/slots/{name}/documents` | List documents in a slot with decayed scores |
+| `DELETE` | `/slots/{name}/documents/{doc_id}` | Remove a document from a slot |
+| `POST` | `/slots/reindex` | Re-route all documents through keyword router |
+
+**Default Slots (auto-seeded):**
+
+| Slot | Frozen | Decay Rate (λ) | Purpose |
+|---|---|---|---|
+| `architecture` | ✅ Yes | 0.0 | System design, module structure, high-level patterns |
+| `types` | No | 0.05 | Type definitions, structs, enums, type aliases |
+| `apis` | No | 0.05 | Public API surfaces, function signatures, trait definitions |
+| `dependencies` | No | 0.1 | Crate dependencies, version constraints, feature flags |
+| `tests` | No | 0.1 | Test files, test utilities, benchmark harnesses |
+| `chatter` | No | 0.5 | Conversational context, chat logs, informal notes |
+
+**Example — Slot-filtered search:**
+```sh
+curl -X POST http://localhost:3000/search/slots \
+  -H 'Content-Type: application/json' \
+  -d '{"active_slots":["apis","types"],"include_frozen":true,"limit":10}'
+```
 
 ### Auth
 
