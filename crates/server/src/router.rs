@@ -33,6 +33,8 @@ pub fn create_router(app_state: AppState) -> Router {
         )
         .route("/knowledge/export", get(handlers::knowledge_export_handler))
         // --- Slot Management & Routed Search Routes ---
+        // --- Domain Classification Route ---
+        .route("/classify/domain", post(handlers::classify_domain_handler))
         .route("/search/slots", post(handlers::slot_search_handler))
         .route("/slots", get(handlers::list_slots_handler))
         .route("/slots", post(handlers::create_slot_handler))

@@ -120,17 +120,17 @@ keywords = ["sudoku", "puzzle", "grid", "9x9"]
 
 ### Phase 1: Types & Trait
 
-- [ ] **Task 1: Add classification types** (`crates/lib/src/router/types.rs`)
+- [x] **Task 1: Add classification types** (`crates/lib/src/router/types.rs`)
   - `DomainDefinition`, `ClassificationResult`, `DomainScore`, `ClassifyError`
   - Shared between classifier impl and API handler
 
-- [ ] **Task 2: Define `DomainClassifier` trait** (`crates/lib/src/router/classifier.rs`)
+- [x] **Task 2: Define `DomainClassifier` trait** (`crates/lib/src/router/classifier.rs`)
   - Async trait with `classify()` method
   - `Send + Sync` for use in axum handlers
 
 ### Phase 2: Keyword + Embedding Hybrid Classifier
 
-- [ ] **Task 3: Implement `HybridClassifier`** (`crates/lib/src/router/hybrid.rs`)
+- [x] **Task 3: Implement `HybridClassifier`** (`crates/lib/src/router/hybrid.rs`)
   - Combines keyword overlap (from Plan 004's `KeywordRouter`) with embedding similarity
   - Keyword scoring: reuse `KeywordRouter` logic
   - Embedding scoring: use existing vector search against slot documents
@@ -139,10 +139,10 @@ keywords = ["sudoku", "puzzle", "grid", "9x9"]
 
 ### Phase 3: REST API Endpoint
 
-- [ ] **Task 4: Add `POST /classify/domain` endpoint** (`crates/server/src/handlers/classify.rs`)
+- [x] **Task 4: Add `POST /classify/domain` endpoint** (`crates/server/src/handlers/classify.rs`)
   - Request: `{ prompt, candidate_domains }`
   - Response: `{ domain, confidence, matched_slots, alternatives }`
-  - Calls `HybridClassifier::classify()` through state
+  - Calls `HybridClassifier::classify_from_scores()` — handler does I/O (embeddings, vector search)
   - Error handling: provider unavailable → fall back to keyword-only
 
 - [ ] **Task 5: Add domain mapping config** (`crates/server/src/config.rs` or config file)

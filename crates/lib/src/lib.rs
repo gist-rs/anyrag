@@ -16,6 +16,7 @@ pub mod ingest;
 pub mod prompts;
 pub mod providers;
 pub mod rerank;
+pub mod router;
 pub mod search;
 pub mod slots;
 pub mod types;
