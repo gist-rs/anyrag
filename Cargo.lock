@@ -1375,6 +1375,7 @@ dependencies = [
  "anyrag-github",
  "anyrag-markdown",
  "assert_cmd",
+ "async-trait",
  "clap",
  "hyper 1.7.0",
  "hyper-util",

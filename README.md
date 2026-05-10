@@ -382,6 +382,9 @@ cargo run --bin cli -- list my_table --project-id my-project
 
 # Count rows
 cargo run --bin cli -- count my_table --project-id my-project
+
+# Export training data as JSONL (for LoRA fine-tuning)
+cargo run --bin cli -- export --max-episodes 1000 --output output/training.jsonl
 ```
 
 ### GoF (Project-Aware RAG CLI)
