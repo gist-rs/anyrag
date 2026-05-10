@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
 
+// Re-export chrono types used in episodic memory
+pub use chrono::NaiveDateTime;
+
 /// A client for executing natural language prompts against a storage provider.
 ///
 /// This client orchestrates the process of converting a prompt into a SQL query
@@ -201,6 +204,23 @@ impl PromptClientBuilder {
     }
 }
 
+/// Indicates the origin type of a search result.
+/// Used for weighted Reciprocal Rank Fusion to boost or penalize results
+/// based on their source during RIIR (Rewrite It In Rust) tasks.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSourceType {
+    /// Legacy untagged results.
+    #[default]
+    Unknown,
+    /// Code examples from `/search/examples` or code ingestion.
+    Code,
+    /// Documentation from `/search/knowledge` (web, PDF, text).
+    Documentation,
+    /// Structured YAML FAQ data.
+    Faq,
+}
+
 /// A search result from any search provider (vector, keyword, etc.).
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SearchResult {
@@ -209,6 +229,9 @@ pub struct SearchResult {
     pub description: String,
     /// A relevance score where higher is better. For vector search, this is the cosine similarity (1.0 is a perfect match). For keyword search, this is a placeholder 0.0.
     pub score: f64,
+    /// The source type of this result, used for weighted fusion.
+    #[serde(default)]
+    pub source_type: SearchSourceType,
 }
 
 impl Rerankable for SearchResult {
@@ -223,6 +246,37 @@ impl Rerankable for SearchResult {
     fn get_description(&self) -> &str {
         &self.description
     }
+}
+
+/// Query context for source-type weighting in RIIR-aware search.
+/// Determines how code vs documentation results are weighted during fusion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum QueryContext {
+    /// Code generation: code_boost=10, doc_penalty=0.5
+    CodeGeneration,
+    /// Balanced: code_boost=1, doc_penalty=1 (equal treatment)
+    #[default]
+    Explanation,
+    /// Debugging: code_boost=5, doc_penalty=0.8
+    Debugging,
+}
+
+/// Concept tags for Rust-specific query routing (concept sharding).
+/// Queries are classified by concept and routed to filtered vector search.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RustConcept {
+    Lifetimes,
+    Macros,
+    Async,
+    Traits,
+    Generics,
+    ErrorHandling,
+    Ownership,
+    FFI,
+    Testing,
+    Concurrency,
 }
 
 /// Represents the data type of a field in a table schema.
@@ -309,6 +363,57 @@ impl From<HttpRequestPromptOptions> for ExecutePromptOptions {
     }
 }
 
+// --- Episodic Memory Types (Plan 003: Self-Improving Cycle) ---
+
+/// Result of compiling generated Rust code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CompilationResult {
+    Success {
+        warnings: u32,
+        clippy_lints: u32,
+    },
+    Failed {
+        error_message: String,
+        error_code: Option<String>,
+        suggestion: Option<String>,
+    },
+    /// Generated but not yet verified by compilation.
+    NotCompiled,
+}
+
+/// A single RIIR (Rewrite It In Rust) translation episode.
+/// Tracks the full lifecycle: source → retrieval → generation → compilation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TranslationEpisode {
+    /// Unique identifier (UUID v7).
+    pub id: String,
+    /// Source language (e.g., "python", "typescript").
+    pub source_language: String,
+    /// Original input code.
+    pub source_code: String,
+    /// LLM-generated Rust code.
+    pub generated_rust: String,
+    /// What RAG retrieved for context.
+    pub retrieved_context: Vec<SearchResult>,
+    /// Embedding vector at generation time.
+    pub hidden_state: Option<Vec<f64>>,
+    /// Result of compiling the generated Rust code.
+    pub compilation_result: CompilationResult,
+    /// ISO 8601 timestamp when this episode was created.
+    pub created_at: String,
+}
+
+/// Statistics for episodic memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodicStats {
+    pub total_episodes: u64,
+    pub successful: u64,
+    pub failed: u64,
+    pub success_rate: f64,
+    pub top_error_codes: Vec<(String, u64)>,
+}
+
 // --- Configuration Structs ---
 // These structs define the shape of the application's configuration (`config.yml`)
 // and are now centralized in the library crate to be shared with any consumer.
@@ -339,6 +444,93 @@ pub struct EmbeddingConfig {
     pub api_url: String,
     pub model_name: String,
     pub api_key: Option<String>,
+}
+
+/// Domain mapping for the `/classify/domain` endpoint.
+///
+/// Defines how anyrag maps prompt classification to microgpt-rs domains.
+/// Each mapping has a domain name, associated anyrag slots (for embedding scoring),
+/// and keywords (for keyword overlap scoring).
+///
+/// These defaults match `microgpt-rs/domains.toml` so the two services
+/// share the same domain vocabulary out of the box.
+#[derive(Debug, Deserialize, Clone)]
+pub struct DomainMapping {
+    /// Unique domain name (e.g., "rust_code", "py2rs", "sudoku").
+    pub domain: String,
+    /// anyrag slot names used for embedding similarity scoring.
+    /// If empty, embedding scoring is skipped for this domain.
+    #[serde(default)]
+    pub slots: Vec<String>,
+    /// Keywords for keyword overlap scoring (case-insensitive).
+    #[serde(default)]
+    pub keywords: Vec<String>,
+}
+
+/// Default domain mappings matching `microgpt-rs/domains.toml`.
+///
+/// These are used when no `[[domain_mapping]]` entries are configured
+/// in `config.yml`. The keywords and slot assignments provide sensible
+/// defaults for code RAG workloads.
+fn default_domain_mappings() -> Vec<DomainMapping> {
+    vec![
+        DomainMapping {
+            domain: "sudoku".to_string(),
+            slots: vec!["tests".to_string()],
+            keywords: vec![
+                "sudoku".to_string(),
+                "puzzle".to_string(),
+                "grid".to_string(),
+                "9x9".to_string(),
+                "digit".to_string(),
+            ],
+        },
+        DomainMapping {
+            domain: "pathfinding".to_string(),
+            slots: vec!["tests".to_string()],
+            keywords: vec![
+                "path".to_string(),
+                "maze".to_string(),
+                "bear".to_string(),
+                "terrain".to_string(),
+                "tactical".to_string(),
+                "grid".to_string(),
+            ],
+        },
+        DomainMapping {
+            domain: "rust_code".to_string(),
+            slots: vec![
+                "apis".to_string(),
+                "types".to_string(),
+                "architecture".to_string(),
+            ],
+            keywords: vec![
+                "rust".to_string(),
+                "cargo".to_string(),
+                "axum".to_string(),
+                "tokio".to_string(),
+                "trait".to_string(),
+                "impl".to_string(),
+                "compile".to_string(),
+            ],
+        },
+        DomainMapping {
+            domain: "py2rs".to_string(),
+            slots: vec!["apis".to_string(), "types".to_string()],
+            keywords: vec![
+                "python".to_string(),
+                "rewrite".to_string(),
+                "fastapi".to_string(),
+                "flask".to_string(),
+                "translate".to_string(),
+            ],
+        },
+        DomainMapping {
+            domain: "general".to_string(),
+            slots: vec![],
+            keywords: vec![],
+        },
+    ]
 }
 
 /// A reusable configuration for a specific AI provider instance.
@@ -424,4 +616,8 @@ pub struct AppConfig {
     pub providers: HashMap<String, ProviderConfig>,
     /// A map of tasks, each specifying a provider and prompts.
     pub tasks: HashMap<String, TaskConfig>,
+    /// Domain mappings for the `/classify/domain` endpoint.
+    /// Defaults to the domains from `microgpt-rs/domains.toml` if not configured.
+    #[serde(default = "default_domain_mappings")]
+    pub domain_mappings: Vec<DomainMapping>,
 }

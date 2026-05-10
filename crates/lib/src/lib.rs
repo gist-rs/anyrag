@@ -11,20 +11,25 @@ pub mod executor;
 
 pub mod constants;
 pub mod curator;
+pub mod cycle;
 pub mod ingest;
 pub mod prompts;
 pub mod providers;
 pub mod rerank;
+pub mod router;
 pub mod search;
+pub mod slots;
 pub mod types;
 
 pub use errors::PromptError;
 pub use executor::AnyragExecutor;
-pub use rerank::{RerankError, Rerankable};
+pub use rerank::{RerankError, Rerankable, RrfWeights};
 pub use search::{SearchError, SearchMode};
+pub use slots::{KeywordRouter, SlotIngester, SlotName};
 pub use types::{
-    ExecutePromptOptions, HttpRequestPromptOptions, PromptClient, PromptClientBuilder,
-    PromptResult, SearchResult,
+    CompilationResult, EpisodicStats, ExecutePromptOptions, HttpRequestPromptOptions, PromptClient,
+    PromptClientBuilder, PromptResult, QueryContext, RustConcept, SearchResult, SearchSourceType,
+    TranslationEpisode,
 };
 
 use crate::prompts::{

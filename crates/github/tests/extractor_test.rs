@@ -564,3 +564,92 @@ fn test_rstest_simple() {
         "rstest test should include parameters in handle"
     );
 }
+
+#[test]
+fn test_anchor_markers_stripped_from_readme() {
+    // Arrange
+    let temp_dir = tempdir().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path();
+    let readme_path = repo_path.join("README.md");
+
+    let readme_content = r#"# Project
+
+```rust
+// ANCHOR: here
+fn main() {
+    // ANCHOR_END: here
+    println!("hello");
+    // --snip--
+}
+```
+"#;
+    create_test_file(&readme_path, readme_content);
+
+    // Act
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
+
+    // Assert
+    assert_eq!(examples.len(), 1, "Expected exactly one code block.");
+    let code = &examples[0].content;
+    assert!(
+        !code.contains("ANCHOR:"),
+        "ANCHOR markers should be stripped, got: {code}"
+    );
+    assert!(
+        !code.contains("ANCHOR_END:"),
+        "ANCHOR_END markers should be stripped, got: {code}"
+    );
+    assert!(
+        !code.contains("--snip--"),
+        "--snip-- markers should be stripped, got: {code}"
+    );
+    assert!(
+        code.contains("fn main()"),
+        "Actual code should be preserved, got: {code}"
+    );
+    assert!(
+        code.contains("println!"),
+        "Actual code should be preserved, got: {code}"
+    );
+}
+
+#[test]
+fn test_anchor_markers_stripped_from_doc_comments() {
+    // Arrange
+    let temp_dir = tempdir().expect("Failed to create temp dir");
+    let repo_path = temp_dir.path();
+    let src_dir = repo_path.join("src");
+    std::fs::create_dir_all(&src_dir).expect("Failed to create src dir");
+
+    let lib_path = src_dir.join("lib.rs");
+    let lib_content = r#"/// Example:
+///
+/// ```rust
+/// // ANCHOR: example
+/// let x = 42;
+/// // ANCHOR_END: example
+/// ```
+pub fn answer() -> i32 { 42 }
+"#;
+    create_test_file(&lib_path, lib_content);
+
+    // Act
+    let examples = Extractor::extract(repo_path, "v1.0.0", false, &None, &[]).unwrap();
+
+    // Assert
+    let doc_example = examples
+        .iter()
+        .find(|e| e.source_type == ExampleSourceType::DocComment)
+        .expect("Expected a doc comment example");
+
+    assert!(
+        !doc_example.content.contains("ANCHOR:"),
+        "ANCHOR markers should be stripped from doc comments, got: {}",
+        doc_example.content
+    );
+    assert!(
+        doc_example.content.contains("let x = 42;"),
+        "Actual code should be preserved, got: {}",
+        doc_example.content
+    );
+}

@@ -178,38 +178,38 @@ None — all changes use existing dependencies (SQLite, existing LLM provider).
 ## Tasks
 
 ### Phase 1: Source-Type Tagging
-- [ ] 1.1 Add `SearchSourceType` enum to `crates/lib/src/types.rs`
-- [ ] 1.2 Add `source_type` field to `SearchResult`
-- [ ] 1.3 Tag results from `/search/examples` as `Code`
-- [ ] 1.4 Tag results from `/search/knowledge` as `Documentation` or `Faq`
-- [ ] 1.5 Update all search functions to populate `source_type`
-- [ ] 1.6 Add test: source type correctly populated for each search type
+- [x] 1.1 Add `SearchSourceType` enum to `crates/lib/src/types.rs`
+- [x] 1.2 Add `source_type` field to `SearchResult`
+- [x] 1.3 Tag results from `/search/examples` as `Code`
+- [x] 1.4 Tag results from `/search/knowledge` as `Documentation` or `Faq`
+- [x] 1.5 Update all search functions to populate `source_type`
+- [x] 1.6 Add test: source type correctly populated for each search type
 
 ### Phase 2: Weighted RRF
-- [ ] 2.1 Add `RrfWeights` struct to `crates/lib/src/rerank.rs`
-- [ ] 2.2 Add `reciprocal_rank_fusion_weighted()` function
-- [ ] 2.3 Replace hardcoded `100.0` bias with `RrfWeights::default()`
-- [ ] 2.4 Add `QueryContext` enum to server types
-- [ ] 2.5 Update `/search/hybrid` and `/search/knowledge` handlers to accept `context` param
-- [ ] 2.6 Add test: `CodeGeneration` context boosts code results above doc results
-- [ ] 2.7 Add test: `Explanation` context treats all sources equally
+- [x] 2.1 Add `RrfWeights` struct to `crates/lib/src/rerank.rs`
+- [x] 2.2 Add `reciprocal_rank_fusion_weighted()` function
+- [x] 2.3 Replace hardcoded `100.0` bias with `RrfWeights::default()`
+- [x] 2.4 Add `QueryContext` enum to server types
+- [x] 2.5 Update `/search/hybrid` and `/search/knowledge` handlers to accept `context` param
+- [x] 2.6 Add test: `CodeGeneration` context boosts code results above doc results
+- [x] 2.7 Add test: `Explanation` context treats all sources equally
 
 ### Phase 3: Concept Classification
-- [ ] 3.1 Add `RustConcept` enum to `crates/lib/src/types.rs`
-- [ ] 3.2 Add `classify_concepts()` to `crates/lib/src/search.rs`
-- [ ] 3.3 Add concept tagging to ingestion pipeline (`tag_rust_concepts`)
-- [ ] 3.4 Store concept tags in document metadata JSON
-- [ ] 3.5 Add concept-filtered vector search
-- [ ] 3.6 Add test: concept classification from query entities
-- [ ] 3.7 Add test: concept filtering returns only matching documents
+- [x] 3.1 Add `RustConcept` enum to `crates/lib/src/types.rs`
+- [x] 3.2 Add `classify_concepts()` to `crates/lib/src/search.rs`
+- [x] 3.3 Add concept tagging to ingestion pipeline (`tag_rust_concepts`)
+- [x] 3.4 Store concept tags in document metadata JSON
+- [x] 3.5 Add concept-filtered vector search
+- [x] 3.6 Add test: concept classification from query entities
+- [x] 3.7 Add test: concept filtering returns only matching documents
 
 ### Phase 4: Integration & Validation
-- [ ] 4.1 Update `/search/knowledge` to use concept classification + weighted RRF
-- [ ] 4.2 Update `/search/examples` to tag results as `Code` source type
-- [ ] 4.3 Add CLI flag: `--context code_generation` for gof search
-- [ ] 4.4 Manual test: RIIR query returns mostly code results, not prose
-- [ ] 4.5 Run `cargo test --workspace`
-- [ ] 4.6 Run `cargo clippy --workspace`
+- [x] 4.1 Update `/search/knowledge` to use concept classification + weighted RRF
+- [x] 4.2 Update `/search/examples` to tag results as `Code` source type
+- [x] 4.3 Add CLI flag: `--context code_generation` for gof search
+- [x] 4.4 Manual test: RIIR query returns mostly code results, not prose
+- [x] 4.5 Run `cargo test --workspace`
+- [x] 4.6 Run `cargo clippy --workspace`
 
 ## Key Risks & Mitigations
 
@@ -243,4 +243,4 @@ None — all changes use existing dependencies (SQLite, existing LLM provider).
 
 - `.research/00_Neuro-Symbolic LLM Architecture.md` — §Context Pollution, §Concept Sharding
 - `.research/01_Advanced Neuro-Symbolic Rust Translation.md` — §Latency Mitigation via anyrag
-- `mini-dllm/.plans/009_rest_speculative_decoding.md` — REST bridge consumes these APIs
+- `microgpt-rs/.plans/009_rest_speculative_decoding.md` — REST bridge consumes these APIs

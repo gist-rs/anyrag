@@ -17,7 +17,7 @@ use anyrag::{
 use anyrag_github::ingest::storage::StorageManager;
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, RwLock},
 };
 
 /// The shared application state, accessible from all request handlers.
@@ -37,6 +37,8 @@ pub struct AppState {
     pub executor: Arc<AnyragExecutor>,
     /// Manages databases for GitHub example ingestion and search.
     pub storage_manager: Arc<StorageManager>,
+    /// Orchestrator for the self-improving 32-day cycle (RIIR pipeline).
+    pub cycle: Arc<Mutex<anyrag::cycle::SelfImprovingCycle>>,
 }
 
 /// Builds the shared application state from the configuration.
@@ -155,5 +157,8 @@ pub async fn build_app_state(config: AppConfig) -> anyhow::Result<AppState> {
         knowledge_graph: Arc::new(RwLock::new(MemoryKnowledgeGraph::new_memory())),
         executor: Arc::new(executor),
         storage_manager: storage_manager_arc,
+        cycle: Arc::new(Mutex::new(anyrag::cycle::SelfImprovingCycle::new(
+            Default::default(),
+        ))),
     })
 }

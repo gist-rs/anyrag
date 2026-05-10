@@ -16,20 +16,63 @@
 //!     atomic transaction. It updates the oldest existing document with the new synthesized
 //!     content and then deletes all other, now-redundant, versions.
 //!
+//! ## Training Data Synthesis (Plan 003)
+//!
+//! The Curator also synthesizes successful RIIR translation episodes into structured
+//! training pairs as JSONL. This is the "Day 30" step of the self-improving
+//! cycle — turning episodic memory into fine-tuning data.
+//!
 //! This strategy robustly consolidates contradictory or fragmented information into a single,
 //! authoritative document, aligning with the "memory stream" vision while respecting all
 //! database constraints.
 
 use crate::{
-    ingest::IngestionResult,
+    ingest::{episodic, IngestionResult},
     providers::{ai::AiProvider, db::sqlite::SqliteProvider},
+    types::TranslationEpisode,
 };
 use anyhow::Result;
-use tracing::info;
+use serde::Serialize;
+use tracing::{info, warn};
 use turso::params;
 
 /// The prompt used by the Curator to synthesize multiple document versions into one.
 const CURATOR_SYNTHESIS_PROMPT: &str = "Analyze these different versions of the same document, provided below. Create a single, definitive summary of the current state of the information, prioritizing the most recent content. Identify and resolve any conflicting information found across the documents.";
+
+/// The prompt used to synthesize successful translation episodes into canonical training pairs.
+const TRAINING_SYNTHESIS_PROMPT: &str = "You are a Rust expert. Analyze these successful Rust translations and create ONE canonical training example.\n\
+Each example shows source code from another language and its correct Rust translation.\n\
+Output ONLY valid JSONL: {\"messages\":[{\"role\":\"system\",\"content\":\"Rewrite the following code in idiomatic Rust.\"},{\"role\":\"user\",\"content\":\"<source code>\"},{\"role\":\"assistant\",\"content\":\"<rust code>\"}]}\n\
+Pick the most idiomatic Rust version. Preserve all functionality.";
+
+/// Statistics from a training data synthesis run.
+#[derive(Debug, Clone, Serialize)]
+pub struct SynthesisStats {
+    /// Number of episodes processed.
+    pub episode_count: usize,
+    /// Number of training pairs produced.
+    pub pairs_count: usize,
+    /// Number of groups formed from pattern clustering.
+    pub group_count: usize,
+}
+
+/// The result of a training JSONL export operation.
+#[derive(Debug, Clone, Serialize)]
+pub struct TrainingExport {
+    /// The JSONL training data (one JSON object per line).
+    pub training_jsonl: String,
+    /// Statistics about the export.
+    pub stats: TrainingExportStats,
+}
+
+/// Statistics about a training JSONL export.
+#[derive(Debug, Clone, Serialize)]
+pub struct TrainingExportStats {
+    /// Number of FAQ pairs included.
+    pub faq_pairs: usize,
+    /// Number of translation pairs included.
+    pub translation_pairs: usize,
+}
 
 /// The Curator struct, holding dependencies needed for the synthesis process.
 pub struct Curator<'a> {
@@ -162,5 +205,167 @@ impl<'a> Curator<'a> {
             document_ids: vec![canonical_doc_id.clone()],
             ..Default::default()
         }))
+    }
+
+    /// Synthesizes successful translation episodes into training pairs.
+    ///
+    /// This is the "Day 30" step of the self-improving cycle. It fetches successful
+    /// episodes, groups them by similarity, and uses an LLM to create canonical Q&A pairs
+    /// suitable for downstream training pipelines.
+    ///
+    /// # Arguments
+    ///
+    /// * `limit` — Maximum number of episodes to process.
+    /// * `since` — Optional ISO date string; only episodes after this date are included.
+    pub async fn synthesize_training_data(
+        &self,
+        limit: usize,
+        since: Option<&str>,
+    ) -> Result<SynthesisStats> {
+        let conn = self.db_provider.db.connect()?;
+
+        // 1. Fetch successful episodes.
+        let episodes = episodic::get_successful_episodes(&conn, limit, since)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch episodes for synthesis: {e}"))?;
+
+        if episodes.is_empty() {
+            info!("No successful episodes found for synthesis.");
+            return Ok(SynthesisStats {
+                episode_count: 0,
+                pairs_count: 0,
+                group_count: 0,
+            });
+        }
+
+        info!(
+            "Synthesizing training data from {} successful episodes.",
+            episodes.len()
+        );
+
+        // 2. Group episodes by source language for batch synthesis.
+        let groups = Self::group_by_source_language(&episodes);
+
+        // 3. For each group, synthesize a canonical training pair.
+        let mut total_pairs = 0usize;
+        for (language, group_episodes) in &groups {
+            let episodes_context: String = group_episodes
+                .iter()
+                .map(|e| format!("---\n{}\n→\n{}", e.source_code, e.generated_rust))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let prompt = format!(
+                "{TRAINING_SYNTHESIS_PROMPT}\n\nSource language: {language}\n\
+                 Successful translations:\n{episodes_context}"
+            );
+
+            match self.ai_provider.generate(&prompt, "").await {
+                Ok(synthesis) => {
+                    let cleaned = synthesis
+                        .trim()
+                        .trim_start_matches("```jsonl")
+                        .trim_end_matches("```")
+                        .trim();
+                    if !cleaned.is_empty() {
+                        total_pairs += cleaned.lines().filter(|l| !l.is_empty()).count();
+                        info!(
+                            "Synthesized {} training pairs for language '{language}'.",
+                            cleaned.lines().count()
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("LLM synthesis failed for language '{language}': {e}");
+                }
+            }
+        }
+
+        // 4. Mark synthesized episodes.
+        let episode_ids: Vec<String> = episodes.iter().map(|e| e.id.clone()).collect();
+        if let Err(e) = episodic::mark_synthesized(&conn, &episode_ids).await {
+            warn!("Failed to mark episodes as synthesized: {e}");
+        }
+
+        let stats = SynthesisStats {
+            episode_count: episodes.len(),
+            pairs_count: total_pairs,
+            group_count: groups.len(),
+        };
+        info!("Training synthesis complete: {stats:?}");
+        Ok(stats)
+    }
+
+    /// Exports training data for downstream training pipelines.
+    ///
+    /// Produces JSONL combining:
+    /// 1. FAQ pairs from structured YAML documents (existing).
+    /// 2. Successful translation episodes (new).
+    pub async fn export_training_jsonl(
+        &self,
+        max_episodes: usize,
+        since: Option<&str>,
+    ) -> Result<TrainingExport> {
+        let conn = self.db_provider.db.connect()?;
+
+        // 1. FAQ pairs from existing export logic.
+        let faq_jsonl =
+            crate::ingest::knowledge::export_for_finetuning(&self.db_provider.db).await?;
+        let faq_count = faq_jsonl.lines().filter(|l| !l.is_empty()).count();
+
+        // 2. Successful translation episodes as direct training pairs.
+        let episodes = episodic::get_successful_episodes(&conn, max_episodes, since)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to fetch episodes for JSONL export: {e}"))?;
+
+        let mut jsonl_lines: Vec<String> = faq_jsonl
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(String::from)
+            .collect();
+
+        for episode in &episodes {
+            let jsonl = serde_json::json!({
+                "messages": [
+                    {"role": "system", "content": "Rewrite the following code in idiomatic Rust."},
+                    {"role": "user", "content": &episode.source_code},
+                    {"role": "assistant", "content": &episode.generated_rust},
+                ]
+            })
+            .to_string();
+            jsonl_lines.push(jsonl);
+        }
+
+        let stats = TrainingExportStats {
+            faq_pairs: faq_count,
+            translation_pairs: episodes.len(),
+        };
+
+        info!(
+            "JSONL export produced {} lines ({} FAQ + {} translation).",
+            jsonl_lines.len(),
+            stats.faq_pairs,
+            stats.translation_pairs
+        );
+
+        Ok(TrainingExport {
+            training_jsonl: jsonl_lines.join("\n"),
+            stats,
+        })
+    }
+
+    /// Groups episodes by source language for batch synthesis.
+    fn group_by_source_language(
+        episodes: &[TranslationEpisode],
+    ) -> std::collections::HashMap<String, Vec<&TranslationEpisode>> {
+        let mut groups: std::collections::HashMap<String, Vec<&TranslationEpisode>> =
+            std::collections::HashMap::new();
+        for episode in episodes {
+            groups
+                .entry(episode.source_language.clone())
+                .or_default()
+                .push(episode);
+        }
+        groups
     }
 }

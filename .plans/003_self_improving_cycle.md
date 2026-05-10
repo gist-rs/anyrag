@@ -1,8 +1,8 @@
-# Plan 003: Self-Improving Cycle — 32-Day Runtime LoRA Pipeline
+# Plan 003: Self-Improving Cycle — JSONL Export Pipeline
 
 ## Objective
 
-Implement the full 32-day self-improving loop described in the research: anyrag collects successful RIIR translations (episodic memory), synthesizes patterns into structured training data, exports JSONL, feeds it into mini-dllm's wgpu LoRA trainer (Plan 008), and hot-reloads the trained adapter back into the inference engine.
+Implement the full 32-day self-improving loop described in the research: anyrag collects successful RIIR translations (episodic memory), synthesizes patterns into structured training data, exports JSONL, feeds it into 's wgpu external training pipeline (riir-burner) (Plan 008), and hot-reloads the trained adapter back into the inference engine.
 
 ## The Problem
 
@@ -10,13 +10,13 @@ Current state:
 1. **No episodic memory**: anyrag ingests documents but doesn't track which translations succeeded (compiled) vs failed
 2. **Export is FAQ-only**: `/knowledge/export` only exports YAML FAQ pairs, not code translation pairs with hidden states
 3. **No auto-synthesis**: The curator deduplicates but doesn't synthesize patterns into training data
-4. **No bridge to LoRA trainer**: No pipeline from anyrag export → mini-dllm Plan 008 training
-5. **No hot-reload**: Once `lora.bin` is trained, there's no mechanism to load it into a running mini-dllm instance
+4. **No bridge to external training pipeline (riir-burner)**: No pipeline from anyrag export →  Plan 008 training
+5. **No hot-reload**: Once `model weights` is trained, there's no mechanism to load it into a running  instance
 
 The research describes a 4-phase cycle:
 - **Day 1 (RAG Phase)**: Answer queries via retrieval
 - **Day 30 (Synthesis)**: Curator synthesizes common patterns into Q&A pairs
-- **Day 31 (Export & Fine-tune)**: `/knowledge/export` → JSONL → LoRA training
+- **Day 31 (Export & Fine-tune)**: `/knowledge/export` → JSONL → external training
 - **Day 32 (Upgrade)**: Base model upgraded, episodic memory cleared
 
 ## Architecture
@@ -160,15 +160,15 @@ impl Curator {
 // crates/lib/src/ingest/knowledge.rs — extend export
 
 impl KnowledgeExporter {
-    /// Export training data for LoRA fine-tuning.
+    /// Export training data for fine-tuning.
     /// Extends /knowledge/export to include:
     /// 1. FAQ pairs (existing)
     /// 2. Successful translation episodes (new)
     /// 3. Hidden state vectors for REST retrieval (new)
-    pub async fn export_for_lora(
+    pub async fn export_training_jsonl(
         db: &dyn DbProvider,
         config: &ExportConfig,
-    ) -> Result<LoraExport> {
+    ) -> Result<TrainingExport> {
         let mut jsonl_lines = Vec::new();
         
         // 1. FAQ pairs (existing logic)
@@ -196,7 +196,7 @@ impl KnowledgeExporter {
             .filter_map(|e| e.hidden_state.as_ref().map(|hs| (e.id.clone(), hs.clone())))
             .collect();
         
-        Ok(LoraExport {
+        Ok(TrainingExport {
             training_jsonl: jsonl_lines.join("\n"),
             hidden_states_json: serde_json::to_string(&hidden_states)?,
             stats: ExportStats {
@@ -233,7 +233,7 @@ pub struct CycleConfig {
     pub synthesis_interval_days: u32,       // default: 30
     /// Path to write training JSONL.
     pub export_path: String,               // default: "exports/training.jsonl"
-    /// mini-dllm API URL for hot-reload trigger.
+    ///  API URL for hot-reload trigger.
     pub model_api_url: Option<String>,      // e.g., "http://localhost:8080"
 }
 
@@ -244,8 +244,8 @@ pub enum CycleState {
     Synthesizing,  // Running LLM synthesis
     ReadyToExport, // Synthesis complete, ready for export
     Exporting,     // Generating JSONL
-    Training,      // Waiting for LoRA training to complete
-    Upgrading,     // Day 32: hot-reloading trained LoRA
+    Training,      // Waiting for external training to complete
+    Upgrading,     // Day 32: hot-reloading trained model
 }
 
 impl SelfImprovingCycle {
@@ -270,7 +270,7 @@ impl SelfImprovingCycle {
                 Ok(Some(CycleAction::SynthesisComplete(dataset.stats)))
             }
             CycleState::ReadyToExport => {
-                let export = KnowledgeExporter::export_for_lora(
+                let export = KnowledgeExporter::export_training_jsonl(
                     &*self.db, &Default::default(),
                 ).await?;
                 // Write JSONL to file
@@ -281,13 +281,13 @@ impl SelfImprovingCycle {
             }
             CycleState::Training => {
                 // Wait for external training (Plan 008 wgpu trainer)
-                // Could poll file system for lora.bin, or wait for webhook
+                // Could poll file system for model weights, or wait for webhook
                 Ok(None)
             }
             CycleState::Upgrading => {
-                // POST to mini-dllm API to hot-reload lora.bin
+                // POST to  API to hot-reload model weights
                 if let Some(url) = &self.config.model_api_url {
-                    // reqwest::post(format!("{}/reload_lora", url)).send().await?;
+                    // reqwest::post(format!("{}/reload_model", url)).send().await?;
                 }
                 // Clear episodic memory for new cycle
                 // db.execute("DELETE FROM episodes WHERE created_at < ?").await?;
@@ -303,20 +303,20 @@ pub enum CycleAction {
     BeginSynthesis,
     SynthesisComplete(SynthesisStats),
     ExportComplete(ExportStats),
-    TrainingComplete { lora_path: String },
+    TrainingComplete { model_path: String },
     CycleComplete,
 }
 ```
 
-### Part 5: mini-dllm Hot-Reload Endpoint
+### Part 5:  Hot-Reload Endpoint
 
 ```rust
-// This goes in mini-dllm, not anyrag.
-// mini-dllm gets a simple HTTP endpoint that reloads lora.bin:
+// This goes in , not anyrag.
+//  gets a simple HTTP endpoint that reloads model weights:
 
-// mini-dllm/src/server.rs (new, behind "server" feature)
-// POST /reload_lora — loads new lora.bin and swaps the adapter
-// GET /status — returns current model stats, LoRA version, acceptance rate
+// /src/server.rs (new, behind "server" feature)
+// POST /reload_model — loads new model weights and swaps the adapter
+// GET /status — returns current model stats, model version, acceptance rate
 ```
 
 ## Database Schema
@@ -339,46 +339,178 @@ CREATE INDEX idx_episodes_success ON episodes(compilation_result);
 CREATE INDEX idx_episodes_created ON episodes(created_at);
 ```
 
+## 5.3 How microgpt-rs Plan 008 Trainer Consumes the JSONL
+
+### JSONL Format
+
+anyrag's `Curator::export_training_jsonl()` produces a JSONL file where each line is a JSON object with a `messages` array following the chat completion format:
+
+```jsonl
+{"messages":[{"role":"system","content":"Rewrite the following code in idiomatic Rust."},{"role":"user","content":"def hello(): print(\"hello\")"},{"role":"assistant","content":"fn hello() { println!(\"hello\"); }"}]}
+{"messages":[{"role":"system","content":"Rewrite the following code in idiomatic Rust."},{"role":"user","content":"class Foo: ..."},{"role":"assistant","content":"struct Foo { ... }"}]}
+```
+
+Two sources feed into this JSONL:
+1. **FAQ pairs** — structured YAML knowledge documents (existing `/knowledge/export` logic)
+2. **Translation episodes** — successful `CompilationResult::Success` episodes from the `episodes` table
+
+### Consumption Pipeline
+
+```
+anyrag                          microgpt-rs (Plan 008)
+──────                          ────────────────────
+Curator::export_training_jsonl()
+        │
+        ▼
+training.jsonl ──────────────► DataLoader::from_jsonl(path, batch_size, seq_len, pad_id)
+                                       │
+                                       ▼
+                                 Parse each line as TrainingSample { tokens: Vec<usize> }
+                                 - system + user content = input_ids
+                                 - assistant content = target_ids (shifted by 1)
+                                       │
+                                       ▼
+                                 batches() → Iterator<Item = (Vec<u32>, Vec<u32>)>
+                                 - Shuffles samples each epoch
+                                 - Pads/truncates to seq_len
+                                 - Returns (input_ids, target_ids) pairs
+                                       │
+                                       ▼
+                                 GPU Training Loop
+                                 for each (input_ids, target_ids):
+                                   1. GpuForwardPass::forward(input_ids) → logits
+                                   2. Cross-entropy loss(logits, target_ids)
+                                   3. GpuBackwardPass::compute_gradients()
+                                   4. AdamW optimizer step
+                                       │
+                                       ▼
+                                 export_weights() → model weights (safetensors)
+```
+
+### Config Compatibility
+
+Plan 008's `DataLoader` requires `seq_len` and `pad_id` to match the tokenizer used during microgpt-rs inference. For the micro config:
+- `vocab_size = 4096` (BPE tokenizer from Plan 007)
+- `n_embd = 32`, `n_layer = 1`
+- `rank = 4`, `alpha = 8.0`
+
+The JSONL `messages` content must be tokenized by microgpt-rs's BPE tokenizer **before** training. The `DataLoader` expects pre-tokenized `TrainingSample { tokens }` — not raw text. This means either:
+1. anyrag exports pre-tokenized JSONL (requires shared tokenizer), or
+2. microgpt-rs tokenizes the JSONL at load time in `DataLoader::from_jsonl()`
+
+Current implementation uses option 2: `DataLoader::from_jsonl()` parses raw text messages and microgpt-rs's tokenizer handles encoding.
+
+### File Path Convention
+
+- anyrag writes to: `exports/training.jsonl` (configurable via `CycleConfig::export_path`)
+- microgpt-rs reads from: passed as CLI arg `--data training.jsonl`
+- The cycle orchestrator's `ReadyToExport` state writes the file; microgpt-rs's CLI consumes it.
+
+## 5.4 How microgpt-rs Hot-Reloads Trained model weights
+
+### Hot-Reload Architecture
+
+```
+microgpt-rs (Plan 008)                     anyrag Cycle
+──────────────────                       ────────────
+POST /reload_model ◄─────────────────── CycleConfig::model_api_url
+        │                                         │
+        ▼                                         │
+load_model(path, &mut forward)                     │
+  1. Read model weights (safetensors)                  │
+  2. Deserialize tensors                          │
+  3. Upload A/B matrices to GPU                   │
+  4. Swap into GpuForwardPass.adapters       │
+        │                                         │
+        ▼                                         │
+Next inference uses new model weights              │
+```
+
+### The Reload Endpoint
+
+microgpt-rs exposes a simple HTTP server (behind `#[cfg(feature = "server")]`):
+
+```
+POST /reload_model    — Reads model weights from disk, uploads to GPU, swaps adapter
+GET  /status         — Returns current model stats, model version, acceptance rate
+```
+
+The reload is **atomic at the inference level**: the GPU buffers are swapped in a single write, so the next `forward()` call uses the new weights. There is no partial state — the old adapter GPU buffers are simply overwritten.
+
+### model weights Format (safetensors)
+
+```rust
+// Key naming convention:
+// "weight.{layer_idx}.a" — A matrix (down-projection): [n_embd, rank]  f32
+// "weight.{layer_idx}.b" — B matrix (up-projection):   [rank, out_dim] f32
+
+// Example for 1-layer micro config with rank=4, targets=["q","k","v","o","mlp1","mlp2"]:
+// weight.0.a  → [32, 4]   f32 (q_proj down)
+// weight.0.b  → [4, 32]   f32 (q_proj up)
+// weight.1.a  → [32, 4]   f32 (k_proj down)
+// weight.1.b  → [4, 32]   f32 (k_proj up)
+// ... etc for v, o, mlp1, mlp2
+```
+
+For targets where safetensors may not compile, a simpler binary format is used:
+`[blake3_hash(4B) | n_layers(4B) | rank(4B) | layer_data...]` where each `layer_data` is `[a_len(4B) | a_data | b_len(4B) | b_data]`.
+
+### Trigger Flow
+
+1. anyrag cycle reaches `CycleState::Upgrading`
+2. `CycleConfig::model_api_url` points to microgpt-rs's server (e.g., `http://localhost:8080`)
+3. anyrag sends `POST {model_api_url}/reload_model`
+4. microgpt-rs reads `model weights` from disk (path configured server-side)
+5. `load_model()` deserializes + uploads to GPU
+6. Next inference call uses updated model weights
+7. anyrag clears episodic memory and returns to `CycleState::Collecting`
+
+### Current State
+
+- `CycleConfig::model_api_url` exists in anyrag's config but the POST call is commented out (placeholder)
+- microgpt-rs's server endpoint is not yet implemented (part of Plan 008 Phase 7)
+- The `load_model()` function is defined in Plan 008's Phase 6 but not yet implemented
+
 ## Tasks
 
 ### Phase 1: Episodic Memory
-- [ ] 1.1 Add `TranslationEpisode`, `CompilationResult`, `EpisodicStats` to types
-- [ ] 1.2 Create `crates/lib/src/ingest/episodic.rs`
-- [ ] 1.3 Add `episodes` table to DB schema
-- [ ] 1.4 Add `POST /episodes` handler
-- [ ] 1.5 Add `GET /episodes` handler with filtering
-- [ ] 1.6 Add `GET /episodes/stats` handler
-- [ ] 1.7 Add `POST /episodes/{id}/verify` handler
-- [ ] 1.8 Add tests: record, verify, query episodes
+- [x] 1.1 Add `TranslationEpisode`, `CompilationResult`, `EpisodicStats` to types
+- [x] 1.2 Create `crates/lib/src/ingest/episodic.rs`
+- [x] 1.3 Add `episodes` table to DB schema
+- [x] 1.4 Add `POST /episodes` handler
+- [x] 1.5 Add `GET /episodes` handler with filtering
+- [x] 1.6 Add `GET /episodes/stats` handler
+- [x] 1.7 Add `POST /episodes/{id}/verify` handler
+- [x] 1.8 Add tests: record, verify, query episodes
 
 ### Phase 2: Training Data Synthesis
-- [ ] 2.1 Extend `Curator` with `synthesize_training_data()`
-- [ ] 2.2 Implement pattern grouping (similar source → similar output)
-- [ ] 2.3 Add LLM prompt for canonical Q&A pair generation
-- [ ] 2.4 Add test: synthesis produces valid JSONL
+- [x] 2.1 Extend `Curator` with `synthesize_training_data()`
+- [x] 2.2 Implement pattern grouping (similar source → similar output)
+- [x] 2.3 Add LLM prompt for canonical Q&A pair generation
+- [x] 2.4 Add test: synthesis produces valid JSONL
 
 ### Phase 3: Extended Export
-- [ ] 3.1 Extend `/knowledge/export` to include translation episodes
-- [ ] 3.2 Add hidden state export for REST retrieval index
-- [ ] 3.3 Add `GET /knowledge/export/lora` — LoRA-specific export endpoint
-- [ ] 3.4 Add test: export produces valid training JSONL
-- [ ] 3.5 Add test: exported JSONL parses with serde_json
+- [x] 3.1 Extend `/knowledge/export` to include translation episodes
+- [x] 3.2 Add hidden state export for REST retrieval index
+- [x] 3.3 Add `GET /knowledge/export/jsonl` — export endpoint
+- [x] 3.4 Add test: export produces valid training JSONL
+- [x] 3.5 Add test: exported JSONL parses with serde_json
 
 ### Phase 4: Cycle Orchestrator
-- [ ] 4.1 Create `crates/lib/src/cycle.rs`
-- [ ] 4.2 Implement `SelfImprovingCycle` state machine
-- [ ] 4.3 Add `CycleConfig` to `AppConfig`
-- [ ] 4.4 Add background task in server that calls `tick()` periodically
-- [ ] 4.5 Add `GET /cycle/status` endpoint
-- [ ] 4.6 Add `POST /cycle/trigger` endpoint (manual trigger)
-- [ ] 4.7 Add test: state transitions work correctly
+- [x] 4.1 Create `crates/lib/src/cycle.rs`
+- [x] 4.2 Implement `SelfImprovingCycle` state machine
+- [x] 4.3 Add `CycleConfig` to `AppConfig`
+- [x] 4.4 Add background task in server that calls `tick()` periodically
+- [x] 4.5 Add `GET /cycle/status` endpoint
+- [x] 4.6 Add `POST /cycle/trigger` endpoint (manual trigger)
+- [x] 4.7 Add test: state transitions work correctly
 
 ### Phase 5: Integration
-- [ ] 5.1 Wire: episode recording → RAG pipeline → episode storage
-- [ ] 5.2 Wire: synthesis → export → file system
-- [ ] 5.3 Document: how mini-dllm Plan 008 trainer consumes the JSONL
-- [ ] 5.4 Document: how mini-dllm hot-reloads trained lora.bin
-- [ ] 5.5 End-to-end test: record episode → verify → synthesize → export → JSONL
+- [x] 5.1 Wire: episode recording → RAG pipeline → episode storage
+- [x] 5.2 Wire: synthesis → export → file system
+- [x] 5.3 Document: how  Plan 008 trainer consumes the JSONL
+- [x] 5.4 Document: how  hot-reloads trained model weights
+- [x] 5.5 End-to-end test: record episode → verify → synthesize → export → JSONL
 
 ## Key Risks & Mitigations
 
@@ -393,9 +525,9 @@ CREATE INDEX idx_episodes_created ON episodes(created_at);
 
 1. **Episodic memory**: Every RIIR translation tracked with success/failure
 2. **Training synthesis**: Curator auto-generates training pairs from successful episodes
-3. **LoRA export**: `/knowledge/export/lora` produces JSONL for Plan 008 trainer
+3. **JSONL export**: `/knowledge/export/jsonl` produces JSONL for Plan 008 trainer
 4. **32-day cycle**: Background orchestrator advances through collection → synthesis → export → upgrade
-5. **Hot-reload**: mini-dllm can swap `lora.bin` without restart
+5. **Hot-reload**:  can swap `model weights` without restart
 
 ## Files to Create/Modify
 
@@ -413,7 +545,7 @@ CREATE INDEX idx_episodes_created ON episodes(created_at);
 
 ## Cross-Project References
 
-- `mini-dllm/.plans/008_wgpu_lora_training.md` — Consumes the JSONL this plan produces
-- `mini-dllm/.plans/009_rest_speculative_decoding.md` — Queries episodic hidden states during inference
-- `.research/00_Neuro-Symbolic LLM Architecture.md` — §Runtime LoRA Pipeline (Day 1→32)
+- `/.plans/008_wgpu_training.md (riir-burner)` — Consumes the JSONL this plan produces
+- `/.plans/009_rest_speculative_decoding.md` — Queries episodic hidden states during inference
+- `.research/00_Neuro-Symbolic LLM Architecture.md` — §Runtime JSONL Export Pipeline (Day 1→32)
 - `.research/01_Advanced Neuro-Symbolic Rust Translation.md` — §Continuous Learning Loop

@@ -2,7 +2,7 @@
 .env
 *.serviceAccount.json
 gcp_creds.json
-output.json
+output/
 .test
 *.db
 *.db-wal
@@ -10,3 +10,4 @@ output.json
 /db
 indradb
 *.log
+.logs/

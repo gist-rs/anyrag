@@ -6,9 +6,12 @@ mod auth;
 mod firebase;
 mod process;
 use anyhow::{bail, Result};
-
 use anyrag::constants;
+use anyrag::curator::Curator;
+use anyrag::providers::ai::AiProvider;
+use anyrag::PromptError;
 use anyrag_github::cli::{handle_dump_github, GithubArgs};
+use async_trait::async_trait;
 use clap::{Parser, Subcommand};
 use keyring::Entry;
 use std::fs;
@@ -16,6 +19,22 @@ use std::path::Path;
 use tracing::info;
 use tracing_subscriber::{fmt, EnvFilter};
 use turso::Value as TursoValue;
+
+// --- Noop AI Provider (for export) ---
+
+#[derive(Debug, Clone)]
+struct NoopAiProvider;
+
+#[async_trait]
+impl AiProvider for NoopAiProvider {
+    async fn generate(
+        &self,
+        _system_prompt: &str,
+        _user_prompt: &str,
+    ) -> Result<String, PromptError> {
+        Ok(String::new())
+    }
+}
 
 // --- CLI Definition ---
 
@@ -39,6 +58,8 @@ enum Commands {
     List(ListArgs),
     /// Count items in a local database table
     Count(CountArgs),
+    /// Export training data as JSONL
+    Export(ExportArgs),
 }
 
 #[derive(Parser, Debug)]
@@ -75,6 +96,22 @@ struct CountArgs {
     project_id: Option<String>,
     /// The name of the table to count items in
     table_name: String,
+}
+
+#[derive(Parser, Debug)]
+struct ExportArgs {
+    /// The Google Cloud Project ID. If omitted, it will be inferred from `gcp_creds.json`.
+    #[arg(long)]
+    project_id: Option<String>,
+    /// Maximum number of episodes to export
+    #[arg(long, default_value = "1000")]
+    max_episodes: usize,
+    /// Only include episodes since this date (ISO 8601 format)
+    #[arg(long)]
+    since: Option<String>,
+    /// Output file path for the JSONL training data
+    #[arg(long, default_value = "output/training.jsonl")]
+    output: String,
 }
 
 // --- Main Application Entry ---
@@ -132,6 +169,12 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Commands::Export(args) => {
+            if let Err(e) = handle_export(args).await {
+                eprintln!("Export failed: {e}");
+                std::process::exit(1);
+            }
+        }
     }
 
     Ok(())
@@ -148,6 +191,40 @@ async fn handle_dump(args: &DumpArgs) -> Result<()> {
             handle_dump_github(github_args).await?;
         }
     }
+    Ok(())
+}
+
+async fn handle_export(args: &ExportArgs) -> Result<()> {
+    let project_id = firebase::resolve_project_id(args.project_id.as_deref())?;
+    let db_path = format!("{}/{project_id}.db", constants::DB_DIR);
+    if !Path::new(&db_path).exists() {
+        bail!(
+            "Database file '{db_path}' not found. Run a `dump` command first for project '{project_id}'."
+        );
+    }
+
+    let db_provider = anyrag::providers::db::sqlite::SqliteProvider::new(&db_path).await?;
+    let noop_ai = NoopAiProvider;
+    let curator = Curator::new(&db_provider, &noop_ai);
+
+    let export = curator
+        .export_training_jsonl(args.max_episodes, args.since.as_deref())
+        .await?;
+
+    // Create output directory if needed
+    if let Some(parent) = Path::new(&args.output).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+
+    fs::write(&args.output, &export.training_jsonl)?;
+
+    println!(
+        "{} FAQ + {} episodes → {}",
+        export.stats.faq_pairs, export.stats.translation_pairs, args.output
+    );
+
     Ok(())
 }
 

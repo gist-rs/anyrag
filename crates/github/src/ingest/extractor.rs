@@ -406,6 +406,49 @@ impl Extractor {
     }
 
     /// Parses `README.md` files to extract Rust code blocks.
+    /// Strips documentation tooling artifacts from a code block string.
+    ///
+    /// Removes ANCHOR markers (`// ANCHOR: name`, `// ANCHOR_END: name`),
+    /// snip markers (`// --snip--`), and collapses 3+ consecutive blank lines
+    /// into at most 2.
+    fn clean_code_block(code: &str) -> String {
+        let filtered: Vec<&str> = code
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim();
+                if let Some(rest) = trimmed.strip_prefix("//") {
+                    let after = rest.trim_start();
+                    if after.starts_with("ANCHOR:") || after.starts_with("ANCHOR_END:") {
+                        return false;
+                    }
+                    if after == "--snip--" {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+
+        // Collapse 3+ consecutive blank lines into 2
+        let mut result = String::new();
+        let mut blank_count = 0u32;
+        for line in &filtered {
+            if line.trim().is_empty() {
+                blank_count += 1;
+                if blank_count <= 2 {
+                    result.push_str(line);
+                    result.push('\n');
+                }
+            } else {
+                blank_count = 0;
+                result.push_str(line);
+                result.push('\n');
+            }
+        }
+
+        result.trim().to_string()
+    }
+
     fn parse_readme_files(
         repo_path: &Path,
         files: &[PathBuf],
@@ -424,7 +467,7 @@ impl Extractor {
 
             for (i, cap) in re.captures_iter(&content).enumerate() {
                 if let Some(code_match) = cap.get(1) {
-                    let code_block = code_match.as_str().trim().to_string();
+                    let code_block = Self::clean_code_block(code_match.as_str());
                     if code_block.is_empty() {
                         continue;
                     }
@@ -611,7 +654,7 @@ impl Extractor {
                     for (i, code_cap) in code_block_re.captures_iter(&markdown_content).enumerate()
                     {
                         if let Some(code_match) = code_cap.get(1) {
-                            let code_block = code_match.as_str().trim().to_string();
+                            let code_block = Self::clean_code_block(code_match.as_str());
                             if code_block.is_empty() {
                                 continue;
                             }

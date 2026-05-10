@@ -146,4 +146,7 @@ pub struct IngestionTask {
     /// Optional list of glob patterns to exclude (e.g., `["*.lock", "benches/**"]`).
     /// When set, files matching these patterns are skipped during extraction.
     pub excludes: Option<Vec<String>>,
+    /// Force re-ingestion even if the version already exists in the database.
+    /// When `false` (default), skips cloning if examples for this version are already stored.
+    pub force: bool,
 }

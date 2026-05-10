@@ -3,7 +3,7 @@ use crate::{
     errors::PromptError,
     providers::db::storage::{KeywordSearch, MetadataSearch, Storage, VectorSearch},
     search::SearchError,
-    types::SearchResult,
+    types::{SearchResult, SearchSourceType},
 };
 use async_trait::async_trait;
 #[cfg(feature = "core-access")]
@@ -14,7 +14,7 @@ use std::{
     fmt::{self, Debug},
     sync::Arc,
 };
-use tokio::sync::RwLock;
+
 use tracing::{debug, info};
 use turso::{Database, Value as TursoValue};
 
@@ -41,7 +41,7 @@ pub struct FaqSearchResult {
 pub struct SqliteProvider {
     /// The Turso database instance. It's cloneable and thread-safe.
     pub db: Database,
-    schema_cache: Arc<RwLock<HashMap<String, Arc<TableSchema>>>>,
+    schema_cache: papaya::HashMap<String, Arc<TableSchema>>,
 }
 
 impl SqliteProvider {
@@ -74,7 +74,7 @@ impl SqliteProvider {
 
         Ok(Self {
             db,
-            schema_cache: Arc::new(RwLock::new(HashMap::new())),
+            schema_cache: papaya::HashMap::new(),
         })
     }
 
@@ -194,7 +194,7 @@ impl Storage for SqliteProvider {
 
     /// Retrieves the schema for a given SQLite table.
     async fn get_table_schema(&self, table_name: &str) -> Result<Arc<TableSchema>, PromptError> {
-        if let Some(schema) = self.schema_cache.read().await.get(table_name) {
+        if let Some(schema) = self.schema_cache.pin().get(table_name).cloned() {
             debug!(table_name = %table_name, "Returning cached schema.");
             return Ok(schema.clone());
         }
@@ -251,8 +251,7 @@ impl Storage for SqliteProvider {
         let schema = Arc::new(TableSchema { fields });
 
         self.schema_cache
-            .write()
-            .await
+            .pin()
             .insert(table_name.to_string(), schema.clone());
 
         Ok(schema)
@@ -430,6 +429,7 @@ impl VectorSearch for SqliteProvider {
                 link,
                 description: content,
                 score,
+                source_type: SearchSourceType::Unknown,
             });
         }
 
@@ -525,6 +525,7 @@ impl KeywordSearch for SqliteProvider {
                 link: row.get::<String>(1)?,
                 description: row.get::<String>(2)?,
                 score: 0.5,
+                source_type: SearchSourceType::Unknown,
             });
         }
 
@@ -646,6 +647,7 @@ impl MetadataSearch for SqliteProvider {
                 link,
                 description,
                 score,
+                source_type: SearchSourceType::Unknown,
             });
         }
 

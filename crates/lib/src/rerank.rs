@@ -4,7 +4,11 @@
 //! - LLM.
 //! - Reciprocal Rank Fusion.
 
-use crate::{providers::ai::AiProvider, types::SearchResult, PromptError};
+use crate::{
+    providers::ai::AiProvider,
+    types::{QueryContext, SearchResult, SearchSourceType},
+    PromptError,
+};
 use std::{collections::HashMap, fmt::Debug};
 use thiserror::Error;
 use tracing::{debug, info};
@@ -29,6 +33,78 @@ pub trait Rerankable: Clone + Debug {
     fn get_title(&self) -> &str;
     /// Returns a summary or description of the item.
     fn get_description(&self) -> &str;
+}
+
+/// Configurable weights for Reciprocal Rank Fusion.
+///
+/// Controls how different search sources and content types are weighted
+/// during fusion. This enables RIIR-aware search that boosts code results
+/// and dampens documentation when generating code.
+#[derive(Debug, Clone, Copy)]
+pub struct RrfWeights {
+    /// Weight for metadata search results (first result set). Default: 100.0.
+    pub metadata: f64,
+    /// Weight for vector search results (second result set). Default: 1.0.
+    pub vector: f64,
+    /// Weight for keyword search results (third result set). Default: 1.0.
+    pub keyword: f64,
+    /// Multiplier applied to results tagged as `SearchSourceType::Code`.
+    /// Default: 10.0 — strongly boosts code results for RIIR tasks.
+    pub code_boost: f64,
+    /// Multiplier applied to results tagged as `SearchSourceType::Documentation`.
+    /// Default: 0.5 — dampens prose for code generation queries.
+    pub doc_penalty: f64,
+}
+
+impl Default for RrfWeights {
+    fn default() -> Self {
+        Self {
+            metadata: 100.0,
+            vector: 1.0,
+            keyword: 1.0,
+            code_boost: 1.0,
+            doc_penalty: 1.0,
+        }
+    }
+}
+
+impl RrfWeights {
+    /// Returns weights configured for the given query context.
+    pub fn from_context(context: QueryContext) -> Self {
+        match context {
+            QueryContext::CodeGeneration => Self {
+                code_boost: 10.0,
+                doc_penalty: 0.5,
+                ..Default::default()
+            },
+            QueryContext::Explanation => Self::default(),
+            QueryContext::Debugging => Self {
+                code_boost: 5.0,
+                doc_penalty: 0.8,
+                ..Default::default()
+            },
+        }
+    }
+
+    /// Returns the weight for a result set at the given index.
+    ///
+    /// Convention: 0 = metadata, 1 = vector, 2+ = keyword.
+    pub fn set_weight(&self, set_index: usize) -> f64 {
+        match set_index {
+            0 => self.metadata,
+            1 => self.vector,
+            _ => self.keyword,
+        }
+    }
+
+    /// Returns the source-type multiplier for a result.
+    pub fn source_multiplier(&self, source_type: &SearchSourceType) -> f64 {
+        match source_type {
+            SearchSourceType::Code => self.code_boost,
+            SearchSourceType::Documentation | SearchSourceType::Faq => self.doc_penalty,
+            SearchSourceType::Unknown => 1.0,
+        }
+    }
 }
 
 /// Re-ranks a list of candidates using an LLM.
@@ -107,9 +183,28 @@ pub async fn llm_rerank<T: Rerankable>(
 }
 
 /// Re-ranks search results from multiple sources using Reciprocal Rank Fusion.
+///
+/// This is a convenience wrapper around [`reciprocal_rank_fusion_weighted`]
+/// with default weights (no source-type boost/penalty).
 pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<SearchResult> {
+    reciprocal_rank_fusion_weighted(&result_sets, &RrfWeights::default())
+}
+
+/// Re-ranks search results from multiple sources using weighted Reciprocal Rank Fusion.
+///
+/// Each result set is weighted according to its position (metadata/vector/keyword),
+/// and individual results are boosted or penalized based on their [`SearchSourceType`].
+///
+/// # Arguments
+///
+/// * `result_sets` — Ordered slices: metadata (0), vector (1), keyword (2+).
+/// * `weights` — Configurable weights for sources and content types.
+pub fn reciprocal_rank_fusion_weighted(
+    result_sets: &[Vec<SearchResult>],
+    weights: &RrfWeights,
+) -> Vec<SearchResult> {
     info!(
-        "Re-ranking using Reciprocal Rank Fusion for {} result sets.",
+        "Re-ranking using Weighted Reciprocal Rank Fusion for {} result sets.",
         result_sets.len()
     );
 
@@ -119,25 +214,24 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
     let mut all_unique_results: HashMap<String, SearchResult> = HashMap::new();
 
     for (set_index, results) in result_sets.iter().enumerate() {
+        let set_weight = weights.set_weight(set_index);
         for (rank, result) in results.iter().enumerate() {
             // A document is unique by its link *and* its content. This prevents
             // different versions of the same document (same link) from being de-duplicated.
             let unique_key = format!("{}::{}", result.link, result.description);
 
-            // Give a significantly higher weight to the first result set (metadata),
-            // treating it as a high-precision signal.
-            let score = if set_index == 0 {
-                100.0 / ((rank + 1) as f64) // High base score, sensitive to rank
-            } else {
-                1.0 / (k + (rank + 1) as f64) // Standard RRF score for other sets
-            };
+            // Base RRF score weighted by source set (metadata vs vector vs keyword).
+            let base_score = set_weight / (k + (rank + 1) as f64);
+            // Apply source-type boost/penalty (code_boost or doc_penalty).
+            let source_multiplier = weights.source_multiplier(&result.source_type);
+            let score = base_score * source_multiplier;
             debug!(
-                "RRF score for '{}' (set: {}, rank: {}): {}",
-                result.title, set_index, rank, score
+                "Weighted RRF score for '{}' (set: {}, rank: {}, source_type: {:?}): {} (base={}, mult={})",
+                result.title, set_index, rank, result.source_type, score, base_score, source_multiplier
             );
             *rrf_scores.entry(unique_key.clone()).or_insert(0.0) += score;
 
-            // Collect unique results by link
+            // Collect unique results by link+description key
             all_unique_results
                 .entry(unique_key)
                 .or_insert_with(|| result.clone());
@@ -166,6 +260,6 @@ pub fn reciprocal_rank_fusion(result_sets: Vec<Vec<SearchResult>>) -> Vec<Search
         result.score = *rrf_scores.get(&key).unwrap_or(&0.0);
     }
 
-    debug!("Final RRF scores: {:?}", rrf_scores);
+    debug!("Final weighted RRF scores: {:?}", rrf_scores);
     combined_results
 }

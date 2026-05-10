@@ -68,6 +68,7 @@ async fn ask_question(
         limit: Some(5),
         mode: Default::default(),
         use_knowledge_graph: Some(use_kg),
+        context: None,
     };
 
     let result = handlers::knowledge_search_handler(
