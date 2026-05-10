@@ -1,4 +1,4 @@
-//! Self-Improving Cycle — 32-Day Runtime LoRA Pipeline Orchestrator
+//! Self-Improving Cycle — Episode-Driven JSONL Export Orchestrator
 
 use crate::types::EpisodicStats;
 use anyhow::Result;
@@ -14,7 +14,7 @@ pub struct CycleConfig {
     pub min_success_rate: f64,
     /// Path to write training JSONL. Default: "exports/training.jsonl"
     pub export_path: String,
-    /// microgpt-rs API URL for hot-reload trigger.
+    /// External API URL for model reload trigger.
     pub model_api_url: Option<String>,
 }
 
@@ -29,11 +29,11 @@ impl Default for CycleConfig {
     }
 }
 
-/// State machine for the 32-day self-improving cycle.
+/// State machine for the self-improving cycle.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum CycleState {
-    /// Day 1-29: recording episodes
+    /// Recording episodes
     Collecting,
     /// Enough episodes collected, ready for LLM synthesis
     ReadyToSynthesize,
@@ -43,9 +43,9 @@ pub enum CycleState {
     ReadyToExport,
     /// Generating JSONL
     Exporting,
-    /// Waiting for LoRA training to complete
+    /// Waiting for external training to complete
     Training,
-    /// Hot-reloading trained LoRA
+    /// Applying trained model update
     Upgrading,
 }
 
@@ -64,11 +64,11 @@ pub enum CycleAction {
     BeginSynthesis,
     SynthesisComplete { pairs_count: usize },
     ExportComplete { path: String, lines: usize },
-    TrainingComplete { lora_path: String },
+    TrainingComplete { model_path: String },
     CycleComplete,
 }
 
-/// Orchestrator for the self-improving 32-day cycle.
+/// Orchestrator for the self-improving cycle.
 ///
 /// Manages transitions: Collecting → Synthesizing → Exporting → Training → Upgrading.
 /// The orchestrator only advances the state machine; the caller is responsible for

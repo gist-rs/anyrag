@@ -213,6 +213,7 @@ async fn handle_example(args: ExampleArgs) -> Result<()> {
                     dump_type,
                     includes: None,
                     excludes: None,
+                    force: false,
                 };
 
                 println!(

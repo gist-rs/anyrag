@@ -345,6 +345,31 @@ impl StorageManager {
         }
     }
 
+    /// Checks if examples for a given repository and version already exist in the database.
+    /// Returns `true` if at least one example exists for the specified `(repo_name, version)` pair.
+    pub async fn version_exists(
+        &self,
+        repo_name: &str,
+        version: &str,
+    ) -> Result<bool, GitHubIngestError> {
+        let repo_provider = self.get_provider_for_repo(repo_name).await?;
+        let conn = repo_provider.db.connect()?;
+
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) as cnt FROM generated_examples WHERE version = ?",
+                params![version],
+            )
+            .await?;
+
+        if let Some(row) = rows.next().await? {
+            let count: i64 = row.get(0)?;
+            Ok(count > 0)
+        } else {
+            Ok(false)
+        }
+    }
+
     // --- Private Helper Functions ---
 
     /// Creates the `repositories` table in the main metadata database if it doesn't exist.

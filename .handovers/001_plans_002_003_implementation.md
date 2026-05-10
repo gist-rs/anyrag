@@ -2,7 +2,7 @@
 
 ## What Happened
 
-Implemented both Plan 002 (Context Pollution Prevention + Concept Sharding) and Plan 003 (Self-Improving Cycle — 32-Day Runtime LoRA Pipeline) for the anyrag project. Both plans are now feature-complete with all core logic, API endpoints, and tests passing.
+Implemented both Plan 002 (Context Pollution Prevention + Concept Sharding) and Plan 003 (Self-Improving Cycle — JSONL Export Pipeline) for the anyrag project. Both plans are now feature-complete with all core logic, API endpoints, and tests passing.
 
 ### Plan 002: Context Pollution Prevention
 
@@ -18,7 +18,7 @@ Implemented both Plan 002 (Context Pollution Prevention + Concept Sharding) and 
 
 2. **Training Data Synthesis** — Extended `Curator` with `synthesize_training_data()` that groups successful episodes by source language and uses LLM to create canonical Q&A pairs.
 
-3. **LoRA Export** — Extended `Curator` with `export_for_lora()` that combines FAQ pairs + translation episodes into JSONL for fine-tuning.
+3. **JSONL Export** — Extended `Curator` with `export_training_jsonl()` that combines FAQ pairs + translation episodes into JSONL for fine-tuning.
 
 4. **Cycle Orchestrator** — `SelfImprovingCycle` state machine (7 states: Collecting → ReadyToSynthesize → Synthesizing → ReadyToExport → Exporting → Training → Upgrading). `CycleConfig` with configurable thresholds. Integrated into `AppState` with `Mutex<SelfImprovingCycle>`.
 
@@ -45,7 +45,7 @@ Implemented both Plan 002 (Context Pollution Prevention + Concept Sharding) and 
 | `crates/lib/src/types.rs` | `SearchSourceType`, `QueryContext`, `RustConcept`, `TranslationEpisode`, `CompilationResult`, `EpisodicStats` |
 | `crates/lib/src/rerank.rs` | `RrfWeights`, `reciprocal_rank_fusion_weighted()`, backward-compatible wrapper |
 | `crates/lib/src/search.rs` | `classify_concepts()`, `tag_rust_concepts()`, `concepts` field on `HybridSearchOptions` |
-| `crates/lib/src/curator.rs` | `synthesize_training_data()`, `export_for_lora()`, `SynthesisStats`, `LoraExport` |
+| `crates/lib/src/curator.rs` | `synthesize_training_data()`, `export_training_jsonl()`, `SynthesisStats`, `TrainingExport` |
 | `crates/lib/src/ingest/knowledge.rs` | `store_concept_tags()` for metadata tagging |
 | `crates/lib/src/ingest/mod.rs` | Added `pub mod episodic;` |
 | `crates/lib/src/lib.rs` | Added `pub mod cycle;`, re-exports for all new types |
@@ -76,8 +76,8 @@ Implemented both Plan 002 (Context Pollution Prevention + Concept Sharding) and 
 
 ### Plan 003
 - [ ] 5.3 Document: how microgpt-rs Plan 008 trainer consumes the JSONL
-- [ ] 5.4 Document: how microgpt-rs hot-reloads trained lora.bin
-- LoRA export endpoint wiring to file system (currently returns JSONL in response body)
+- [ ] 5.4 Document: how microgpt-rs hot-reloads trained model weights
+- JSONL export endpoint wiring to file system (currently returns JSONL in response body)
 - Hot-reload trigger to microgpt-rs API (placeholder exists in `CycleConfig::model_api_url`)
 - Background tick task (currently manual trigger via `POST /cycle/trigger`)
 

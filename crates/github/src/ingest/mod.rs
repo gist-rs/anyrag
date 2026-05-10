@@ -46,11 +46,49 @@ pub async fn run_github_ingestion(
     // 1. Setup
     let tracked_repo = storage_manager.track_repository(&task.url).await?;
 
+    // 1b. Cache check — skip clone if version already ingested (unless force)
+    if !task.force {
+        let version_to_check = task.version.as_deref().unwrap_or("");
+        if !version_to_check.is_empty() {
+            let exists = storage_manager
+                .version_exists(&tracked_repo.repo_name, version_to_check)
+                .await?;
+            if exists {
+                // Retrieve cached count
+                let cached_examples = storage_manager
+                    .get_examples(&tracked_repo.repo_name, version_to_check)
+                    .await?;
+                let cached_count = cached_examples.len();
+                info!(
+                    cached_count,
+                    "Version '{version_to_check}' already ingested. Skipping clone (use --force to override)."
+                );
+                return Ok((cached_count, version_to_check.to_string()));
+            }
+        }
+    }
+
     // 2. Crawl
     let crawl_result = Crawler::crawl(&task).await?;
 
-    // TODO: Add logic to determine the latest version if none is specified in the task.
-    // For now, the version returned by crawl() is used.
+    // 2b. Second cache check with discovered version (for tasks without explicit version)
+    if !task.force {
+        let exists = storage_manager
+            .version_exists(&tracked_repo.repo_name, &crawl_result.version)
+            .await?;
+        if exists {
+            let cached_examples = storage_manager
+                .get_examples(&tracked_repo.repo_name, &crawl_result.version)
+                .await?;
+            let cached_count = cached_examples.len();
+            info!(
+                cached_count,
+                "Version '{}' already ingested. Skipping extraction (use --force to override).",
+                crawl_result.version
+            );
+            return Ok((cached_count, crawl_result.version));
+        }
+    }
 
     // 3. Compile exclude patterns from task
     let compiled_excludes: Vec<Pattern> = task

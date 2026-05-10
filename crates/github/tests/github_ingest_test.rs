@@ -110,3 +110,79 @@ async fn test_extractor_and_storage_integration() {
     assert_eq!(test_example.content.trim(), common_code);
     assert_eq!(test_example.source_file, "tests/test.rs");
 }
+
+#[tokio::test]
+async fn test_version_exists_returns_false_for_unknown_version() {
+    let db_dir = tempdir().expect("Failed to create db temp dir");
+    let db_path_str = db_dir.path().to_str().unwrap();
+
+    let storage = StorageManager::new(Some(db_path_str)).await.unwrap();
+    let repo_url = "http://mock.com/user/cache-test";
+    let tracked_repo = storage.track_repository(repo_url).await.unwrap();
+
+    // No examples stored yet — version should not exist
+    let exists = storage
+        .version_exists(&tracked_repo.repo_name, "v0.0.0")
+        .await
+        .unwrap();
+    assert!(
+        !exists,
+        "Expected version_exists to return false when no examples are stored"
+    );
+}
+
+#[tokio::test]
+async fn test_version_exists_returns_true_after_store() {
+    let db_dir = tempdir().expect("Failed to create db temp dir");
+    let db_path_str = db_dir.path().to_str().unwrap();
+
+    let storage = StorageManager::new(Some(db_path_str)).await.unwrap();
+    let repo_url = "http://mock.com/user/cache-store";
+    let tracked_repo = storage.track_repository(repo_url).await.unwrap();
+
+    let version = "v2.0.0";
+    let examples = vec![anyrag_github::ingest::types::GeneratedExample {
+        example_handle: "test:src/main.rs:test_fn".to_string(),
+        content: "fn test_fn() {}".to_string(),
+        source_file: "src/main.rs".to_string(),
+        source_type: ExampleSourceType::Test,
+        version: version.to_string(),
+    }];
+
+    storage
+        .store_examples(&tracked_repo, examples)
+        .await
+        .unwrap();
+
+    // After storing, version should exist
+    let exists = storage
+        .version_exists(&tracked_repo.repo_name, version)
+        .await
+        .unwrap();
+    assert!(
+        exists,
+        "Expected version_exists to return true after storing examples"
+    );
+
+    // A different version should still not exist
+    let other_exists = storage
+        .version_exists(&tracked_repo.repo_name, "v3.0.0")
+        .await
+        .unwrap();
+    assert!(
+        !other_exists,
+        "Expected version_exists to return false for unstored version"
+    );
+}
+
+#[tokio::test]
+async fn test_version_exists_returns_false_for_untracked_repo() {
+    let db_dir = tempdir().expect("Failed to create db temp dir");
+    let db_path_str = db_dir.path().to_str().unwrap();
+
+    let storage = StorageManager::new(Some(db_path_str)).await.unwrap();
+
+    // Query a repo that was never tracked — should fail gracefully
+    let result = storage.version_exists("nonexistent-repo", "v1.0.0").await;
+    assert!(result.is_err(), "Expected error for untracked repo");
+}

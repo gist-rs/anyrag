@@ -10,7 +10,7 @@ Key ideas from the Raven paper:
 - **Selective decay** (Equation 18): non-frozen slots decay over time, reducing relevance scores
 - **Frozen slots**: critical slots (e.g., `architecture`) never decay — always available at full strength
 
-This is **Phase 1** — keyword-based routing only. Neural/WASM routing is deferred to Phase 2, following the same pattern as `microgpt-rs` `WasmPruner`.
+This is **Phase 1** — keyword-based routing only. Neural routing is deferred to Phase 2, following embedding-based pattern.
 
 ## Architecture
 
@@ -70,8 +70,8 @@ pub struct SlotDocument {
 pub enum RouteMethod {
     /// Phase 1: deterministic keyword matching.
     Keyword,
-    /// Phase 2 (future): WASM-based neural routing.
-    Wasm,
+    /// Phase 2 (future): embedding-based neural routing.
+    Neural,
 }
 
 /// Result of routing a document to slots.
@@ -324,7 +324,7 @@ None — all changes use existing dependencies (turso/libsql, serde, chrono, uui
 | Decay makes useful docs vanish | Lost context | Low default decay rates; frozen architecture slot; reindex endpoint to re-route |
 | Slot_documents table grows large | Query slowdown | Unique index on (slot_name, document_id); periodic cleanup of decayed docs |
 | Breaking existing search pipeline | Regression | All slot features are opt-in; existing endpoints untouched; separate `/search/slots` route |
-| Future WASM router incompatible with schema | Migration pain | `RouteMethod` enum already has `Wasm` variant; same schema works for both |
+| Future neural router incompatible with schema | Migration pain | `RouteMethod` enum already has `Neural` variant; same schema works for both |
 
 ## Expected Outcomes
 
@@ -362,7 +362,7 @@ None — all changes use existing dependencies (turso/libsql, serde, chrono, uui
 
 ## Out of Scope
 
-- **Neural/WASM router** — Phase 2, follows `WasmPruner` pattern from microgpt-rs
+- **Neural router** — Phase 2, embedding-based routing
 - **LLM-based slot routing** — intentionally deterministic only
 - **Modification of existing search endpoints** — `/search/hybrid`, `/search/knowledge`, `/search/examples` are untouched
 - **Slot-based re-ranking** — slots only filter candidates; existing RRF handles ranking
@@ -375,6 +375,6 @@ None — all changes use existing dependencies (turso/libsql, serde, chrono, uui
 
 - Raven RSM paper — Equation 18 (selective decay), fixed slot memory, sparse Top-K routing
 - `microgpt-rs/.plans/*` — plan format reference
-- `microgpt-rs` `WasmPruner` — Phase 2 WASM router will follow this pattern
+- microgpt-rs — Phase 2 neural router will follow this pattern
 - `anyrag/.plans/002_context_pollution_prevention.md` — `RrfWeights`, `SearchSourceType`, `RustConcept` (slot search reuses these)
 - `anyrag/.plans/003_self_improving_cycle.md` — episodic memory schema pattern (Turso/libsql with UUID v7)

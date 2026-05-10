@@ -51,6 +51,9 @@ pub struct GithubArgs {
     /// Extract and embed files referenced by `include_bytes!` macros.
     #[arg(long)]
     pub extract_included_files: bool,
+    /// Force re-ingestion even if the version already exists in the database.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 pub async fn handle_dump_github(args: &GithubArgs) -> Result<()> {
@@ -78,19 +81,21 @@ async fn handle_examples_dump(args: &GithubArgs) -> Result<()> {
         dump_type: crate::ingest::types::DumpType::Examples,
         includes: args.includes.clone(),
         excludes: args.excludes.clone(),
+        force: args.force,
     };
 
     let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
     let (ingested_count, ingested_version) = run_github_ingestion(&storage_manager, task).await?;
-    println!(
-        "✅ Successfully ingested {} unique examples from '{}' (version: {}).",
-        ingested_count, args.url, ingested_version
-    );
 
     if ingested_count == 0 {
         println!("No new examples were found to generate a markdown file.");
         return Ok(());
     }
+
+    println!(
+        "✅ Successfully ingested {} unique examples from '{}' (version: {}).",
+        ingested_count, args.url, ingested_version
+    );
 
     println!("📝 Generating consolidated examples file...");
     let repo_name = StorageManager::url_to_repo_name(&args.url);
@@ -138,7 +143,8 @@ async fn handle_examples_dump(args: &GithubArgs) -> Result<()> {
     markdown_content.push_str(&example_markdown);
 
     let safe_version = ingested_version.replace('/', "-");
-    let output_filename = format!("{repo_name}-{safe_version}-examples.md");
+    fs::create_dir_all("output")?;
+    let output_filename = format!("output/{repo_name}-{safe_version}-examples.md");
     fs::write(&output_filename, markdown_content)?;
     println!("✅ Successfully generated examples file: '{output_filename}'");
 
@@ -167,6 +173,7 @@ async fn handle_tests_dump(args: &GithubArgs) -> Result<()> {
         dump_type: crate::ingest::types::DumpType::Tests,
         includes: args.includes.clone(),
         excludes: args.excludes.clone(),
+        force: args.force,
     };
 
     let storage_manager = StorageManager::new(Some(constants::GITHUB_DB_DIR)).await?;
@@ -216,7 +223,8 @@ async fn handle_tests_dump(args: &GithubArgs) -> Result<()> {
     markdown_content.push_str(&test_markdown);
 
     let safe_version = ingested_version.replace('/', "-");
-    let output_filename = format!("{repo_name}-{safe_version}-tests.md");
+    fs::create_dir_all("output")?;
+    let output_filename = format!("output/{repo_name}-{safe_version}-tests.md");
     fs::write(&output_filename, markdown_content)?;
     println!("✅ Successfully generated tests file: '{output_filename}'");
 
@@ -235,6 +243,9 @@ async fn handle_src_dump(args: &GithubArgs) -> Result<()> {
     );
     println!("📥 Starting source code dump for '{}'...", args.url);
 
+    let repo_name = StorageManager::url_to_repo_name(&args.url);
+
+    // Task 4: Check if output file already exists before cloning
     let task = IngestionTask {
         url: args.url.clone(),
         version: args.version.clone(),
@@ -245,10 +256,29 @@ async fn handle_src_dump(args: &GithubArgs) -> Result<()> {
         dump_type: crate::ingest::types::DumpType::Src,
         includes: args.includes.clone(),
         excludes: args.excludes.clone(),
+        force: args.force,
     };
 
+    // Pre-check: skip clone if output file already exists (unless --force)
+    let version_placeholder = task.version.as_deref().unwrap_or("latest");
+    let safe_version = version_placeholder.replace('/', "-");
+    fs::create_dir_all("output")?;
+    let output_filename = format!("output/{repo_name}-{safe_version}-src.md");
+
+    if !args.force && fs::metadata(&output_filename).is_ok() {
+        println!("ℹ️  Output file '{output_filename}' already exists. Use --force to re-generate.");
+        return Ok(());
+    }
+
     let crawl_result = Crawler::crawl(&task).await?;
-    let repo_name = StorageManager::url_to_repo_name(&args.url);
+
+    // Re-check with discovered version
+    let safe_version = crawl_result.version.replace('/', "-");
+    let output_filename = format!("output/{repo_name}-{safe_version}-src.md");
+    if !args.force && fs::metadata(&output_filename).is_ok() {
+        println!("ℹ️  Output file '{output_filename}' already exists. Use --force to re-generate.");
+        return Ok(());
+    }
 
     println!("📝 Generating consolidated source code file...");
 
@@ -304,8 +334,6 @@ async fn handle_src_dump(args: &GithubArgs) -> Result<()> {
         .collect::<Vec<String>>()
         .join("---\n");
 
-    let safe_version = crawl_result.version.replace('/', "-");
-    let output_filename = format!("{repo_name}-{safe_version}-src.md");
     fs::write(&output_filename, markdown_content)?;
     println!("✅ Successfully generated source file: '{output_filename}'");
 

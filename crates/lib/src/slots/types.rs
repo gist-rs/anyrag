@@ -72,15 +72,15 @@ pub struct SlotDocument {
 pub enum RouteMethod {
     /// Phase 1: deterministic keyword matching.
     Keyword,
-    /// Phase 2 (future): WASM-based neural routing.
-    Wasm,
+    /// Phase 2 (future): embedding-based neural routing.
+    Neural,
 }
 
 impl std::fmt::Display for RouteMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RouteMethod::Keyword => write!(f, "keyword"),
-            RouteMethod::Wasm => write!(f, "wasm"),
+            RouteMethod::Neural => write!(f, "neural"),
         }
     }
 }

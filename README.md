@@ -22,7 +22,7 @@ A Rust-based platform for building a self-improving knowledge base from GitHub s
 - **Text-to-SQL** — Translates natural language prompts into executable SQL queries for Google BigQuery or local SQLite.
 - **Code RAG** — Ingest and search code examples from public GitHub repositories.
 - **Raven Routed Slot Memory** — Deterministic slot-based memory for code RAG. Documents are routed to named slots (e.g., `architecture`, `types`, `apis`, `dependencies`, `tests`, `chatter`) via keyword matching. Frozen slots never decay; non-frozen slots decay over time following Raven Equation 18: `score(t) = score₀ × exp(-λΔt)`. Slot-filtered search reduces context pollution by retrieving only from active slots.
-- **Episodic Memory & Self-Improving Cycle** — Record translation episodes, verify compilation results, and drive a state machine (`Collecting` → `Synthesizing` → `Exporting` → `Training` → `Upgrading`) toward autonomous LoRA fine-tuning. Export FAQ as JSONL for training data.
+- **Episodic Memory & Self-Improving Cycle** — Record translation episodes, verify compilation results, and drive a state machine (`Collecting` → `Synthesizing` → `Exporting` → `Training` → `Upgrading`) toward autonomous JSONL export. Export FAQ and episodes as structured JSONL for downstream training pipelines.
 - **Identity & Ownership** — JWT + Google OAuth2 authentication with deterministic "Guest User" fallback. Search results are filtered by owner.
 - **Config-Driven** — YAML configuration with environment variable substitution, per-provider prompt templates, and `prompt.yml` overrides.
 

@@ -39,6 +39,8 @@ struct IngestSource {
     includes: Option<Vec<String>>,
     #[serde(default)]
     excludes: Option<Vec<String>>,
+    #[serde(default)]
+    force: bool,
 }
 
 use std::sync::Arc;
@@ -99,6 +101,7 @@ impl Ingestor for GithubIngestor {
             dump_type: ingest_source.dump_type,
             includes: ingest_source.includes,
             excludes: ingest_source.excludes,
+            force: ingest_source.force,
         };
 
         // 3. Run the ingestion pipeline.

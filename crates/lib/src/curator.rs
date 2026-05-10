@@ -19,7 +19,7 @@
 //! ## Training Data Synthesis (Plan 003)
 //!
 //! The Curator also synthesizes successful RIIR translation episodes into structured
-//! training pairs for LoRA fine-tuning. This is the "Day 30" step of the self-improving
+//! training pairs as JSONL. This is the "Day 30" step of the self-improving
 //! cycle — turning episodic memory into fine-tuning data.
 //!
 //! This strategy robustly consolidates contradictory or fragmented information into a single,
@@ -56,18 +56,18 @@ pub struct SynthesisStats {
     pub group_count: usize,
 }
 
-/// The result of a LoRA export operation.
+/// The result of a training JSONL export operation.
 #[derive(Debug, Clone, Serialize)]
-pub struct LoraExport {
+pub struct TrainingExport {
     /// The JSONL training data (one JSON object per line).
     pub training_jsonl: String,
     /// Statistics about the export.
-    pub stats: LoraExportStats,
+    pub stats: TrainingExportStats,
 }
 
-/// Statistics about a LoRA export.
+/// Statistics about a training JSONL export.
 #[derive(Debug, Clone, Serialize)]
-pub struct LoraExportStats {
+pub struct TrainingExportStats {
     /// Number of FAQ pairs included.
     pub faq_pairs: usize,
     /// Number of translation pairs included.
@@ -211,7 +211,7 @@ impl<'a> Curator<'a> {
     ///
     /// This is the "Day 30" step of the self-improving cycle. It fetches successful
     /// episodes, groups them by similarity, and uses an LLM to create canonical Q&A pairs
-    /// suitable for LoRA fine-tuning.
+    /// suitable for downstream training pipelines.
     ///
     /// # Arguments
     ///
@@ -296,16 +296,16 @@ impl<'a> Curator<'a> {
         Ok(stats)
     }
 
-    /// Exports training data for LoRA fine-tuning.
+    /// Exports training data for downstream training pipelines.
     ///
     /// Produces JSONL combining:
     /// 1. FAQ pairs from structured YAML documents (existing).
     /// 2. Successful translation episodes (new).
-    pub async fn export_for_lora(
+    pub async fn export_training_jsonl(
         &self,
         max_episodes: usize,
         since: Option<&str>,
-    ) -> Result<LoraExport> {
+    ) -> Result<TrainingExport> {
         let conn = self.db_provider.db.connect()?;
 
         // 1. FAQ pairs from existing export logic.
@@ -316,7 +316,7 @@ impl<'a> Curator<'a> {
         // 2. Successful translation episodes as direct training pairs.
         let episodes = episodic::get_successful_episodes(&conn, max_episodes, since)
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to fetch episodes for LoRA export: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("Failed to fetch episodes for JSONL export: {e}"))?;
 
         let mut jsonl_lines: Vec<String> = faq_jsonl
             .lines()
@@ -336,19 +336,19 @@ impl<'a> Curator<'a> {
             jsonl_lines.push(jsonl);
         }
 
-        let stats = LoraExportStats {
+        let stats = TrainingExportStats {
             faq_pairs: faq_count,
             translation_pairs: episodes.len(),
         };
 
         info!(
-            "LoRA export produced {} lines ({} FAQ + {} translation).",
+            "JSONL export produced {} lines ({} FAQ + {} translation).",
             jsonl_lines.len(),
             stats.faq_pairs,
             stats.translation_pairs
         );
 
-        Ok(LoraExport {
+        Ok(TrainingExport {
             training_jsonl: jsonl_lines.join("\n"),
             stats,
         })

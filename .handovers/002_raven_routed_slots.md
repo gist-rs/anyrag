@@ -76,7 +76,7 @@ These should be added to `crates/server/tests/` or `crates/lib/tests/slots_test.
 - [ ] 7.3 Benchmark: decay calculation overhead on 10K slot_documents
 
 ### Future (Phase 2 — Out of Scope)
-- Neural/WASM router following `microgpt-rs` `WasmPruner` pattern
+- Neural router following `microgpt-rs` pattern
 - LLM-based slot routing
 - Slot-based re-ranking integration with existing RRF pipeline
 
