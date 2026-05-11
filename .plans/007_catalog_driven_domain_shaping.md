@@ -10,13 +10,13 @@ anyrag already has `domains.toml`-driven routing with keywords and pruners. This
 
 ## Tasks
 
-- [ ] T1: Add truncation policy to domain config (`mode`: tokens|bytes, `limit`: u32)
-- [ ] T2: Add reasoning retention policy to domain config (`keep_on_tool_calls`: bool, `keep_on_plain`: bool)
-- [ ] T3: Add `/v1/models/{domain}` endpoint — returns domain expert metadata (keywords, truncation, reasoning, tools)
-- [ ] T4: Add `/v1/tokenize` endpoint — wraps existing tokenizer for pre-request token counting
-- [ ] T5: Add `/v1/detokenize` endpoint — inverse of tokenize
+- [x] T1: Add truncation policy to domain config (`mode`: tokens|bytes, `limit`: u32)
+- [x] T2: Add reasoning retention policy to domain config (`keep_on_tool_calls`: bool, `keep_on_plain`: bool)
+- [x] T3: Add `/v1/models/{domain}` endpoint — returns domain expert metadata (keywords, truncation, reasoning, tools)
+- [x] T4: Add `/v1/tokenize` endpoint — wraps existing tokenizer for pre-request token counting
+- [x] T5: Add `/v1/detokenize` endpoint — inverse of tokenize
 - [ ] T6: Ensure stable prompt prefix — no per-request metadata at position zero that would poison KV cache
-- [ ] T7: Update README.md with catalog-driven shaping section
+- [x] T7: Update README.md with catalog-driven shaping section
 
 ## Design Notes
 

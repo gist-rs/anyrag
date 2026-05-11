@@ -35,6 +35,15 @@ pub fn create_router(app_state: AppState) -> Router {
         // --- Slot Management & Routed Search Routes ---
         // --- Domain Classification Route ---
         .route("/classify/domain", post(handlers::classify_domain_handler))
+        // --- Catalog-Driven Domain Shaping Routes (Plan 007) ---
+        .route("/v1/models", get(handlers::list_domain_models_handler))
+        .route(
+            "/v1/models/{domain}",
+            get(handlers::get_domain_model_handler),
+        )
+        .route("/v1/tokenize", post(handlers::tokenize_handler))
+        .route("/v1/detokenize", post(handlers::detokenize_handler))
+        // --- Slot Management & Routed Search Routes ---
         .route("/search/slots", post(handlers::slot_search_handler))
         .route("/slots", get(handlers::list_slots_handler))
         .route("/slots", post(handlers::create_slot_handler))

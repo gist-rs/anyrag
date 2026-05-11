@@ -121,7 +121,11 @@ impl HybridClassifier {
         let top = ranked.remove(0);
         let alternatives: Vec<DomainScore> = ranked
             .into_iter()
-            .map(|(domain, confidence, _, _)| DomainScore { domain, confidence })
+            .map(|(domain, confidence, _, _)| DomainScore {
+                domain,
+                confidence,
+                inference: None,
+            })
             .collect();
 
         Ok(ClassificationResult {
@@ -129,6 +133,7 @@ impl HybridClassifier {
             confidence: top.1,
             matched_slots: top.2,
             alternatives,
+            inference: None,
         })
     }
 }

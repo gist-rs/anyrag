@@ -69,7 +69,9 @@ use super::{wrap_response, ApiResponse, AppError, AppState, DebugParams};
 use crate::auth::middleware::AuthenticatedUser;
 use anyrag::{
     providers::{ai::generate_embeddings_batch, db::storage::VectorSearch},
-    router::{ClassificationResult, DomainDefinition, HybridClassifier, ScoredDomain},
+    router::{
+        ClassificationResult, DomainDefinition, HybridClassifier, InferenceBudget, ScoredDomain,
+    },
     types::DomainMapping,
 };
 use axum::{
@@ -149,9 +151,17 @@ pub async fn classify_domain_handler(
 
     // Step 3: Classify using hybrid scoring
     let classifier = HybridClassifier::new();
-    let result = classifier
+    let mut result = classifier
         .classify_from_scores(scored_domains)
         .map_err(|e| AppError::Internal(anyhow::anyhow!("{e}")))?;
+
+    // Wire inference budget from config when using defaults
+    if used_defaults {
+        result.inference = lookup_inference(&result.domain, &app_state.config.domain_mappings);
+        for alt in &mut result.alternatives {
+            alt.inference = lookup_inference(&alt.domain, &app_state.config.domain_mappings);
+        }
+    }
 
     info!(
         "Classified as '{}' (confidence: {:.2})",
@@ -165,6 +175,18 @@ pub async fn classify_domain_handler(
     });
 
     Ok(wrap_response(result, debug_params, Some(debug_info)))
+}
+
+/// Look up a domain's inference budget from config mappings.
+fn lookup_inference(
+    domain_name: &str,
+    config_mappings: &[DomainMapping],
+) -> Option<InferenceBudget> {
+    config_mappings
+        .iter()
+        .find(|m| m.domain == domain_name)
+        .and_then(|m| m.inference.clone())
+        .map(|b| b.resolve())
 }
 
 /// Resolve candidate domains from the request, or fall back to config defaults.
@@ -284,11 +306,19 @@ mod tests {
                     "puzzle".to_string(),
                     "grid".to_string(),
                 ],
+                truncation: None,
+                reasoning: None,
+                hints: None,
+                inference: None,
             },
             DomainMapping {
                 domain: "rust_code".to_string(),
                 slots: vec!["apis".to_string(), "types".to_string()],
                 keywords: vec!["rust".to_string(), "cargo".to_string(), "axum".to_string()],
+                truncation: None,
+                reasoning: None,
+                hints: None,
+                inference: None,
             },
         ]
     }

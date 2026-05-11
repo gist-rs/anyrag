@@ -317,6 +317,83 @@ curl -X POST http://localhost:3000/search/slots \
 
 See **[EXAMPLES.md](EXAMPLES.md)** for detailed `curl` examples for every endpoint.
 
+## Catalog-Driven Domain Shaping
+
+Each domain in anyrag is a **catalog entry** that shapes agent behavior — not just routing, but truncation policy, reasoning retention, inference budget, and agent hints. This follows NVIDIA Dynamo's finding that catalog metadata changes agent behavior as much as the model itself.
+
+### Domain Configuration
+
+```toml
+[[domain_mapping]]
+domain = "py2rs"
+slots = ["apis", "types"]
+keywords = ["python", "rewrite", "fastapi", "translate"]
+
+[domain_mapping.truncation]
+mode = "tokens"    # "tokens" or "bytes"
+limit = 10000
+
+[domain_mapping.reasoning]
+keep_on_tool_calls = true
+keep_on_plain = false
+
+[domain_mapping.hints]
+latency_sensitivity = 0.8
+speculative_prefill = true
+
+[domain_mapping.inference]
+tree_budget = 5000
+draft_lookahead = 12
+screening_threshold = 0.3
+```
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/v1/models` | GET | List all configured domain experts |
+| `/v1/models/{domain}` | GET | Get metadata for a specific domain |
+| `/v1/tokenize` | POST | Estimate token count for text |
+| `/v1/detokenize` | POST | Detokenize token IDs to text (stub) |
+
+## Inference Budget API
+
+The `/classify/domain` endpoint returns per-domain **inference budget** parameters alongside domain classification. This lets consumers (microgpt-rs, riir-router) adjust compute spending per domain.
+
+### Extended Classify Response
+
+```json
+{
+  "domain": "py2rs",
+  "confidence": 0.92,
+  "matched_slots": ["apis", "types"],
+  "inference": {
+    "tree_budget": 5000,
+    "draft_lookahead": 12,
+    "screening_threshold": 0.3
+  },
+  "alternatives": [
+    { "domain": "rust_code", "confidence": 0.67, "inference": { "tree_budget": 3000 } }
+  ]
+}
+```
+
+### β Shorthand
+
+Instead of explicit values, domains can specify a single `beta` scalar [0.0, 1.0] that maps to compute parameters:
+
+```toml
+[domain_mapping.inference]
+beta = 0.8  # → tree_budget=4000, draft_lookahead=12, screening_threshold=0.6
+```
+
+### Deployment Modes
+
+| Mode | Config Source | Use Case |
+|---|---|---|
+| Offline TOML | riir-router reads domains.toml from disk | Single-node, low-latency |
+| Online API | microgpt-rs calls anyrag /classify/domain | SaaS, multi-tenant, dynamic |
+
 ## Configuration
 
 The server uses a layered YAML config system with environment variable substitution:
