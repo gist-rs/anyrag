@@ -7,6 +7,7 @@
 // Sub-modules for different handler categories.
 pub mod admin_handlers;
 pub mod auth_handlers;
+pub mod cache_handlers;
 pub mod catalog;
 pub mod classify;
 pub mod db_handlers;
@@ -26,6 +27,7 @@ pub mod slots;
 // to the router under a single `handlers::` path.
 pub use admin_handlers::*;
 pub use auth_handlers::*;
+pub use cache_handlers::*;
 pub use catalog::*;
 pub use classify::*;
 pub use db_handlers::*;

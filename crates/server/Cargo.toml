@@ -63,7 +63,8 @@ web = ["dep:anyrag-web"]
 pdf = ["dep:anyrag-pdf"]
 sheets = ["dep:anyrag-sheets"]
 text = ["dep:anyrag-text"]
-full = ["bigquery", "graph_db", "rss", "firebase", "github", "web", "pdf", "sheets", "text"]
+solution-cache = ["anyrag/solution-cache"]
+full = ["bigquery", "graph_db", "rss", "firebase", "github", "web", "pdf", "sheets", "text", "solution-cache"]
 
 [dev-dependencies]
 anyrag-test-utils = { path = "../test-utils", features = ["pdf"] }

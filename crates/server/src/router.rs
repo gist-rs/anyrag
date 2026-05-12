@@ -163,6 +163,14 @@ pub fn create_router(app_state: AppState) -> Router {
             .route("/graph/build", post(handlers::graph_build_handler));
     }
 
+    #[cfg(feature = "solution-cache")]
+    {
+        router = router
+            .route("/cache/stats", get(handlers::cache_stats_handler))
+            .route("/cache/export", post(handlers::cache_export_handler))
+            .route("/cache/prune", delete(handlers::cache_prune_handler));
+    }
+
     router
         .with_state(app_state)
         .layer(TraceLayer::new_for_http())
