@@ -63,6 +63,7 @@ firebase = ["dep:gcloud-sdk", "dep:tokio-stream", "dep:firestore"]
 pdf = ["dep:pdf"]
 sheets = ["dep:csv"]
 rss = ["dep:rss"]
+solution-cache = []
 
 [[test]]
 name = "prompts"

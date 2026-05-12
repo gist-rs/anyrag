@@ -21,6 +21,9 @@ pub mod search;
 pub mod slots;
 pub mod types;
 
+#[cfg(feature = "solution-cache")]
+pub mod cache;
+
 pub use errors::PromptError;
 pub use executor::AnyragExecutor;
 pub use rerank::{RerankError, Rerankable, RrfWeights};
