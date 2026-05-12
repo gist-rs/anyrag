@@ -15,7 +15,7 @@ anyrag already has `domains.toml`-driven routing with keywords and pruners. This
 - [x] T3: Add `/v1/models/{domain}` endpoint — returns domain expert metadata (keywords, truncation, reasoning, tools)
 - [x] T4: Add `/v1/tokenize` endpoint — wraps existing tokenizer for pre-request token counting
 - [x] T5: Add `/v1/detokenize` endpoint — inverse of tokenize
-- [ ] T6: Ensure stable prompt prefix — no per-request metadata at position zero that would poison KV cache
+- [x] T6: Ensure stable prompt prefix — no per-request metadata at position zero that would poison KV cache
 - [x] T7: Update README.md with catalog-driven shaping section
 
 ## Design Notes

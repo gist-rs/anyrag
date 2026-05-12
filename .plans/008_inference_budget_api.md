@@ -257,13 +257,13 @@ Hybrid (both):
 
 ## Success Criteria
 
-- [ ] `InferenceBudget` serde round-trips correctly
-- [ ] `/classify/domain` returns `inference` for domains with configured budget
-- [ ] `/classify/domain` returns `inference: null` for domains without budget
-- [ ] Alternatives carry their own inference budgets
-- [ ] `beta = 0.8` in TOML resolves to correct explicit values in API response
-- [ ] Existing classify tests pass unchanged
-- [ ] Default domain mappings include inference budgets for known domains
+- [x] `InferenceBudget` serde round-trips correctly
+- [x] `/classify/domain` returns `inference` for domains with configured budget
+- [x] `/classify/domain` returns `inference: null` for domains without budget
+- [x] Alternatives carry their own inference budgets
+- [x] `beta = 0.8` in TOML resolves to correct explicit values in API response
+- [x] Existing classify tests pass unchanged
+- [x] Default domain mappings include inference budgets for known domains
 
 ---
 
