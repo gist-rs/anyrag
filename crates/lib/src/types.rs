@@ -2,6 +2,9 @@
 use crate::prompts::tasks::{RSS_SUMMARIZATION_SYSTEM_PROMPT, RSS_SUMMARIZATION_USER_PROMPT};
 #[cfg(feature = "bigquery")]
 use crate::providers::db::bigquery::BigQueryProvider;
+use crate::router::types::{
+    DomainHints, InferenceBudget, ReasoningPolicy, TruncationMode, TruncationPolicy,
+};
 use crate::{
     constants,
     errors::PromptError,
@@ -465,6 +468,18 @@ pub struct DomainMapping {
     /// Keywords for keyword overlap scoring (case-insensitive).
     #[serde(default)]
     pub keywords: Vec<String>,
+    /// Truncation policy for context window management.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation: Option<TruncationPolicy>,
+    /// Reasoning retention policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ReasoningPolicy>,
+    /// Agent hints for behavior optimization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hints: Option<DomainHints>,
+    /// Per-domain inference budget parameters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inference: Option<InferenceBudget>,
 }
 
 /// Default domain mappings matching `microgpt-rs/domains.toml`.
@@ -484,6 +499,22 @@ fn default_domain_mappings() -> Vec<DomainMapping> {
                 "9x9".to_string(),
                 "digit".to_string(),
             ],
+            truncation: Some(TruncationPolicy {
+                mode: TruncationMode::Tokens,
+                limit: 4096,
+            }),
+            reasoning: Some(ReasoningPolicy {
+                keep_on_tool_calls: false,
+                keep_on_plain: false,
+            }),
+            hints: None,
+            inference: Some(InferenceBudget {
+                tree_budget: Some(100),
+                draft_lookahead: None,
+                screening_threshold: None,
+                temperature: None,
+                beta: None,
+            }),
         },
         DomainMapping {
             domain: "pathfinding".to_string(),
@@ -496,6 +527,19 @@ fn default_domain_mappings() -> Vec<DomainMapping> {
                 "tactical".to_string(),
                 "grid".to_string(),
             ],
+            truncation: Some(TruncationPolicy {
+                mode: TruncationMode::Tokens,
+                limit: 4096,
+            }),
+            reasoning: None,
+            hints: None,
+            inference: Some(InferenceBudget {
+                tree_budget: Some(1000),
+                draft_lookahead: None,
+                screening_threshold: None,
+                temperature: None,
+                beta: None,
+            }),
         },
         DomainMapping {
             domain: "rust_code".to_string(),
@@ -513,6 +557,25 @@ fn default_domain_mappings() -> Vec<DomainMapping> {
                 "impl".to_string(),
                 "compile".to_string(),
             ],
+            truncation: Some(TruncationPolicy {
+                mode: TruncationMode::Tokens,
+                limit: 8192,
+            }),
+            reasoning: Some(ReasoningPolicy {
+                keep_on_tool_calls: true,
+                keep_on_plain: false,
+            }),
+            hints: Some(DomainHints {
+                latency_sensitivity: Some(0.5),
+                speculative_prefill: false,
+            }),
+            inference: Some(InferenceBudget {
+                tree_budget: Some(3000),
+                draft_lookahead: Some(10),
+                screening_threshold: None,
+                temperature: None,
+                beta: None,
+            }),
         },
         DomainMapping {
             domain: "py2rs".to_string(),
@@ -524,11 +587,34 @@ fn default_domain_mappings() -> Vec<DomainMapping> {
                 "flask".to_string(),
                 "translate".to_string(),
             ],
+            truncation: Some(TruncationPolicy {
+                mode: TruncationMode::Tokens,
+                limit: 10000,
+            }),
+            reasoning: Some(ReasoningPolicy {
+                keep_on_tool_calls: true,
+                keep_on_plain: false,
+            }),
+            hints: Some(DomainHints {
+                latency_sensitivity: Some(0.8),
+                speculative_prefill: true,
+            }),
+            inference: Some(InferenceBudget {
+                tree_budget: Some(5000),
+                draft_lookahead: Some(12),
+                screening_threshold: Some(0.3),
+                temperature: None,
+                beta: None,
+            }),
         },
         DomainMapping {
             domain: "general".to_string(),
             slots: vec![],
             keywords: vec![],
+            truncation: None,
+            reasoning: None,
+            hints: None,
+            inference: None,
         },
     ]
 }

@@ -20,4 +20,7 @@ pub mod types;
 
 pub use classifier::DomainClassifier;
 pub use hybrid::{HybridClassifier, ScoredDomain};
-pub use types::{ClassificationResult, ClassifyError, DomainDefinition, DomainScore};
+pub use types::{
+    ClassificationResult, ClassifyError, DomainDefinition, DomainHints, DomainScore,
+    InferenceBudget, ReasoningPolicy, TruncationMode, TruncationPolicy,
+};

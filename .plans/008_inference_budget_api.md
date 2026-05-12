@@ -1,6 +1,6 @@
 # Plan 008: Inference Budget API — Serve Domain Compute Parameters
 
-> **Status: NOT STARTED**
+> **Status: COMPLETE**
 > **Cross-Ref:** `riir-ai/.plans/026_autotts_dynamic_inference_budget.md` (consumer), `anyrag/.plans/007_catalog_driven_domain_shaping.md` (sibling)
 > **Research:** `microgpt-rs/.research/16_AutoTTS_Dynamic_Test_Time_Scaling.md`
 
@@ -77,13 +77,13 @@ Both endpoints read from the same `DomainMapping.inference` config field.
 
 ### Phase 1: Types & Config
 
-- [ ] **Task 1: Add `InferenceBudget` struct** (`crates/lib/src/router/types.rs`)
+- [x] **Task 1: Add `InferenceBudget` struct** (`crates/lib/src/router/types.rs`)
   - Optional fields: `tree_budget: Option<usize>`, `draft_lookahead: Option<usize>`, `screening_threshold: Option<f32>`, `temperature: Option<f32>`, `beta: Option<f32>`
   - `#[serde(default)]` on all fields — domains without budget get `None`
   - `#[derive(Debug, Clone, Serialize, Deserialize)]`
   - Unit tests: serde round-trip, `None` defaults, partial fields
 
-- [ ] **Task 2: Add `inference` field to `DomainMapping`** (`crates/lib/src/types.rs`)
+- [x] **Task 2: Add `inference` field to `DomainMapping`** (`crates/lib/src/types.rs`)
   - `pub inference: Option<InferenceBudget>` with `#[serde(default)]`
   - Re-export `InferenceBudget` from `crate::router::types`
   - Backward compatible — existing configs without `[domain.inference]` work unchanged
@@ -97,16 +97,16 @@ Both endpoints read from the same `DomainMapping.inference` config field.
 
 ### Phase 2: API Response Extension
 
-- [ ] **Task 3: Add `inference` to `ClassificationResult`** (`crates/lib/src/router/types.rs`)
+- [x] **Task 3: Add `inference` to `ClassificationResult`** (`crates/lib/src/router/types.rs`)
   - `pub inference: Option<InferenceBudget>` field
   - `#[serde(skip_serializing_if = "Option::is_none")]` — clean JSON when absent
   - Backward compatible — existing clients ignore unknown fields
 
-- [ ] **Task 4: Add `inference` to `DomainScore`** (`crates/lib/src/router/types.rs`)
+- [x] **Task 4: Add `inference` to `DomainScore`** (`crates/lib/src/router/types.rs`)
   - `pub inference: Option<InferenceBudget>` field
   - Each alternative domain carries its own budget parameters
 
-- [ ] **Task 5: Wire budget through classify handler** (`crates/server/src/handlers/classify.rs`)
+- [x] **Task 5: Wire budget through classify handler** (`crates/server/src/handlers/classify.rs`)
   - When building `ClassificationResult`, look up the winning domain's `inference` from config
   - For alternatives, look up each domain's `inference` from config
   - `resolve_candidate_domains()` already converts `DomainMapping` → `DomainDefinition`; extend to carry `inference`
@@ -114,7 +114,7 @@ Both endpoints read from the same `DomainMapping.inference` config field.
 
 ### Phase 3: β Parameterization (Optional Convenience)
 
-- [ ] **Task 6: Add `InferenceBudget::resolve()` method** (`crates/lib/src/router/types.rs`)
+- [x] **Task 6: Add `InferenceBudget::resolve()` method** (`crates/lib/src/router/types.rs`)
   - If `beta` is set and explicit fields are `None`, derive from beta
   - If explicit fields are set, use them (ignore beta)
   - Same monotonic mapping as `riir-ai` Plan 026:
@@ -132,14 +132,14 @@ Both endpoints read from the same `DomainMapping.inference` config field.
 
 ### Phase 4: Docs & Tests
 
-- [ ] **Task 7: Integration tests** (`crates/server/tests/classify_test.rs`)
+- [x] **Task 7: Integration tests** (`crates/server/tests/classify_test.rs`)
   - Test: classify "translate FastAPI to Axum" → domain "py2rs" with `inference.tree_budget == 5000`
   - Test: classify "solve this sudoku" → domain "sudoku" with `inference.tree_budget == 100`
   - Test: classify "hello world" → domain "general" with `inference == None`
   - Test: alternatives carry their own inference budgets
   - Test: TOML with `beta = 0.8` resolves to correct explicit values
 
-- [ ] **Task 8: Update README.md**
+- [x] **Task 8: Update README.md**
   - Add `Inference Budget API` section
   - Show extended `/classify/domain` response with inference field
   - Document TOML config format: explicit values vs `beta`
