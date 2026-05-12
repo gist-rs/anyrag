@@ -141,8 +141,8 @@ full = ["bigquery", "graph_db", "rss", "firebase", "github", "web", "pdf", "shee
 
 | Crate | Description |
 |---|---|
-| **[`anyrag`](crates/lib)** | Core library — AI/DB providers, search pipeline, re-ranking, curator, knowledge graph, episodic memory, self-improving cycle, Raven routed slot memory, ingestion traits, prompt templates, types |
-| **[`anyrag-server`](crates/server)** | Axum web server — REST API with feature-flagged routes, JWT/OAuth2 auth, episodes & cycle endpoints, config-driven prompt management |
+| **[`anyrag`](crates/lib)** | Core library — AI/DB providers, search pipeline, re-ranking, curator, knowledge graph, episodic memory, self-improving cycle, Raven routed slot memory, domain classifier router (keyword + embedding hybrid), catalog-driven domain shaping, inference budget API, ingestion traits, prompt templates, types |
+| **[`anyrag-server`](crates/server)** | Axum web server — REST API with feature-flagged routes, JWT/OAuth2 auth, episodes & cycle endpoints, domain classification, catalog-driven shaping (`/v1/models`), slot management, inference budget API, config-driven prompt management |
 | **[`anyrag-cli`](crates/cli)** | CLI tool — `login`, `dump firebase`, `dump github`, `process`, `list`, `count` commands |
 | **[`anyrag-github`](crates/github)** | GitHub ingestion — clone repos, extract code examples/tests/src, version-aware search with embeddings |
 | **[`anyrag-web`](crates/web)** | Web ingestion — `WebIngestor` with `WebIngestStrategy` (`RawHtml` or `Jina`), fetch URLs, convert HTML to Markdown, AI restructuring into structured YAML |
@@ -175,16 +175,17 @@ anyrag/
 │   │       ├── graph/          # Knowledge graph (indradb)
 │   │       ├── prompts/        # System/user prompt templates
 │   │       ├── providers/      # AI + DB provider abstractions
+│   │       ├── router/         # Domain classifier (trait, hybrid scorer, inference budget types)
 │   │       ├── slots/          # Raven Routed Slot Memory (types, router, decay, search, ingest, seeder)
 │   │       ├── ingest/         # Ingestion traits, episodic memory, knowledge, embeddings
-│   │       └── types.rs        # Shared data structures
+│   │       └── types.rs        # Shared data structures (DomainMapping, config types)
 │   ├── server/             # Axum REST API server
 │   │   └── src/
 │   │       ├── router.rs       # Feature-flagged route definitions
 │   │       ├── config.rs       # YAML config with env var substitution
 │   │       ├── state.rs        # AppState, AI/DB providers, cycle mutex
 │   │       ├── auth/           # JWT + Google OAuth2
-│   │       └── handlers/       # Route handlers (ingest, search, admin, episodes)
+│   │       └── handlers/       # Route handlers (ingest, search, admin, episodes, classify, catalog, slots)
 │   ├── cli/                # Administrative CLI
 │   ├── github/             # GitHub repo ingestion + code RAG
 │   ├── web/                # Web URL ingestion
