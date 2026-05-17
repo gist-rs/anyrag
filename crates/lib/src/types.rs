@@ -255,6 +255,7 @@ impl Rerankable for SearchResult {
 /// Determines how code vs documentation results are weighted during fusion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum QueryContext {
     /// Code generation: code_boost=10, doc_penalty=0.5
     CodeGeneration,
@@ -269,6 +270,7 @@ pub enum QueryContext {
 /// Queries are classified by concept and routed to filtered vector search.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum RustConcept {
     Lifetimes,
     Macros,

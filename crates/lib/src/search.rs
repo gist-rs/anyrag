@@ -21,12 +21,23 @@ use serde::{Deserialize, Serialize};
 use serde_yaml;
 
 use std::sync::Arc;
+use std::sync::LazyLock;
 use thiserror::Error;
 use tracing::{debug, info, warn};
+
+static STOP_WORDS: LazyLock<std::collections::HashSet<&'static str>> = LazyLock::new(|| {
+    std::collections::HashSet::from([
+        "a", "an", "the", "in", "on", "at", "for", "to", "of", "is", "are", "was", "were", "i",
+        "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your",
+        "his", "its", "our", "their", "and", "but", "or", "so", "if", "about", "with", "by",
+        "tell", "what",
+    ])
+});
 
 /// Defines the re-ranking strategy for hybrid search.
 #[derive(Default, Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum SearchMode {
     /// Uses a Large Language Model to intelligently re-rank candidates. (Default)
     #[default]
@@ -118,7 +129,7 @@ pub enum SearchError {
 /// Returns an empty vector if no concepts match, which causes a fallback
 /// to unfiltered search.
 pub fn classify_concepts(entities: &[String], keyphrases: &[String]) -> Vec<RustConcept> {
-    let mut concepts = Vec::new();
+    let mut concepts = Vec::with_capacity(4);
     for entity in entities.iter().chain(keyphrases.iter()) {
         let e = entity.to_lowercase();
         if e.contains("lifetime") || e.contains("'a") || e.contains("'static") {
@@ -296,23 +307,13 @@ where
     // --- Sequential Retrieval ---
     // Augment AI-extracted keyphrases with raw keywords from the original query, filtering for stopwords.
     let mut keyphrases_meta = analyzed_query.keyphrases.clone();
-    let stop_words: std::collections::HashSet<&str> = [
-        "a", "an", "the", "in", "on", "at", "for", "to", "of", "is", "are", "was", "were", "i",
-        "you", "he", "she", "it", "we", "they", "me", "him", "her", "us", "them", "my", "your",
-        "his", "its", "our", "their", "and", "but", "or", "so", "if", "about", "with", "by",
-        "tell", "what",
-    ]
-    .iter()
-    .cloned()
-    .collect();
-
     keyphrases_meta.extend(
         options
             .query_text
             .to_lowercase()
             .split_whitespace()
             .map(String::from)
-            .filter(|word| !stop_words.contains(word.as_str())),
+            .filter(|word| !STOP_WORDS.contains(word.as_str())),
     );
     keyphrases_meta.sort();
     keyphrases_meta.dedup();
@@ -446,7 +447,7 @@ where
     );
 
     // --- Step 4: Parse YAML and Expand into Contextual Chunks ---
-    let mut contextual_chunks = Vec::new();
+    let mut contextual_chunks = Vec::with_capacity(ranked_parent_documents.len());
     for parent_doc in ranked_parent_documents {
         // Heuristic: only attempt YAML parsing if it looks like our structured format.
         if parent_doc.description.trim().starts_with("sections:") {

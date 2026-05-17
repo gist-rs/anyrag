@@ -32,6 +32,7 @@ impl Default for CycleConfig {
 /// State machine for the self-improving cycle.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
+#[repr(u8)]
 pub enum CycleState {
     /// Recording episodes
     Collecting,

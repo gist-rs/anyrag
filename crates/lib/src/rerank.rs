@@ -208,10 +208,11 @@ pub fn reciprocal_rank_fusion_weighted(
         result_sets.len()
     );
 
-    let mut rrf_scores: HashMap<String, f64> = HashMap::new();
+    let total: usize = result_sets.iter().map(|s| s.len()).sum();
+    let mut rrf_scores: HashMap<String, f64> = HashMap::with_capacity(total);
     let k = 60.0; // Standard RRF constant
 
-    let mut all_unique_results: HashMap<String, SearchResult> = HashMap::new();
+    let mut all_unique_results: HashMap<String, SearchResult> = HashMap::with_capacity(total);
 
     for (set_index, results) in result_sets.iter().enumerate() {
         let set_weight = weights.set_weight(set_index);
@@ -244,21 +245,18 @@ pub fn reciprocal_rank_fusion_weighted(
 
     let mut combined_results: Vec<SearchResult> = all_unique_results.into_values().collect();
 
-    combined_results.sort_by(|a, b| {
-        let key_a = format!("{}::{}", a.link, a.description);
-        let score_a = rrf_scores.get(&key_a).unwrap_or(&0.0);
-        let key_b = format!("{}::{}", b.link, b.description);
-        let score_b = rrf_scores.get(&key_b).unwrap_or(&0.0);
-        score_b
-            .partial_cmp(score_a)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // Update the final score in each result for debugging/transparency
+    // Pre-compute scores before sort — zero allocations in comparator
     for result in &mut combined_results {
         let key = format!("{}::{}", result.link, result.description);
         result.score = *rrf_scores.get(&key).unwrap_or(&0.0);
     }
+
+    // Sort by pre-computed score
+    combined_results.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     debug!("Final weighted RRF scores: {:?}", rrf_scores);
     combined_results
