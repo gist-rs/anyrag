@@ -1,6 +1,6 @@
 # Plan 007: Catalog-Driven Domain Shaping & API Fidelity
 
-> Distilled from [NVIDIA Dynamo Agentic Inference Lessons](../../microgpt-rs/.research/001_nvidia_dynamo_agentic_lessons.md)
+> Distilled from [NVIDIA Dynamo Agentic Inference Lessons](../../katgpt-rs/.research/001_nvidia_dynamo_agentic_lessons.md)
 
 ## Context
 
@@ -27,7 +27,7 @@ Dynamo's finding: two endpoints serving the **same model** produced **different 
 - Reasoning: catalog-derived reasoning settings enabled/disabled encrypted_content replay
 - System prompt: fallback profile used generic instructions, catalog profile used model-specific instructions
 
-For anyrag, each domain is effectively a "catalog entry" that shapes how microgpt-rs uses that expert.
+For anyrag, each domain is effectively a "catalog entry" that shapes how katgpt-rs uses that expert.
 
 ### Domain Config Extension
 
@@ -71,7 +71,7 @@ Returns metadata for a domain expert. This is what Dynamo's `GET /v1/models/{mod
 
 ### `/v1/tokenize` Endpoint
 
-Wraps the existing tokenizer. Harnesses (microgpt-rs, future agents) use this for context accounting — deciding when to compact conversation before exceeding model window.
+Wraps the existing tokenizer. Harnesses (katgpt-rs, future agents) use this for context accounting — deciding when to compact conversation before exceeding model window.
 
 ```json
 POST /v1/tokenize
@@ -88,7 +88,7 @@ Dynamo showed that varying content at position zero causes 5× TTFT penalty. For
 
 ### Embedding Router Validation
 
-Plan 024 (microgpt-rs) uses `POST /search/embedding` for KV cache priming. Dynamo's work validates this pattern — but we should measure:
+Plan 024 (katgpt-rs) uses `POST /search/embedding` for KV cache priming. Dynamo's work validates this pattern — but we should measure:
 - Do relevant embeddings actually improve draft acceptance rate?
 - What's the latency impact of the embedding lookup vs the TTFT improvement?
 - Is the three-tier fallback (embedding → classify → keyword) exercised in practice?
@@ -96,11 +96,11 @@ Plan 024 (microgpt-rs) uses `POST /search/embedding` for KV cache priming. Dynam
 ## Scope
 
 - **In scope:** Domain config extensions, API endpoints, stable prefix enforcement
-- **Out of scope:** Changing embedding search algorithm, new domain types, microgpt-rs integration (that's Plan 029)
+- **Out of scope:** Changing embedding search algorithm, new domain types, katgpt-rs integration (that's Plan 029)
 
 ## Dependencies
 
-- microgpt-rs Plan 029 (consumer of domain metadata)
+- katgpt-rs Plan 029 (consumer of domain metadata)
 - riir-ai Plan 002 (validator events feed into domain shaping)
 
 ## Success Criteria

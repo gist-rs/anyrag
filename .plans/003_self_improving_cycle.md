@@ -339,7 +339,7 @@ CREATE INDEX idx_episodes_success ON episodes(compilation_result);
 CREATE INDEX idx_episodes_created ON episodes(created_at);
 ```
 
-## 5.3 How microgpt-rs Plan 008 Trainer Consumes the JSONL
+## 5.3 How katgpt-rs Plan 008 Trainer Consumes the JSONL
 
 ### JSONL Format
 
@@ -357,7 +357,7 @@ Two sources feed into this JSONL:
 ### Consumption Pipeline
 
 ```
-anyrag                          microgpt-rs (Plan 008)
+anyrag                          katgpt-rs (Plan 008)
 ──────                          ────────────────────
 Curator::export_training_jsonl()
         │
@@ -389,29 +389,29 @@ training.jsonl ──────────────► DataLoader::from_js
 
 ### Config Compatibility
 
-Plan 008's `DataLoader` requires `seq_len` and `pad_id` to match the tokenizer used during microgpt-rs inference. For the micro config:
+Plan 008's `DataLoader` requires `seq_len` and `pad_id` to match the tokenizer used during katgpt-rs inference. For the micro config:
 - `vocab_size = 4096` (BPE tokenizer from Plan 007)
 - `n_embd = 32`, `n_layer = 1`
 - `rank = 4`, `alpha = 8.0`
 
-The JSONL `messages` content must be tokenized by microgpt-rs's BPE tokenizer **before** training. The `DataLoader` expects pre-tokenized `TrainingSample { tokens }` — not raw text. This means either:
+The JSONL `messages` content must be tokenized by katgpt-rs's BPE tokenizer **before** training. The `DataLoader` expects pre-tokenized `TrainingSample { tokens }` — not raw text. This means either:
 1. anyrag exports pre-tokenized JSONL (requires shared tokenizer), or
-2. microgpt-rs tokenizes the JSONL at load time in `DataLoader::from_jsonl()`
+2. katgpt-rs tokenizes the JSONL at load time in `DataLoader::from_jsonl()`
 
-Current implementation uses option 2: `DataLoader::from_jsonl()` parses raw text messages and microgpt-rs's tokenizer handles encoding.
+Current implementation uses option 2: `DataLoader::from_jsonl()` parses raw text messages and katgpt-rs's tokenizer handles encoding.
 
 ### File Path Convention
 
 - anyrag writes to: `exports/training.jsonl` (configurable via `CycleConfig::export_path`)
-- microgpt-rs reads from: passed as CLI arg `--data training.jsonl`
-- The cycle orchestrator's `ReadyToExport` state writes the file; microgpt-rs's CLI consumes it.
+- katgpt-rs reads from: passed as CLI arg `--data training.jsonl`
+- The cycle orchestrator's `ReadyToExport` state writes the file; katgpt-rs's CLI consumes it.
 
-## 5.4 How microgpt-rs Hot-Reloads Trained model weights
+## 5.4 How katgpt-rs Hot-Reloads Trained model weights
 
 ### Hot-Reload Architecture
 
 ```
-microgpt-rs (Plan 008)                     anyrag Cycle
+katgpt-rs (Plan 008)                     anyrag Cycle
 ──────────────────                       ────────────
 POST /reload_model ◄─────────────────── CycleConfig::model_api_url
         │                                         │
@@ -428,7 +428,7 @@ Next inference uses new model weights              │
 
 ### The Reload Endpoint
 
-microgpt-rs exposes a simple HTTP server (behind `#[cfg(feature = "server")]`):
+katgpt-rs exposes a simple HTTP server (behind `#[cfg(feature = "server")]`):
 
 ```
 POST /reload_model    — Reads model weights from disk, uploads to GPU, swaps adapter
@@ -458,9 +458,9 @@ For targets where safetensors may not compile, a simpler binary format is used:
 ### Trigger Flow
 
 1. anyrag cycle reaches `CycleState::Upgrading`
-2. `CycleConfig::model_api_url` points to microgpt-rs's server (e.g., `http://localhost:8080`)
+2. `CycleConfig::model_api_url` points to katgpt-rs's server (e.g., `http://localhost:8080`)
 3. anyrag sends `POST {model_api_url}/reload_model`
-4. microgpt-rs reads `model weights` from disk (path configured server-side)
+4. katgpt-rs reads `model weights` from disk (path configured server-side)
 5. `load_model()` deserializes + uploads to GPU
 6. Next inference call uses updated model weights
 7. anyrag clears episodic memory and returns to `CycleState::Collecting`
@@ -468,7 +468,7 @@ For targets where safetensors may not compile, a simpler binary format is used:
 ### Current State
 
 - `CycleConfig::model_api_url` exists in anyrag's config but the POST call is commented out (placeholder)
-- microgpt-rs's server endpoint is not yet implemented (part of Plan 008 Phase 7)
+- katgpt-rs's server endpoint is not yet implemented (part of Plan 008 Phase 7)
 - The `load_model()` function is defined in Plan 008's Phase 6 but not yet implemented
 
 ## Tasks

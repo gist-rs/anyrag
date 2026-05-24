@@ -2,7 +2,7 @@
 
 > **Status: COMPLETE**
 > **Cross-Ref:** `riir-ai/.plans/026_autotts_dynamic_inference_budget.md` (consumer), `anyrag/.plans/007_catalog_driven_domain_shaping.md` (sibling)
-> **Research:** `microgpt-rs/.research/16_AutoTTS_Dynamic_Test_Time_Scaling.md`
+> **Research:** `katgpt-rs/.research/16_AutoTTS_Dynamic_Test_Time_Scaling.md`
 
 **Branch:** `develop/feature/008_inference_budget_api`
 **Depends on:** Plan 005 (Domain Classifier API — ✅ Complete)
@@ -11,14 +11,14 @@
 
 ## Summary
 
-Extend `anyrag` to serve per-domain inference budget parameters alongside domain classification. When `microgpt-rs` asks "what domain is this prompt?", anyrag answers "py2rs" **and** tells it how much compute to spend: `tree_budget=5000, draft_lookahead=12, screening_threshold=0.3`.
+Extend `anyrag` to serve per-domain inference budget parameters alongside domain classification. When `katgpt-rs` asks "what domain is this prompt?", anyrag answers "py2rs" **and** tells it how much compute to spend: `tree_budget=5000, draft_lookahead=12, screening_threshold=0.3`.
 
 This is the **online API** counterpart to `riir-ai` Plan 026's offline TOML approach. Together they provide two deployment modes:
 
 | Mode | Config Source | Use Case |
 |---|---|---|
 | **Offline TOML** (Plan 026) | `riir-router` reads `domains.toml` from disk | Single-node, low-latency, no network |
-| **Online API** (this plan) | `microgpt-rs` calls `anyrag /classify/domain` | SaaS, multi-tenant, dynamic config |
+| **Online API** (this plan) | `katgpt-rs` calls `anyrag /classify/domain` | SaaS, multi-tenant, dynamic config |
 
 ### Why anyrag Needs This
 
@@ -201,7 +201,7 @@ keywords = []
 
 ## Design Decisions
 
-1. **`Option<InferenceBudget>` everywhere** — `None` means "consumer decides". This avoids anyrag needing to know microgpt-rs defaults. The consumer (`riir-router`) merges: `null` from API → use local `Config::draft()` defaults.
+1. **`Option<InferenceBudget>` everywhere** — `None` means "consumer decides". This avoids anyrag needing to know katgpt-rs defaults. The consumer (`riir-router`) merges: `null` from API → use local `Config::draft()` defaults.
 
 2. **Same struct in response and config** — `InferenceBudget` is both the config type (TOML) and the API type (JSON). No mapping layer needed.
 
@@ -220,8 +220,8 @@ keywords = []
 | `riir-ai` | Plan 026 (AutoTTS Dynamic Budget) | **Consumer.** `riir-router` calls `/classify/domain`, reads `inference` field, passes to `Config::with_overrides()` |
 | `anyrag` | Plan 005 (Domain Classifier) | **Foundation.** Built on — this plan extends its response |
 | `anyrag` | Plan 007 (Catalog-Driven Shaping) | **Sibling.** Will serve same inference budget via `/v1/models/{domain}` |
-| `microgpt-rs` | Plan 021 (ScreeningPruner) | **Verifier.** `screening_threshold` from budget controls pruning aggressiveness |
-| `microgpt-rs` | `.research/16_AutoTTS_...` | **Research.** Distilled rationale for dynamic budget |
+| `katgpt-rs` | Plan 021 (ScreeningPruner) | **Verifier.** `screening_threshold` from budget controls pruning aggressiveness |
+| `katgpt-rs` | `.research/16_AutoTTS_...` | **Research.** Distilled rationale for dynamic budget |
 
 ### Offline vs Online Deployment
 
@@ -231,7 +231,7 @@ Offline (Plan 026 only):
   No network call. Budget is static until restart.
 
 Online (Plan 026 + this plan):
-  microgpt-rs → anyrag /classify/domain → { domain, inference }
+  katgpt-rs → anyrag /classify/domain → { domain, inference }
   riir-router reads inference from API response → Config::with_overrides()
   Budget can change without restart (update anyrag config + reload).
 

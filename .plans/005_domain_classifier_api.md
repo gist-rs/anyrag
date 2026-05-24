@@ -1,18 +1,18 @@
-# Plan 005: Domain Classifier API — Embedding-Based Routing for microgpt-rs
+# Plan 005: Domain Classifier API — Embedding-Based Routing for katgpt-rs
 
-> **Status: COMPLETE** — All 7 tasks implemented. Tasks 1–4 (types, trait, hybrid classifier, handler) were pre-existing. Tasks 5–7 (domain mapping config, integration tests, microgpt-rs docs) added in this session. 7 integration tests + 3 unit tests passing. `microgpt-rs` Plan 023 (KeywordRouter V1) remains the working fallback when anyrag is unavailable.
+> **Status: COMPLETE** — All 7 tasks implemented. Tasks 1–4 (types, trait, hybrid classifier, handler) were pre-existing. Tasks 5–7 (domain mapping config, integration tests, katgpt-rs docs) added in this session. 7 integration tests + 3 unit tests passing. `katgpt-rs` Plan 023 (KeywordRouter V1) remains the working fallback when anyrag is unavailable.
 
 **Branch:** `develop/feature/005_domain_classifier`
 **Depends on:** Plan 004 (Raven Routed Slots — keyword router + slot system)
-**Cross-Ref:** `microgpt-rs/.plans/023_prompt_router.md` (consumer of this API)
+**Cross-Ref:** `katgpt-rs/.plans/023_prompt_router.md` (consumer of this API)
 
 ---
 
 ## Summary
 
-Expose anyrag's slot-based semantic routing as a `DomainClassifier` API that `microgpt-rs` can query to upgrade from keyword-based routing to embedding-based domain classification. This is the V2 router backend — `microgpt-rs` sends a prompt, anyrag returns a domain classification with confidence scores.
+Expose anyrag's slot-based semantic routing as a `DomainClassifier` API that `katgpt-rs` can query to upgrade from keyword-based routing to embedding-based domain classification. This is the V2 router backend — `katgpt-rs` sends a prompt, anyrag returns a domain classification with confidence scores.
 
-The keyword router in microgpt-rs Plan 023 is ~80% accurate. This API targets ~95% by using anyrag's existing vector embeddings + slot keyword overlap to classify prompts into the same domains defined in `domains.toml`.
+The keyword router in katgpt-rs Plan 023 is ~80% accurate. This API targets ~95% by using anyrag's existing vector embeddings + slot keyword overlap to classify prompts into the same domains defined in `domains.toml`.
 
 ---
 
@@ -95,7 +95,7 @@ fn compute_domain_score(
 
 ### Slot → Domain Mapping
 
-The mapping between anyrag slots and microgpt-rs domains is configured in anyrag's config:
+The mapping between anyrag slots and katgpt-rs domains is configured in anyrag's config:
 
 ```toml
 [[domain_mapping]]
@@ -147,7 +147,7 @@ keywords = ["sudoku", "puzzle", "grid", "9x9"]
 
 - [x] **Task 5: Add domain mapping config** (`crates/lib/src/types.rs` + handler)
   - `DomainMapping` struct with domain name, slots, keywords
-  - Default mappings matching `microgpt-rs/domains.toml`
+  - Default mappings matching `katgpt-rs/domains.toml`
   - Handler falls back to config defaults when no candidates provided
 
 ### Phase 4: Integration Test
@@ -162,11 +162,11 @@ keywords = ["sudoku", "puzzle", "grid", "9x9"]
   - Test: empty prompt still classifies
   - Unit tests for `resolve_candidate_domains()` in handler
 
-### Phase 5: microgpt-rs Integration Docs
+### Phase 5: katgpt-rs Integration Docs
 
-- [x] **Task 7: Document microgpt-rs integration** (`crates/server/src/handlers/classify.rs` module docs)
+- [x] **Task 7: Document katgpt-rs integration** (`crates/server/src/handlers/classify.rs` module docs)
   - How to configure `domains.toml` to match anyrag's `domain_mapping`
-  - How to call `/classify/domain` from microgpt-rs REST client
+  - How to call `/classify/domain` from katgpt-rs REST client
   - Fallback behavior when anyrag is unavailable
 
 ---
@@ -178,7 +178,7 @@ keywords = ["sudoku", "puzzle", "grid", "9x9"]
 | AI provider latency slows classification | Cache recent classifications. Set timeout (200ms). Fall back to keyword-only. |
 | Embedding quality insufficient for domain separation | Tune keyword weight up (50/50 split). Add more domain-specific keywords. |
 | Slot-document overlap across domains | Use slot-specific documents for scoring, not all documents. Domain mapping is explicit, not inferred. |
-| anyrag unavailable | microgpt-rs `KeywordRouter` is the V1 fallback. This API is additive, not required. |
+| anyrag unavailable | katgpt-rs `KeywordRouter` is the V1 fallback. This API is additive, not required. |
 
 ---
 
@@ -218,7 +218,7 @@ keywords = ["sudoku", "puzzle", "grid", "9x9"]
 - Training a custom classifier model (future research)
 - Multi-label classification (one prompt → multiple domains)
 - Streaming classification (not needed — single response)
-- Auto-sync of domain config between microgpt-rs and anyrag (manual for now)
+- Auto-sync of domain config between katgpt-rs and anyrag (manual for now)
 
 ---
 
@@ -226,6 +226,6 @@ keywords = ["sudoku", "puzzle", "grid", "9x9"]
 
 | Project | Plan | Relationship |
 |---------|------|-------------|
-| `microgpt-rs` | `.plans/023_prompt_router.md` | Consumer of this API. `KeywordRouter` is V1, this is V2. |
+| `katgpt-rs` | `.plans/023_prompt_router.md` | Consumer of this API. `KeywordRouter` is V1, this is V2. |
 | `anyrag` | `.plans/004_raven_routed_slots.md` | Slot system + KeywordRouter reused for classification |
 | `riir-ai` (riir-validator-sdk) | N/A | Platform generates validators internally; this classifies which one to use |

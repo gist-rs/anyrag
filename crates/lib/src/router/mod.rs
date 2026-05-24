@@ -2,7 +2,7 @@
 //!
 //! Embedding-based domain classification for prompt routing.
 //! Combines keyword overlap with vector embedding similarity
-//! to classify prompts into domains for microgpt-rs routing.
+//! to classify prompts into domains for katgpt-rs routing.
 //!
 //! ## Usage
 //!

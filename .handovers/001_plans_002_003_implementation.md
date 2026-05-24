@@ -75,10 +75,10 @@ Implemented both Plan 002 (Context Pollution Prevention + Concept Sharding) and 
 - Optional: CLI `--context` flag for `gof` search (skipped — not in gof scope)
 
 ### Plan 003
-- [ ] 5.3 Document: how microgpt-rs Plan 008 trainer consumes the JSONL
-- [ ] 5.4 Document: how microgpt-rs hot-reloads trained model weights
+- [ ] 5.3 Document: how katgpt-rs Plan 008 trainer consumes the JSONL
+- [ ] 5.4 Document: how katgpt-rs hot-reloads trained model weights
 - JSONL export endpoint wiring to file system (currently returns JSONL in response body)
-- Hot-reload trigger to microgpt-rs API (placeholder exists in `CycleConfig::model_api_url`)
+- Hot-reload trigger to katgpt-rs API (placeholder exists in `CycleConfig::model_api_url`)
 - Background tick task (currently manual trigger via `POST /cycle/trigger`)
 
 ## Issues Ref

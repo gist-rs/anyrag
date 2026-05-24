@@ -41,7 +41,7 @@ pub struct TrainingSample {
     pub domain: String,
 }
 
-/// Inference result from microgpt-rs feedback.
+/// Inference result from katgpt-rs feedback.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceResult {
     pub domain: String,

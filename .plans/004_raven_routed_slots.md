@@ -374,7 +374,7 @@ None — all changes use existing dependencies (turso/libsql, serde, chrono, uui
 ## Cross-Project References
 
 - Raven RSM paper — Equation 18 (selective decay), fixed slot memory, sparse Top-K routing
-- `microgpt-rs/.plans/*` — plan format reference
-- microgpt-rs — Phase 2 neural router will follow this pattern
+- `katgpt-rs/.plans/*` — plan format reference
+- katgpt-rs — Phase 2 neural router will follow this pattern
 - `anyrag/.plans/002_context_pollution_prevention.md` — `RrfWeights`, `SearchSourceType`, `RustConcept` (slot search reuses these)
 - `anyrag/.plans/003_self_improving_cycle.md` — episodic memory schema pattern (Turso/libsql with UUID v7)

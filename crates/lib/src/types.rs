@@ -453,11 +453,11 @@ pub struct EmbeddingConfig {
 
 /// Domain mapping for the `/classify/domain` endpoint.
 ///
-/// Defines how anyrag maps prompt classification to microgpt-rs domains.
+/// Defines how anyrag maps prompt classification to katgpt-rs domains.
 /// Each mapping has a domain name, associated anyrag slots (for embedding scoring),
 /// and keywords (for keyword overlap scoring).
 ///
-/// These defaults match `microgpt-rs/domains.toml` so the two services
+/// These defaults match `katgpt-rs/domains.toml` so the two services
 /// share the same domain vocabulary out of the box.
 #[derive(Debug, Deserialize, Clone)]
 pub struct DomainMapping {
@@ -484,7 +484,7 @@ pub struct DomainMapping {
     pub inference: Option<InferenceBudget>,
 }
 
-/// Default domain mappings matching `microgpt-rs/domains.toml`.
+/// Default domain mappings matching `katgpt-rs/domains.toml`.
 ///
 /// These are used when no `[[domain_mapping]]` entries are configured
 /// in `config.yml`. The keywords and slot assignments provide sensible
@@ -705,7 +705,7 @@ pub struct AppConfig {
     /// A map of tasks, each specifying a provider and prompts.
     pub tasks: HashMap<String, TaskConfig>,
     /// Domain mappings for the `/classify/domain` endpoint.
-    /// Defaults to the domains from `microgpt-rs/domains.toml` if not configured.
+    /// Defaults to the domains from `katgpt-rs/domains.toml` if not configured.
     #[serde(default = "default_domain_mappings")]
     pub domain_mappings: Vec<DomainMapping>,
 }

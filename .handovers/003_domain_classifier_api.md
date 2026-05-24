@@ -6,18 +6,18 @@ Implemented Tasks 5, 6, and 7 of Plan 005 (Domain Classifier API). Tasks 1–4 w
 
 - **Tasks 1–4 (pre-existing):** `DomainDefinition`, `ClassificationResult`, `ClassifyError` types; `DomainClassifier` trait with `async_trait`; `HybridClassifier` with keyword/embedding hybrid scoring; `POST /classify/domain` handler with embedding scoring against slot documents.
 
-- **Task 5 (domain mapping config):** Added `DomainMapping` struct and `default_domain_mappings()` to `crates/lib/src/types.rs`. Default mappings match `microgpt-rs/domains.toml` (sudoku, pathfinding, rust_code, py2rs, general). Added `domain_mappings: Vec<DomainMapping>` field to `AppConfig` with serde default. Updated handler to fall back to config defaults when `candidate_domains` is empty.
+- **Task 5 (domain mapping config):** Added `DomainMapping` struct and `default_domain_mappings()` to `crates/lib/src/types.rs`. Default mappings match `katgpt-rs/domains.toml` (sudoku, pathfinding, rust_code, py2rs, general). Added `domain_mappings: Vec<DomainMapping>` field to `AppConfig` with serde default. Updated handler to fall back to config defaults when `candidate_domains` is empty.
 
 - **Task 6 (integration tests):** Created `crates/server/tests/classify_test.rs` with 7 integration tests + 3 unit tests in the handler module. All 10 tests pass.
 
-- **Task 7 (microgpt-rs docs):** Added comprehensive module-level documentation to `crates/server/src/handlers/classify.rs` explaining: how to configure `domains.toml`, how to call `/classify/domain` from microgpt-rs REST client, and fallback behavior when anyrag is unavailable.
+- **Task 7 (katgpt-rs docs):** Added comprehensive module-level documentation to `crates/server/src/handlers/classify.rs` explaining: how to configure `domains.toml`, how to call `/classify/domain` from katgpt-rs REST client, and fallback behavior when anyrag is unavailable.
 
 ## Where Is the Plan/Code/Test
 
 - **Plan:** `.plans/005_domain_classifier_api.md` — status updated to COMPLETE
 - **Code:**
   - `crates/lib/src/types.rs` — `DomainMapping` struct + `default_domain_mappings()` + `domain_mappings` field in `AppConfig`
-  - `crates/server/src/handlers/classify.rs` — updated handler with `resolve_candidate_domains()` fallback + microgpt-rs integration docs + unit tests
+  - `crates/server/src/handlers/classify.rs` — updated handler with `resolve_candidate_domains()` fallback + katgpt-rs integration docs + unit tests
   - `crates/server/Cargo.toml` — `[[test]]` entry for `classify_test`
 - **Tests:**
   - `crates/server/tests/classify_test.rs` — 7 integration tests
@@ -34,7 +34,7 @@ Implemented Tasks 5, 6, and 7 of Plan 005 (Domain Classifier API). Tasks 1–4 w
 
 - Plan 005 is **complete** — all 7 tasks done.
 - Plan 004 (Raven Routed Slots) still has unchecked tasks (5.8–5.10, 6.6–6.7, 7.1–7.3 benchmarks). The slot system infrastructure works but integration tests and benchmarks are incomplete.
-- microgpt-rs Plan 023 (KeywordRouter V1) is the working fallback. When Plan 004 is validated, the embedding scoring in this classifier will use real slot document embeddings.
+- katgpt-rs Plan 023 (KeywordRouter V1) is the working fallback. When Plan 004 is validated, the embedding scoring in this classifier will use real slot document embeddings.
 
 ## Issues Ref
 
@@ -62,7 +62,7 @@ cargo test -p anyrag-server --test classify_test && cargo test -p anyrag-server 
 ### Adding new domains
 
 1. Add `[[domain_mapping]]` entries to `config.yml`, or rely on defaults in `default_domain_mappings()`.
-2. Domain names must match `microgpt-rs/domains.toml` for the two services to share vocabulary.
+2. Domain names must match `katgpt-rs/domains.toml` for the two services to share vocabulary.
 3. `slots` field maps to anyrag slot names (used for embedding scoring). `keywords` are for keyword overlap scoring.
 
 ### Testing with real embeddings

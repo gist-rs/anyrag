@@ -4,14 +4,14 @@
 //! Combines keyword overlap (30%) with vector embedding similarity (70%).
 //! Falls back to keyword-only when the AI provider is unavailable.
 //!
-//! ## microgpt-rs Integration (Plan 005, Task 7)
+//! ## katgpt-rs Integration (Plan 005, Task 7)
 //!
-//! This endpoint is designed to be called by `microgpt-rs` as the V2 embedding-based
+//! This endpoint is designed to be called by `katgpt-rs` as the V2 embedding-based
 //! domain router, upgrading from the V1 `KeywordRouter` (Plan 023).
 //!
 //! ### How to configure `domains.toml`
 //!
-//! `microgpt-rs/domains.toml` domain names and keywords should match the
+//! `katgpt-rs/domains.toml` domain names and keywords should match the
 //! `[[domain_mapping]]` entries in anyrag's `config.yml`. The default anyrag
 //! config already includes mappings for: `sudoku`, `pathfinding`, `rust_code`,
 //! `py2rs`, `general`. To add custom domains, add entries to `config.yml`:
@@ -23,7 +23,7 @@
 //!     keywords: ["my_keyword", "custom"]
 //! ```
 //!
-//! ### How to call `/classify/domain` from microgpt-rs
+//! ### How to call `/classify/domain` from katgpt-rs
 //!
 //! Send a POST request with the prompt and candidate domains:
 //!
@@ -60,7 +60,7 @@
 //!
 //! ### Fallback behavior when anyrag is unavailable
 //!
-//! If anyrag is down or unreachable, microgpt-rs should fall back to its
+//! If anyrag is down or unreachable, katgpt-rs should fall back to its
 //! built-in `KeywordRouter` (Plan 023). The V1 keyword router is ~80% accurate
 //! and requires no external service. Set a short timeout (200ms) on the REST
 //! call to avoid blocking the prompt pipeline.

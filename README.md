@@ -359,7 +359,7 @@ screening_threshold = 0.3
 
 ## Inference Budget API
 
-The `/classify/domain` endpoint returns per-domain **inference budget** parameters alongside domain classification. This lets consumers (microgpt-rs, riir-router) adjust compute spending per domain.
+The `/classify/domain` endpoint returns per-domain **inference budget** parameters alongside domain classification. This lets consumers (katgpt-rs, riir-router) adjust compute spending per domain.
 
 ### Extended Classify Response
 
@@ -393,7 +393,7 @@ beta = 0.8  # → tree_budget=4000, draft_lookahead=12, screening_threshold=0.6
 | Mode | Config Source | Use Case |
 |---|---|---|
 | Offline TOML | riir-router reads domains.toml from disk | Single-node, low-latency |
-| Online API | microgpt-rs calls anyrag /classify/domain | SaaS, multi-tenant, dynamic |
+| Online API | katgpt-rs calls anyrag /classify/domain | SaaS, multi-tenant, dynamic |
 
 ## Configuration
 

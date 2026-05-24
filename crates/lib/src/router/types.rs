@@ -24,7 +24,7 @@ pub struct DomainDefinition {
 
 /// Per-domain inference budget parameters.
 ///
-/// Controls how much compute a consumer (e.g., microgpt-rs) should spend
+/// Controls how much compute a consumer (e.g., katgpt-rs) should spend
 /// on inference for this domain. All fields optional — `None` means
 /// "consumer decides" (use local defaults).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
